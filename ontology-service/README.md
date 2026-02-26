@@ -51,6 +51,13 @@ uv run uvicorn ontology_service.main:app --reload --port 8081
 | GET | `/{ontology}/term/{id}/trajectories` | All paths from root to term |
 | POST | `/{ontology}/tree` | Merged tree for multiple terms |
 
+### Data Export
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/exports/interactions/parquet` | Export filtered interactions as Parquet subset |
+| POST | `/exports/entities/parquet` | Export filtered entities as Parquet subset |
+| POST | `/exports/associations/parquet` | Export filtered associations as Parquet subset |
+
 ## Examples
 
 ```bash

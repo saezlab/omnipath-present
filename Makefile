@@ -2,7 +2,7 @@
 #
 # Prerequisites: Run `make export` from the parent directory to populate data/
 
-.PHONY: dev dev-reset stop validate-data reimport-meilisearch
+.PHONY: dev stop restart validate-data reimport-meilisearch reset
 
 # Validate that all required data files exist
 validate-data:
@@ -58,6 +58,16 @@ dev: validate-data
 # Stop Docker services
 stop:
 	COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml down
+
+# Restart Docker services and rebuild images
+restart: validate-data
+	COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml down
+	COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml up -d --build
+	@echo ""
+	@echo "Backend services rebuilt and restarted"
+	@echo "  - Meilisearch:      http://localhost:7700"
+	@echo "  - Entity Service:   http://localhost:8080"
+	@echo "  - Ontology Service: http://localhost:8081"
 
 # Force reimport of meilisearch data (useful when dump file changes)
 reimport-meilisearch:

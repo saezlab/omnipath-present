@@ -13,7 +13,8 @@ COPY omnipath-present/ontology-service/README.md .
 RUN sed -i 's#../../ontograph#/ontograph#' pyproject.toml
 
 # Copy ontograph package (needed as path dependency)
-COPY ontograph /ontograph
+# In this workspace layout, ontograph lives under omnipath_build/ontograph
+COPY omnipath_build/ontograph /ontograph
 
 # Copy application code
 COPY omnipath-present/ontology-service/ontology_service/ ontology_service/

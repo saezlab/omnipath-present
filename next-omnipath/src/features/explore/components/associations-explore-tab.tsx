@@ -4,10 +4,12 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { searchAssociationsMeilisearch } from "@/lib/meilisearch/search";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import type { MeilisearchFilters, MeilisearchAssociation } from "@/types/meilisearch";
 import { ResultCard, type SearchResult } from "@/features/search/components/result-card";
 import { INDEXES } from "@/lib/meilisearch/client";
+import { Download } from "lucide-react";
 
 interface AssociationFilters {
     parent_entity_types?: string[];
@@ -235,10 +237,54 @@ export function AssociationsExploreTab({
         ? parentEntityType.split(':')[0].toLowerCase()
         : mode === 'parents' ? 'parent' : 'member';
 
+    const handleExport = async () => {
+        try {
+            setError(null);
+            const date = new Date().toISOString().split('T')[0];
+            const queryFilters = buildQueryFilters();
+            const response = await fetch('/api/exports/associations/parquet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: '',
+                    filters: queryFilters,
+                    filename: `associations_subset_${date}`,
+                }),
+            });
+
+            if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.error || `Export failed (${response.status})`);
+            }
+
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const contentDisposition = response.headers.get('Content-Disposition');
+            const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
+            const fileName = fileNameMatch?.[1] || `associations_subset_${date}.parquet`;
+
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to export associations');
+        }
+    };
+
     return (
         <div className="space-y-4">
-            <div className="text-sm text-muted-foreground">
-                Found {results.length} {typeLabel}{results.length !== 1 ? 's' : ''} across {selectedEntities.length} selected entit{selectedEntities.length !== 1 ? 'ies' : 'y'}
+            <div className="flex items-center justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                    Found {results.length} {typeLabel}{results.length !== 1 ? 's' : ''} across {selectedEntities.length} selected entit{selectedEntities.length !== 1 ? 'ies' : 'y'}
+                </div>
+                <Button variant="outline" size="sm" onClick={handleExport}>
+                    <Download className="h-4 w-4 mr-1.5" />
+                    Export
+                </Button>
             </div>
 
             <div className="space-y-2">

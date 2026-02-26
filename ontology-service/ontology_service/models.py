@@ -1,7 +1,8 @@
 """Pydantic models for API request/response schemas."""
 
 from __future__ import annotations
-from pydantic import BaseModel
+from typing import Any
+from pydantic import BaseModel, Field
 
 
 class TermInfo(BaseModel):
@@ -64,6 +65,13 @@ class OntologyInfo(BaseModel):
 class OntologiesResponse(BaseModel):
     """Response listing available ontologies."""
     ontologies: list[OntologyInfo]
+
+
+class InteractionExportRequest(BaseModel):
+    """Request payload for interaction subset export."""
+    query: str = ""
+    filters: dict[str, Any] = Field(default_factory=dict)
+    filename: str | None = None
 
 
 class ErrorResponse(BaseModel):

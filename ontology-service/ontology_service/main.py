@@ -1,9 +1,12 @@
 """FastAPI application for ontology service."""
 
 import logging
+import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from ontograph.queries.introspection import IntrospectionPronto
 
 from .models import (
@@ -16,6 +19,7 @@ from .models import (
     TreeResponse,
     OntologyInfo,
     OntologiesResponse,
+    InteractionExportRequest,
 )
 from .registry import registry
 
@@ -267,4 +271,90 @@ async def get_tree(request: TermsRequest):
     ontograph_root = IntrospectionPronto._build_tree_from_trajectories(all_trajectories)
     root = ontograph_node_to_tree_node(ontograph_root)
     return TreeResponse(root=root)
+
+
+# --- Data export ---
+
+
+def _run_export(
+    *,
+    request: InteractionExportRequest,
+    background_tasks: BackgroundTasks,
+    fetch_ids,
+    write_subset,
+    default_filename: str,
+    log_label: str,
+):
+    try:
+        matched_ids = fetch_ids(
+            query=request.query or "",
+            filters=request.filters or {},
+        )
+
+        temp_file = tempfile.NamedTemporaryFile(prefix=f"{default_filename}_", suffix=".parquet", delete=False)
+        temp_path = Path(temp_file.name)
+        temp_file.close()
+
+        row_count = write_subset(matched_ids, temp_path)
+
+        safe_name = (request.filename or default_filename).strip() or default_filename
+        download_name = safe_name if safe_name.lower().endswith(".parquet") else f"{safe_name}.parquet"
+
+        background_tasks.add_task(lambda p: Path(p).unlink(missing_ok=True), str(temp_path))
+
+        response = FileResponse(
+            path=str(temp_path),
+            media_type="application/x-parquet",
+            filename=download_name,
+        )
+        response.headers["X-Export-Row-Count"] = str(row_count)
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("%s export failed", log_label)
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
+
+
+@app.post("/exports/interactions/parquet")
+def export_interactions_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
+    from .exports import fetch_matching_interaction_ids, write_interaction_subset_parquet
+
+    return _run_export(
+        request=request,
+        background_tasks=background_tasks,
+        fetch_ids=fetch_matching_interaction_ids,
+        write_subset=write_interaction_subset_parquet,
+        default_filename="interactions_subset",
+        log_label="Interaction",
+    )
+
+
+@app.post("/exports/entities/parquet")
+def export_entities_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
+    from .exports import fetch_matching_entity_ids, write_entity_subset_parquet
+
+    return _run_export(
+        request=request,
+        background_tasks=background_tasks,
+        fetch_ids=fetch_matching_entity_ids,
+        write_subset=write_entity_subset_parquet,
+        default_filename="entities_subset",
+        log_label="Entity",
+    )
+
+
+@app.post("/exports/associations/parquet")
+def export_associations_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
+    from .exports import fetch_matching_association_ids, write_association_subset_parquet
+
+    return _run_export(
+        request=request,
+        background_tasks=background_tasks,
+        fetch_ids=fetch_matching_association_ids,
+        write_subset=write_association_subset_parquet,
+        default_filename="associations_subset",
+        log_label="Association",
+    )
 

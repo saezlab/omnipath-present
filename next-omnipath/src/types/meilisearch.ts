@@ -26,6 +26,9 @@ export interface InteractionDirection {
 }
 
 export interface MeilisearchInteraction {
+  // Deterministic numeric identifier for exports/subsetting
+  interaction_id?: number;
+
   // Primary key - pair key like "123-456"
   interaction_key: string;
 
@@ -68,6 +71,9 @@ export interface IdentifierEntry {
 
 // Association document type
 export interface MeilisearchAssociation {
+  // Deterministic numeric identifier for exports/subsetting
+  association_id?: number;
+
   // Primary key
   association_key: string;
 

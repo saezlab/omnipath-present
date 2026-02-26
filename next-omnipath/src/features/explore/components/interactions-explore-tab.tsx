@@ -14,7 +14,6 @@ import GraphView from "@/features/interactions-search/components/graph-view";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { cn, formatNumber } from "@/lib/utils";
-import { exportToCSV } from "@/lib/utils/export";
 import { MeilisearchFilters, MeilisearchInteraction } from "@/types/meilisearch";
 import { ArrowRight, Filter, Minus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -232,26 +231,42 @@ export function InteractionsExploreTab({
   }, []);
 
   // Handle export
-  const handleExport = useCallback(() => {
-    const dataToExport = viewMode === "network" && allInteractions.length > 0 ? allInteractions : results;
+  const handleExport = useCallback(async () => {
+    try {
+      setError(null);
+      const date = new Date().toISOString().split('T')[0];
+      const response = await fetch('/api/exports/interactions/parquet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: '',
+          filters,
+          filename: `interactions_subset_${date}`,
+        }),
+      });
 
-    const exportData = dataToExport.map(interaction => {
-      const consensusSign = getConsensusSign(interaction.directions);
-      return {
-        'Interaction Key': interaction.interaction_key,
-        'Member A ID': interaction.member_a_id,
-        'Member B ID': interaction.member_b_id,
-        'Member Types': interaction.member_types.join(', '),
-        'Has Direction': interaction.has_direction ? 'Yes' : 'No',
-        'Has Positive Sign': interaction.has_positive_sign ? 'Yes' : 'No',
-        'Has Negative Sign': interaction.has_negative_sign ? 'Yes' : 'No',
-        'Consensus Sign': consensusSign || 'Unknown',
-        'Evidence Count': interaction.evidence.length
-      };
-    });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Export failed (${response.status})`);
+      }
 
-    exportToCSV(exportData, `interactions_explore_${viewMode}_${new Date().toISOString().split('T')[0]}`);
-  }, [viewMode, allInteractions, results]);
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || `interactions_subset_${date}.parquet`;
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export interactions');
+    }
+  }, [filters]);
 
   // Helper to render sign indicator
   const renderSignIndicator = (interaction: MeilisearchInteraction) => {

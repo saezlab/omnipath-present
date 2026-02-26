@@ -13,7 +13,7 @@ services:
     # Meilisearch - Full-text search engine
     # Auto-imports dump when data version changes
     omnipath-meilisearch:
-        image: getmeili/meilisearch:v1.16
+        image: getmeili/meilisearch:v1.36
         restart: unless-stopped
         environment:
             MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-devkey123}
@@ -64,6 +64,8 @@ services:
         environment:
             ONTOLOGY_DATA_DIR: /data
             ONTOLOGY_CACHE_DIR: /app/cache
+            MEILISEARCH_HOST: http://omnipath-meilisearch:7700
+            MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY:-devkey123}
         ports:
             - "8081:8081"
         volumes:

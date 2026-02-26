@@ -12,7 +12,7 @@ import { IdentifierMatches, type IdentifierMatch } from "./components/identifier
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { AnnotationFilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { cn } from "@/lib/utils";
 import type { MeilisearchFilters } from "@/types/meilisearch";
@@ -213,6 +213,43 @@ export default function SearchPage({
     setQuery(q);
   }, []);
 
+  const handleEntityExport = useCallback(async () => {
+    try {
+      setLookupError(null);
+      const date = new Date().toISOString().split('T')[0];
+      const response = await fetch('/api/exports/entities/parquet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query || '',
+          filters,
+          filename: `entities_subset_${date}`,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Export failed (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || `entities_subset_${date}.parquet`;
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : 'Failed to export entities');
+    }
+  }, [query, filters]);
+
   // Identifier lookup helpers
   const runLookup = useCallback(async (identifiers: string[]) => {
     setLookupLoading(true);
@@ -301,16 +338,22 @@ export default function SearchPage({
           </Tabs>
 
           {searchMode === "full-text" && effectiveLayoutMode !== "ontology" && (
-            <div className="flex-1">
-              <SearchBar
-                placeholder="Search proteins, molecules, ontology terms…"
-                onSearch={doSearch}
-                initialQuery={query}
-                autoFocus={false}
-                selectedSpecies={selectedSpecies}
-                onSpeciesChange={handleSpeciesChange}
-              />
-            </div>
+            <>
+              <div className="flex-1">
+                <SearchBar
+                  placeholder="Search proteins, molecules, ontology terms…"
+                  onSearch={doSearch}
+                  initialQuery={query}
+                  autoFocus={false}
+                  selectedSpecies={selectedSpecies}
+                  onSpeciesChange={handleSpeciesChange}
+                />
+              </div>
+              <Button variant="outline" size="sm" onClick={handleEntityExport}>
+                <Download className="h-4 w-4 mr-1.5" />
+                Export
+              </Button>
+            </>
           )}
 
           {searchMode === "identifier" && effectiveLayoutMode !== "ontology" && (
