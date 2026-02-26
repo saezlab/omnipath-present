@@ -2,7 +2,7 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition, type UIEvent } from "react";
 import { searchMeilisearch } from "./api/queries";
 import { EntityFilterSidebar } from "./components/entity-filter-sidebar";
 import type { SearchResult } from "./components/result-card";
@@ -72,6 +72,10 @@ export default function SearchPage({
   const { setSidebarContent } = useSidebarContent();
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("split");
   const [layoutTouched, setLayoutTouched] = useState(false);
+  const [showFloatingSearchHeader, setShowFloatingSearchHeader] = useState(false);
+  const lastSearchScrollTopRef = useRef(0);
+  const upScrollAccumulatorRef = useRef(0);
+  const downScrollAccumulatorRef = useRef(0);
 
   // Fetch function for infinite scroll
   const fetchSearchData = useCallback(
@@ -177,6 +181,56 @@ export default function SearchPage({
     setLayoutMode(mode);
   }, []);
 
+  const handleSearchScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (embedded) return;
+
+    const REVEAL_ENABLE_SCROLL_TOP = 480;
+    const HIDE_WHEN_ORIGINAL_VISIBLE_SCROLL_TOP = 140;
+    const REVEAL_UP_SCROLL_THRESHOLD = 72;
+    const HIDE_DOWN_SCROLL_THRESHOLD = 28;
+    const IGNORE_DELTA = 2;
+
+    const nextScrollTop = event.currentTarget.scrollTop;
+    const delta = nextScrollTop - lastSearchScrollTopRef.current;
+
+    if (Math.abs(delta) < IGNORE_DELTA) {
+      lastSearchScrollTopRef.current = nextScrollTop;
+      return;
+    }
+
+    if (nextScrollTop <= HIDE_WHEN_ORIGINAL_VISIBLE_SCROLL_TOP) {
+      upScrollAccumulatorRef.current = 0;
+      downScrollAccumulatorRef.current = 0;
+      if (showFloatingSearchHeader) {
+        setShowFloatingSearchHeader(false);
+      }
+      lastSearchScrollTopRef.current = nextScrollTop;
+      return;
+    }
+
+    if (delta > 0) {
+      upScrollAccumulatorRef.current = 0;
+      if (showFloatingSearchHeader) {
+        downScrollAccumulatorRef.current += delta;
+        if (downScrollAccumulatorRef.current > HIDE_DOWN_SCROLL_THRESHOLD) {
+          setShowFloatingSearchHeader(false);
+          downScrollAccumulatorRef.current = 0;
+        }
+      }
+    } else {
+      downScrollAccumulatorRef.current = 0;
+      if (!showFloatingSearchHeader && nextScrollTop >= REVEAL_ENABLE_SCROLL_TOP) {
+        upScrollAccumulatorRef.current += Math.abs(delta);
+        if (upScrollAccumulatorRef.current > REVEAL_UP_SCROLL_THRESHOLD) {
+          setShowFloatingSearchHeader(true);
+          upScrollAccumulatorRef.current = 0;
+        }
+      }
+    }
+
+    lastSearchScrollTopRef.current = nextScrollTop;
+  }, [embedded, showFloatingSearchHeader]);
+
   // Set sidebar content when filter counts are available (not in embedded mode unless showFilters is true)
   useEffect(() => {
     if ((!embedded || showFilters) && searchMode === "full-text" && initialSearchType === "search_entities" && Object.keys(filterCounts).length > 0) {
@@ -207,6 +261,13 @@ export default function SearchPage({
       setLookupError(null);
     }
   }, [searchMode]);
+
+  useEffect(() => {
+    setShowFloatingSearchHeader(false);
+    lastSearchScrollTopRef.current = 0;
+    upScrollAccumulatorRef.current = 0;
+    downScrollAccumulatorRef.current = 0;
+  }, [searchMode, effectiveLayoutMode]);
 
   // Debounced search - This will be passed directly to SearchBar's onSearch
   const doSearch = useCallback((q: string) => {
@@ -312,34 +373,15 @@ export default function SearchPage({
     : "h-full max-w-md mx-auto lg:max-w-none";
 
   const renderSearchHeader = (inline: boolean) => (
-    <div className={cn(
-      inline
-        ? "border-b bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/60"
-        : "sticky top-0 z-20 border-b bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/60"
-    )}>
+    <div className="border-b bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
       <div className={cn(
         inline ? "w-full px-4 py-4 space-y-4" : "w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-4"
       )}>
-        {/* Tabs and Search Bar on same row */}
-        <div className={`flex flex-wrap gap-4 ${searchMode === 'batch' ? 'items-start' : 'items-center'}`}>
-          <Tabs
-            value={searchMode}
-            onValueChange={(value) => {
-              setSearchMode(value as SearchMode);
-              setLookupError(null);
-            }}
-            className={searchMode === 'batch' ? 'mt-2' : ''}
-          >
-            <TabsList>
-              <TabsTrigger value="full-text">Full text</TabsTrigger>
-              <TabsTrigger value="identifier">Identifier lookup</TabsTrigger>
-              <TabsTrigger value="batch">Batch identifiers</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
+        {/* Unified search module: active input on top + search mode switcher attached below */}
+        <div className="w-full space-y-3 rounded-2xl border bg-background/60 p-3 shadow-sm backdrop-blur-sm">
           {searchMode === "full-text" && effectiveLayoutMode !== "ontology" && (
-            <>
-              <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="min-w-0 flex-1">
                 <SearchBar
                   placeholder="Search proteins, molecules, ontology terms…"
                   onSearch={doSearch}
@@ -349,15 +391,15 @@ export default function SearchPage({
                   onSpeciesChange={handleSpeciesChange}
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={handleEntityExport}>
+              <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
                 <Download className="h-4 w-4 mr-1.5" />
                 Export
               </Button>
-            </>
+            </div>
           )}
 
           {searchMode === "identifier" && effectiveLayoutMode !== "ontology" && (
-            <div className="flex-1 relative group backdrop-blur-sm rounded-full transition-all focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary/20 bg-background border">
+            <div className="relative group backdrop-blur-sm rounded-full transition-all focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary/20 bg-background border">
               <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary z-10" />
               <Input
                 placeholder="Enter one identifier (e.g. UniProt, gene symbol, etc.)"
@@ -379,7 +421,7 @@ export default function SearchPage({
           )}
 
           {searchMode === "batch" && effectiveLayoutMode !== "ontology" && (
-            <div className="flex-1 flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 transition-all backdrop-blur-sm">
+            <div className="flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 transition-all backdrop-blur-sm">
               <Textarea
                 placeholder="Paste comma or newline separated identifiers"
                 value={batchInput}
@@ -402,6 +444,21 @@ export default function SearchPage({
               </div>
             </div>
           )}
+
+          <Tabs
+            value={searchMode}
+            onValueChange={(value) => {
+              setSearchMode(value as SearchMode);
+              setLookupError(null);
+            }}
+            className="w-full"
+          >
+            <TabsList className="h-auto w-full justify-start rounded-full bg-muted/60 p-1">
+              <TabsTrigger value="full-text" className="rounded-full">Full text</TabsTrigger>
+              <TabsTrigger value="identifier" className="rounded-full">Identifier lookup</TabsTrigger>
+              <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </div>
     </div>
@@ -409,12 +466,21 @@ export default function SearchPage({
 
   // Render content based on embedded mode
   const searchContent = (
-    <div className={cn("h-full min-h-0 flex flex-col")}>
-      {!embedded && isSplitLayout ? renderSearchHeader(true) : null}
-      <div className={cn(
-        embedded ? "flex-1 overflow-y-auto p-4" : "flex-1 overflow-y-auto",
-        "min-h-0"
-      )}>
+    <div className={cn("h-full min-h-0 flex flex-col relative")}>
+      {!embedded && effectiveLayoutMode !== "ontology" && showFloatingSearchHeader ? (
+        <div className="absolute inset-x-0 top-0 z-30 animate-in fade-in-0 duration-150">
+          {renderSearchHeader(true)}
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          embedded ? "flex-1 overflow-y-auto p-4" : "flex-1 overflow-y-auto",
+          "min-h-0"
+        )}
+        onScroll={handleSearchScroll}
+      >
+        {!embedded && effectiveLayoutMode !== "ontology" ? renderSearchHeader(true) : null}
         <div className={searchContainerClass}>
           {searchMode === "full-text" ? (
             <SearchResults
@@ -455,8 +521,6 @@ export default function SearchPage({
       embedded ? "h-full flex flex-col overflow-hidden" : "flex-1 flex flex-col h-svh overflow-hidden",
       "relative"
     )}>
-      {!embedded && !isSplitLayout && effectiveLayoutMode !== "ontology" && renderSearchHeader(false)}
-
       <div className="flex-1 min-h-0">
         {effectiveLayoutMode === "split" && ontologyEnabled ? (
           <ResizablePanelGroup direction="horizontal" className="h-full">

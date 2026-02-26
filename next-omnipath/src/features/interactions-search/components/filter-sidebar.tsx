@@ -183,7 +183,7 @@ function FilterOptionRow({
   const labelContent = (
     <span className={cn(
       "truncate",
-      highlighted ? "text-primary font-medium" : ""
+      highlighted ? "font-medium" : ""
     )}>
       {showIcon && icon && <span className="mr-1.5">{icon}</span>}
       {displayLabel}
@@ -193,10 +193,10 @@ function FilterOptionRow({
   const isCvTerm = !!(entityId && extractTermId(entityId));
 
   return (
-    <div className="flex items-center justify-between group py-0.5 gap-2">
+    <div className="flex items-center justify-between py-0.5 gap-2">
       <Label
         htmlFor={`${filterKey}-${value}`}
-        className={`flex items-center gap-1.5 text-xs font-normal cursor-pointer group-hover:text-primary transition-colors min-w-0 flex-1 ${isSelected ? "text-primary font-medium" : ""
+        className={`flex items-center gap-1.5 text-xs font-normal cursor-pointer min-w-0 flex-1 ${isSelected ? "font-medium" : ""
           }`}
       >
         <Checkbox
@@ -225,8 +225,7 @@ function FilterOptionRow({
       <Badge
         variant={isSelected ? "default" : "outline"}
         className={cn(
-          "text-xs h-5 px-1.5 py-0 transition-colors flex-shrink-0",
-          "group-hover:bg-primary/10",
+          "text-xs h-5 px-1.5 py-0 flex-shrink-0",
           isSelected ? "bg-primary text-primary-foreground" : ""
         )}
       >

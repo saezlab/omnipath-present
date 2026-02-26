@@ -83,7 +83,7 @@ export function SearchBar({
       />
       <div className="absolute right-28 top-1/2 -translate-y-1/2 z-10">
         <Select value={selectedSpecies} onValueChange={onSpeciesChange}>
-          <SelectTrigger className="h-8 w-auto text-xs border-0 bg-transparent shadow-none px-0 gap-1 focus:ring-0 focus:ring-offset-0 [&>span]:text-xs">
+          <SelectTrigger className="h-8 w-auto text-xs border-0 bg-transparent dark:bg-transparent hover:bg-transparent dark:hover:bg-transparent data-[state=open]:bg-transparent shadow-none px-0 gap-1 focus:ring-0 focus:ring-offset-0 [&>span]:text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
