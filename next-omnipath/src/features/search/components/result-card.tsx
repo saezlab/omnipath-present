@@ -15,7 +15,7 @@ import React, { useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ArrowRight, ListOrdered, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { MoleculeStructure } from "./molecule_structure";
-import { searchMeilisearch } from "@/lib/meilisearch/search";
+import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search";
 import { INDEXES } from "@/lib/meilisearch/client";
 import { EntityDetailsDialog } from "./entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
@@ -36,14 +36,15 @@ export function EntityHoverCard({
     if (open && !hasLoaded) {
       setLoading(true);
       try {
-        const result = await searchMeilisearch({
-          query: '',
-          index: INDEXES.ENTITIES,
-          limit: 1,
-          filters: { entity_ids: [parseInt(entityId)] }
-        });
-        if (result.hits.length > 0) {
-          setEntity(result.hits[0] as SearchResult);
+        const normalizedId = entityId.trim();
+        const { documents } = await fetchMeilisearchDocuments(
+          INDEXES.ENTITIES,
+          [normalizedId],
+          "entity_id",
+        );
+
+        if (documents.length > 0) {
+          setEntity(documents[0] as SearchResult);
         }
       } catch (error) {
         console.error('Failed to fetch entity:', error);

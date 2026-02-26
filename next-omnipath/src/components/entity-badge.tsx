@@ -35,6 +35,7 @@ function getEntityTypeConfig(entityType: string | undefined) {
 interface EntityBadgeProps {
   displayName: string;
   canonicalIdentifier: string;
+  entityId?: string; // Deterministic lookup ID for hover card
   entityType?: string; // e.g., "Protein", "SmallMolecule"
   geneSymbol?: string;  // Keep for backward compatibility
   uniprotId?: string;   // Keep for backward compatibility
@@ -45,6 +46,7 @@ interface EntityBadgeProps {
 export const EntityBadge: React.FC<EntityBadgeProps> = ({
   displayName,
   canonicalIdentifier,
+  entityId,
   entityType,
   geneSymbol,
   uniprotId,
@@ -73,7 +75,7 @@ export const EntityBadge: React.FC<EntityBadgeProps> = ({
   const [isIdentifierTruncated, setIsIdentifierTruncated] = useState(false);
   const [isHoverOpen, setIsHoverOpen] = useState(false);
   const { data: entity } = useEntity(
-    isHoverOpen && showHover ? identifier : undefined
+    isHoverOpen && showHover ? entityId : undefined
   );
 
   React.useEffect(() => {

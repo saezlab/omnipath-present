@@ -2,7 +2,7 @@
 
 
 import { useQuery } from "@tanstack/react-query"
-import { searchMeilisearch } from "@/lib/meilisearch/search"
+import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search"
 import { INDEXES } from "@/lib/meilisearch/client"
 import type { SearchResult } from "@/features/search/components/result-card"
 
@@ -18,14 +18,16 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
     queryFn: async () => {
       if (!entityId) return null
 
-      const result = await searchMeilisearch({
-        index: INDEXES.ENTITIES,
-        query: entityId,
-        limit: 1,
-        offset: 0,
-      })
+      const normalizedId = entityId.trim()
+      if (!normalizedId) return null
 
-      const hits = (result.hits as unknown as SearchResult[]) || []
+      const { documents } = await fetchMeilisearchDocuments(
+        INDEXES.ENTITIES,
+        [normalizedId],
+        "entity_id",
+      )
+
+      const hits = (documents as unknown as SearchResult[]) || []
       return hits.length > 0 ? hits[0] : null
     },
     enabled: !!entityId,

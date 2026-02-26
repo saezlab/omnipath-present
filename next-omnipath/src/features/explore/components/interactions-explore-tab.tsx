@@ -404,6 +404,7 @@ export function InteractionsExploreTab({
                             <EntityBadge
                               displayName={sourceEntity?.display_name || String(sourceId)}
                               canonicalIdentifier={sourceEntity?.canonical_identifier || String(sourceId)}
+                              entityId={sourceEntity?.id || String(sourceId)}
                               entityType={sourceEntity?.entity_type_name || sourceType}
                             />
                           </TableCell>
@@ -416,6 +417,7 @@ export function InteractionsExploreTab({
                             <EntityBadge
                               displayName={targetEntity?.display_name || String(targetId)}
                               canonicalIdentifier={targetEntity?.canonical_identifier || String(targetId)}
+                              entityId={targetEntity?.id || String(targetId)}
                               entityType={targetEntity?.entity_type_name || targetType}
                             />
                           </TableCell>
