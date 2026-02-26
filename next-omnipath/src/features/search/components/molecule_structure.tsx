@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +18,20 @@ interface MoleculeStructureProps {
   compoundName?: string;
 }
 
+const isBlackColor = (value: string | null) => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === 'black' ||
+    normalized === '#000' ||
+    normalized === '#000000' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgb(0, 0, 0)' ||
+    normalized === 'rgba(0,0,0,1)' ||
+    normalized === 'rgba(0, 0, 0, 1)'
+  );
+};
+
 export function MoleculeStructure({
   smiles,
   width = 250,
@@ -26,6 +41,8 @@ export function MoleculeStructure({
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [OCL, setOCL] = useState<OpenChemLibModule | null>(null);
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   useEffect(() => {
     let mounted = true;
@@ -87,6 +104,24 @@ export function MoleculeStructure({
           svgElement.style.width = '100%';
           svgElement.style.height = '100%';
           svgElement.style.display = 'block';
+
+          // OpenChemLib renders carbon/bond lines in black by default.
+          // On dark backgrounds they become unreadable, so remap black to a light tone.
+          if (isDark) {
+            const darkModeStroke = '#E5E7EB';
+            const nodes = svgElement.querySelectorAll('*');
+            nodes.forEach((node) => {
+              const stroke = node.getAttribute('stroke');
+              const fill = node.getAttribute('fill');
+
+              if (isBlackColor(stroke)) {
+                node.setAttribute('stroke', darkModeStroke);
+              }
+              if (isBlackColor(fill)) {
+                node.setAttribute('fill', darkModeStroke);
+              }
+            });
+          }
         }
 
       } catch (err) {
@@ -96,7 +131,7 @@ export function MoleculeStructure({
     };
 
     renderMolecule();
-  }, [OCL, smiles, width, height]);
+  }, [OCL, smiles, width, height, isDark]);
 
 
   const structureDisplay = (() => {
