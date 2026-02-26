@@ -4,6 +4,7 @@ import { FileText, Search, ArrowRight, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import { MeilisearchInteraction, InteractionEvidence, InteractionDirection } from "@/types/meilisearch"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface InteractionDetailsProps {
   selectedInteraction: MeilisearchInteraction | null
@@ -21,17 +22,52 @@ function shouldSwapMembers(directions: InteractionDirection[]): boolean {
   return directions[0]?.direction === 'b-a';
 }
 
-// Helper to combine term with its value and unit
-function formatAnnotationWithValue(
-  terms: { value: string }[],
-  values: { value: string }[],
-  units: { value: string }[]
+function formatAnnotations(
+  annotations: { term: string; value?: string | null; unit?: string | null }[]
 ): { term: string; value?: string; unit?: string }[] {
-  return terms.map((term, idx) => ({
-    term: extractLabel(term.value),
-    value: values[idx]?.value,
-    unit: units[idx]?.value ? extractLabel(units[idx].value) : undefined,
+  return annotations.map((a) => ({
+    term: extractLabel(a.term),
+    value: a.value ?? undefined,
+    unit: a.unit ? extractLabel(a.unit) : undefined,
   }));
+}
+
+function AnnotationTable({
+  annotations,
+  tone = 'default',
+}: {
+  annotations: { term: string; value?: string; unit?: string }[];
+  tone?: 'default' | 'source' | 'target';
+}) {
+  const headerToneClass =
+    tone === 'source'
+      ? 'bg-blue-50/70'
+      : tone === 'target'
+        ? 'bg-purple-50/70'
+        : 'bg-muted/40';
+
+  return (
+    <div className="rounded-md border overflow-hidden">
+      <Table className="text-xs">
+        <TableHeader className={headerToneClass}>
+          <TableRow>
+            <TableHead className="h-8">Term</TableHead>
+            <TableHead className="h-8">Value</TableHead>
+            <TableHead className="h-8">Unit</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {annotations.map((annotation, idx) => (
+            <TableRow key={idx}>
+              <TableCell className="whitespace-normal break-words">{annotation.term}</TableCell>
+              <TableCell className="whitespace-normal break-words">{annotation.value || '—'}</TableCell>
+              <TableCell className="whitespace-normal break-words">{annotation.unit || '—'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
 }
 
 // Helper to determine overall sign from directions
@@ -65,9 +101,9 @@ const getSignLabel = (sign: 'positive' | 'negative' | 'mixed' | null) => {
 function extractAnnotationTerms(evidence: InteractionEvidence[]): string[] {
   const terms = new Set<string>();
   evidence.forEach(e => {
-    e.interaction_annotation_terms?.forEach(t => terms.add(t.value));
-    e.member_a_annotation_terms?.forEach(t => terms.add(t.value));
-    e.member_b_annotation_terms?.forEach(t => terms.add(t.value));
+    e.interaction_annotations?.forEach(a => terms.add(a.term));
+    e.member_a_annotations?.forEach(a => terms.add(a.term));
+    e.member_b_annotations?.forEach(a => terms.add(a.term));
   });
   return Array.from(terms);
 }
@@ -232,91 +268,47 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
               {selectedInteraction.evidence?.map((evidence, index) => (
                 <div key={index} className="border rounded-lg p-4 bg-muted/30">
                   {/* Evidence Header */}
-                  <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-start justify-between mb-3 gap-2">
                     <Badge variant="outline" className="text-xs">
-                      Evidence {index + 1}
+                      Evidence {evidence.evidence_serial ?? index + 1}
                     </Badge>
+                    {evidence.source && (
+                      <Badge variant="secondary" className="text-xs">
+                        {extractLabel(evidence.source)}
+                      </Badge>
+                    )}
                   </div>
 
                   {/* Interaction Annotations */}
-                  {evidence.interaction_annotation_terms && evidence.interaction_annotation_terms.length > 0 && (
+                  {evidence.interaction_annotations && evidence.interaction_annotations.length > 0 && (
                     <div className="mb-4">
                       <div className="text-xs font-medium text-muted-foreground mb-2">Interaction Annotations</div>
-                      <div className="flex flex-wrap gap-2">
-                        {formatAnnotationWithValue(
-                          evidence.interaction_annotation_terms,
-                          evidence.interaction_annotation_values || [],
-                          evidence.interaction_annotation_units || []
-                        ).map((annotation, termIdx) => (
-                          <Badge key={termIdx} variant="secondary" className="text-xs">
-                            {annotation.term}
-                            {annotation.value && (
-                              <span className="ml-1 font-normal opacity-80">
-                                = {annotation.value}{annotation.unit && ` ${annotation.unit}`}
-                              </span>
-                            )}
-                          </Badge>
-                        ))}
-                      </div>
+                      <AnnotationTable annotations={formatAnnotations(evidence.interaction_annotations)} />
                     </div>
                   )}
 
                   {/* Source Member Annotations */}
                   {(() => {
-                    const sourceTerms = swap ? evidence.member_b_annotation_terms : evidence.member_a_annotation_terms;
-                    const sourceValues = swap ? evidence.member_b_annotation_values : evidence.member_a_annotation_values;
-                    const sourceUnits = swap ? evidence.member_b_annotation_units : evidence.member_a_annotation_units;
-                    return sourceTerms && sourceTerms.length > 0 ? (
+                    const sourceAnnotations = swap ? evidence.member_b_annotations : evidence.member_a_annotations;
+                    return sourceAnnotations && sourceAnnotations.length > 0 ? (
                       <div className="mb-4">
                         <div className="text-xs font-medium text-muted-foreground mb-2">
                           Source ({sourceId}) Annotations
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {formatAnnotationWithValue(
-                            sourceTerms,
-                            sourceValues || [],
-                            sourceUnits || []
-                          ).map((annotation, termIdx) => (
-                            <Badge key={termIdx} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                              {annotation.term}
-                              {annotation.value && (
-                                <span className="ml-1 font-normal opacity-80">
-                                  = {annotation.value}{annotation.unit && ` ${annotation.unit}`}
-                                </span>
-                              )}
-                            </Badge>
-                          ))}
-                        </div>
+                        <AnnotationTable annotations={formatAnnotations(sourceAnnotations)} tone="source" />
                       </div>
                     ) : null;
                   })()}
 
                   {/* Target Member Annotations */}
                   {(() => {
-                    const targetTerms = swap ? evidence.member_a_annotation_terms : evidence.member_b_annotation_terms;
-                    const targetValues = swap ? evidence.member_a_annotation_values : evidence.member_b_annotation_values;
-                    const targetUnits = swap ? evidence.member_a_annotation_units : evidence.member_b_annotation_units;
-                    return targetTerms && targetTerms.length > 0 ? (
+                    const targetAnnotations = swap ? evidence.member_a_annotations : evidence.member_b_annotations;
+                    return targetAnnotations && targetAnnotations.length > 0 ? (
                       <div className="mb-4">
                         <div className="text-xs font-medium text-muted-foreground mb-2">
                           Target ({targetId}) Annotations
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {formatAnnotationWithValue(
-                            targetTerms,
-                            targetValues || [],
-                            targetUnits || []
-                          ).map((annotation, termIdx) => (
-                            <Badge key={termIdx} variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
-                              {annotation.term}
-                              {annotation.value && (
-                                <span className="ml-1 font-normal opacity-80">
-                                  = {annotation.value}{annotation.unit && ` ${annotation.unit}`}
-                                </span>
-                              )}
-                            </Badge>
-                          ))}
-                        </div>
+                        <AnnotationTable annotations={formatAnnotations(targetAnnotations)} tone="target" />
                       </div>
                     ) : null;
                   })()}

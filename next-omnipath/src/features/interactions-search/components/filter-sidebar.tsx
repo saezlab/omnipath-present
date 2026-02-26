@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MeilisearchFilters } from "@/types/meilisearch"
 import { ArrowRight, Plus, Minus, X, Filter, Search } from "lucide-react"
-import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
+import { cn, formatNumber } from "@/lib/utils"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { EntityHoverCard, CvTermHoverCard } from "@/features/search/components/result-card"
 
@@ -272,14 +272,16 @@ export function FilterSidebar({
     return Object.entries(counts)
       .map(([value, count]) => {
         const termId = extractTermId(value);
-        const label = termId && termId === value
-          ? value
-          : value.includes(':')
-            ? value.split(':')[0]
-            : value;
-        // Get emoji icon for member_types and sources filters
-        const icon = filterKey === 'member_types'
-          ? getEntityTypeEmoji(value)
+        const label = filterKey === 'interaction_type'
+          ? value.split('|').map((part) => part.split(':')[0]).join(' ↔ ')
+          : termId && termId === value
+            ? value
+            : value.includes(':')
+              ? value.split(':')[0]
+              : value;
+        // Get emoji icon for interaction_type and sources filters
+        const icon = filterKey === 'interaction_type'
+          ? '🔗'
           : filterKey === 'sources'
             ? '📚'
             : undefined;
@@ -358,15 +360,15 @@ export function FilterSidebar({
         </div>
       </div>
 
-      <Accordion type="multiple" defaultValue={["member_types"]} className="w-full">
-        {/* Member Types Filter */}
+      <Accordion type="multiple" defaultValue={["interaction_types"]} className="w-full">
+        {/* Interaction Type Filter */}
         <ArrayFilterSection
-          title="Member Types"
-          filterKey="member_types"
-          options={transformFilterCounts(filterCounts.member_types, 'member_types')}
-          selectedValues={filters.member_types || []}
-          onToggle={(value) => handleArrayToggle("member_types", value)}
-          showHoverCard={true}
+          title="Interaction Type"
+          filterKey="interaction_types"
+          options={transformFilterCounts(filterCounts.interaction_type, 'interaction_type')}
+          selectedValues={filters.interaction_types || []}
+          onToggle={(value) => handleArrayToggle("interaction_types", value)}
+          showHoverCard={false}
           showIcon={true}
         />
         {/* Sources Filter */}

@@ -11,6 +11,7 @@ import { MeilisearchFilters } from "@/types/meilisearch";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { searchAssociationsMeilisearch } from "@/lib/meilisearch/search";
 import { INDEXES } from "@/lib/meilisearch/client";
+import { getUnifiedCvTerms } from "@/lib/cv-terms";
 
 // Entity type accessions for filtering associations
 const ENTITY_TYPES = {
@@ -118,10 +119,7 @@ export default function ExplorePage() {
   // Calculate which tabs have results
   const tabsWithResults = useMemo(() => {
     // Check if any selected entities have CV terms
-    const hasCvTerms = selectedEntities.some(e => {
-      const cvTerms = e.cv_terms || e.fullResult?.cv_terms || [];
-      return cvTerms.length > 0;
-    });
+    const hasCvTerms = selectedEntities.some(e => getUnifiedCvTerms(e.fullResult).length > 0 || (e.cv_terms?.length || 0) > 0);
 
     return {
       interactions: true, // Always show interactions

@@ -12,6 +12,7 @@ import { MeilisearchFilters, MeilisearchAssociation } from "@/types/meilisearch"
 import { searchInteractionsMeilisearch } from "@/lib/meilisearch/search";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import SearchPage from "@/features/search/page";
+import { getUnifiedCvTerms } from "@/lib/cv-terms";
 import { INDEXES } from "@/lib/meilisearch/client";
 
 interface EntityDetailsDialogProps {
@@ -108,10 +109,10 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
                             <span>{entity.complexes.length} complexes</span>
                         </div>
                     )}
-                    {entity.cv_terms && entity.cv_terms.length > 0 && (
+                    {getUnifiedCvTerms(entity).length > 0 && (
                         <div className="flex items-center gap-1">
                             <Tag className="h-4 w-4" />
-                            <span>{entity.cv_terms.length} annotations</span>
+                            <span>{getUnifiedCvTerms(entity).length} annotations</span>
                         </div>
                     )}
                     {entity.references && entity.references.length > 0 && (

@@ -65,8 +65,8 @@ export function buildInteractionFilterString(filters: MeilisearchFilters): strin
     filterParts.push(`(member_a_id = ${filters.member_b_id} OR member_b_id = ${filters.member_b_id})`);
   }
 
-  if (filters.member_types?.length) {
-    const typeFilters = filters.member_types.map((type) => `member_types = "${type}"`).join(" OR ");
+  if (filters.interaction_types?.length) {
+    const typeFilters = filters.interaction_types.map((type) => `interaction_type = "${type}"`).join(" OR ");
     filterParts.push(`(${typeFilters})`);
   }
 

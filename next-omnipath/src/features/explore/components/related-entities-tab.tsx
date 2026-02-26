@@ -8,6 +8,7 @@ import type { SearchResult } from "@/features/search/components/result-card";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useEntitySelection, type SelectedEntity } from "@/contexts/entity-selection-context";
+import { getUnifiedCvTerms } from "@/lib/cv-terms";
 
 interface EntityFilters {
   entity_types?: string[];
@@ -78,7 +79,10 @@ export function RelatedEntitiesTab({
       case "complex":
         return aggregateRelatedIds(selectedEntities, e => e.fullResult?.complexes);
       case "cv_term":
-        return aggregateRelatedIds(selectedEntities, e => e.cv_terms || e.fullResult?.cv_terms);
+        return aggregateRelatedIds(selectedEntities, e => {
+          const unified = getUnifiedCvTerms(e.fullResult);
+          return unified.length > 0 ? unified : e.cv_terms;
+        });
       case "pathway":
         return aggregateRelatedIds(selectedEntities, e => e.fullResult?.pathways);
       case "reaction":

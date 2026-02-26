@@ -18,6 +18,7 @@ import { MoleculeStructure } from "./molecule_structure";
 import { searchMeilisearch } from "@/lib/meilisearch/search";
 import { INDEXES } from "@/lib/meilisearch/client";
 import { EntityDetailsDialog } from "./entity-details-dialog";
+import { getUnifiedCvTerms } from "@/lib/cv-terms";
 
 // Component that shows a ResultCardContent in a HoverCard for entities
 export function EntityHoverCard({
@@ -201,6 +202,11 @@ export interface SearchResult {
   sources?: string[];
   complexes?: number[];
   cv_terms?: string[];
+  cv_terms_go?: string[];
+  cv_terms_mi?: string[];
+  cv_terms_om?: string[];
+  cv_terms_hp?: string[];
+  cv_terms_kw?: string[];
   pathways?: number[];
   reactions?: number[];
   num_interactions?: number;
@@ -494,7 +500,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
         entityId: result.entity_id,
         name: primaryName,
         type: entityTypeLabel,
-        cv_terms: result.cv_terms,
+        cv_terms: getUnifiedCvTerms(result),
         references: result.references,
         fullResult: result,
       });
@@ -513,7 +519,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       entityId: result.entity_id,
       name: primaryName,
       type: entityTypeLabel,
-      cv_terms: result.cv_terms,
+      cv_terms: getUnifiedCvTerms(result),
       references: result.references,
       fullResult: result,
     });
@@ -590,10 +596,10 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
               <span>{result.complexes.length}</span>
             </div>
           )}
-          {result.cv_terms && result.cv_terms.length > 0 && (
+          {getUnifiedCvTerms(result).length > 0 && (
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Tag className="h-4 w-4" />
-              <span>{result.cv_terms.length}</span>
+              <span>{getUnifiedCvTerms(result).length}</span>
             </div>
           )}
           {result.references && result.references.length > 0 && (
@@ -652,7 +658,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
         entityId: result.entity_id,
         name: getDisplayName(),
         type: result.entity_type?.split(':')[0] || result.type,
-        cv_terms: result.cv_terms,
+        cv_terms: getUnifiedCvTerms(result),
         references: result.references,
         fullResult: result,
       });
@@ -672,7 +678,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
       entityId: result.entity_id,
       name: getDisplayName(),
       type: result.entity_type?.split(':')[0] || result.type,
-      cv_terms: result.cv_terms,
+      cv_terms: getUnifiedCvTerms(result),
       references: result.references,
       fullResult: result,
     });
@@ -687,7 +693,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
   const references = result._formatted?.references || result.references || [];
   const sources = result._formatted?.sources || result.sources || [];
   const complexes = result.complexes || [];
-  const cvTerms = result.cv_terms || [];
+  const cvTerms = getUnifiedCvTerms(result);
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;

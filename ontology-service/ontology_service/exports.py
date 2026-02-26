@@ -46,11 +46,11 @@ def build_interaction_filter_string(filters: dict[str, Any]) -> str:
         member_b_id = int(member_b_id)
         parts.append(f"(member_a_id = {member_b_id} OR member_b_id = {member_b_id})")
 
-    member_types = filters.get("member_types") or []
-    if member_types:
+    interaction_types = filters.get("interaction_types") or []
+    if interaction_types:
         type_filters = " OR ".join(
-            f'member_types = "{_escape(str(member_type))}"'
-            for member_type in member_types
+            f'interaction_type = "{_escape(str(interaction_type))}"'
+            for interaction_type in interaction_types
         )
         parts.append(f"({type_filters})")
 

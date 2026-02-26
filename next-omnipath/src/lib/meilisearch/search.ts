@@ -113,7 +113,7 @@ export async function searchInteractionsMeilisearch(
       limit,
       offset,
       facets: [
-        'member_types',
+        'interaction_type',
         'has_direction',
         'has_positive_sign',
         'has_negative_sign',

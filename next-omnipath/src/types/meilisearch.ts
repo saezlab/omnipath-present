@@ -1,22 +1,18 @@
 // Types for Meilisearch interaction data
 
-// Map entry for annotation key-value pairs
-export interface AnnotationMapEntry {
-  key: string;
-  value: string;
+export interface InteractionAnnotation {
+  term: string;
+  value?: string | null;
+  unit?: string | null;
 }
 
 // Evidence structure with annotations for interaction, member_a, and member_b
 export interface InteractionEvidence {
-  interaction_annotation_terms: AnnotationMapEntry[];
-  interaction_annotation_values: AnnotationMapEntry[];
-  interaction_annotation_units: AnnotationMapEntry[];
-  member_a_annotation_terms: AnnotationMapEntry[];
-  member_a_annotation_values: AnnotationMapEntry[];
-  member_a_annotation_units: AnnotationMapEntry[];
-  member_b_annotation_terms: AnnotationMapEntry[];
-  member_b_annotation_values: AnnotationMapEntry[];
-  member_b_annotation_units: AnnotationMapEntry[];
+  evidence_serial: number;
+  source: string;
+  interaction_annotations: InteractionAnnotation[];
+  member_a_annotations: InteractionAnnotation[];
+  member_b_annotations: InteractionAnnotation[];
 }
 
 // Direction with sign information
@@ -39,6 +35,9 @@ export interface MeilisearchInteraction {
   // Member types as "TypeName:EntityId" format
   member_types: string[];
 
+  // Canonical interaction type pair, e.g. "Protein:MI:0326|Small molecule:MI:0328"
+  interaction_type?: string;
+
   // Evidence array with nested annotation data
   evidence: InteractionEvidence[];
 
@@ -58,9 +57,15 @@ export interface MeilisearchInteraction {
 
 // Association annotation entry
 export interface AssociationAnnotation {
-  key: string;
-  value: string;
-  unit?: string;
+  term: string;
+  value?: string | null;
+  unit?: string | null;
+}
+
+export interface AssociationEvidence {
+  evidence_serial: number;
+  source: string;
+  annotations: AssociationAnnotation[];
 }
 
 // Identifier entry
@@ -92,8 +97,8 @@ export interface MeilisearchAssociation {
   // Sources
   sources: string[];
 
-  // Annotations
-  annotations: AssociationAnnotation[];
+  // Evidence + annotations
+  evidence: AssociationEvidence[];
   association_annotation_terms: string[];
 
   // Index signature
@@ -110,7 +115,7 @@ export interface MeilisearchFilters {
   member_a_id?: number;
   member_b_id?: number;
   entity_ids?: number[];  // Filter by multiple entity IDs (matches member_a_id OR member_b_id)
-  member_types?: string[];
+  interaction_types?: string[];
   has_direction?: boolean | null;
   has_positive_sign?: boolean | null;
   has_negative_sign?: boolean | null;

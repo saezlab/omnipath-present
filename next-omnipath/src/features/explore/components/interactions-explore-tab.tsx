@@ -84,8 +84,8 @@ export function InteractionsExploreTab({
         const counts: Record<string, Record<string, number>> = {};
 
         // Process facets matching new schema
-        if (facetDist.member_types) {
-          counts.member_types = facetDist.member_types;
+        if (facetDist.interaction_type) {
+          counts.interaction_type = facetDist.interaction_type;
         }
         if (facetDist.has_direction) {
           counts.has_direction = facetDist.has_direction;

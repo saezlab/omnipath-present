@@ -6,6 +6,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { formatNumber } from "@/lib/utils";
+import { getUnifiedCvTerms } from "@/lib/cv-terms";
 
 interface TreeNode {
     id: string;
@@ -35,7 +36,7 @@ export function AnnotationsExploreTab() {
     const cvTermCounts = useMemo(() => {
         const counts = new Map<string, number>();
         for (const entity of selectedEntities) {
-            const cvTerms = entity.cv_terms || entity.fullResult?.cv_terms || [];
+            const cvTerms = getUnifiedCvTerms(entity.fullResult).length > 0 ? getUnifiedCvTerms(entity.fullResult) : (entity.cv_terms || []);
             for (const term of cvTerms) {
                 counts.set(term, (counts.get(term) || 0) + 1);
             }
