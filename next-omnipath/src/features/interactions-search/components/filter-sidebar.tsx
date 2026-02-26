@@ -931,9 +931,6 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
                 )}
               >
                 <span>{tab.name}</span>
-                <Badge variant="secondary" className="ml-1 text-[11px]">
-                  {formatNumber(tab.termIds.length || tab.unmatched.length)}
-                </Badge>
               </TabsTrigger>
             ))}
           </TabsList>
