@@ -508,28 +508,9 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
     }
   };
 
-  const handleCardClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (!entityId) return;
-    if (selected) {
-      removeEntity(entityId);
-      return;
-    }
-    addEntity({
-      id: entityId,
-      entityId: result.entity_id,
-      name: primaryName,
-      type: entityTypeLabel,
-      cv_terms: getUnifiedCvTerms(result),
-      references: result.references,
-      fullResult: result,
-    });
-  };
-
   return (
     <Card
-      className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative cursor-pointer"
-      onClick={handleCardClick}
+      className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative"
     >
       {/* Action buttons */}
       {entityId && (
@@ -666,25 +647,6 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
     }
   };
 
-  // New handler for clicking the whole card to toggle selection
-  const handleCardClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (type !== "entity" || !entityId) return;
-    if (selected) {
-      removeEntity(entityId);
-      return;
-    }
-    addEntity({
-      id: entityId,
-      entityId: result.entity_id,
-      name: getDisplayName(),
-      type: result.entity_type?.split(':')[0] || result.type,
-      cv_terms: getUnifiedCvTerms(result),
-      references: result.references,
-      fullResult: result,
-    });
-  };
-
   // Extract data based on type
   const descriptions = result._formatted?.descriptions || result.descriptions || [];
   const names = result._formatted?.names || result.names || [];
@@ -784,7 +746,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
 
 
   return (
-    <Card className={`flex flex-col hover:shadow-md transition-shadow h-full result-card group relative ${type === 'entity' ? 'cursor-pointer' : ''}`} onClick={handleCardClick}>
+    <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative">
       {/* Action buttons - positioned at bottom center, visible on hover for entities */}
       {type === 'entity' && entityId && (
         <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
