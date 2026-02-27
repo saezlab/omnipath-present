@@ -1,9 +1,9 @@
 "use client";
 
-import { Message } from "ai";
-import { useChat } from "ai/react";
+import { useChat } from "@ai-sdk/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ChatMessage, chatMessagesToUIMessages, uiMessagesToChatMessages } from "../types";
 
 import { Message as PreviewMessage } from "./message";
 import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom";
@@ -35,27 +35,54 @@ export function Chat({
   initialMessages,
 }: {
   id: string;
-  initialMessages: Array<Message>;
+  initialMessages: Array<ChatMessage>;
 }) {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [input, setInput] = useState("");
 
   const {
-    messages,
-    handleSubmit,
-    input,
-    setInput,
-    append,
-    isLoading,
+    messages: uiMessages,
+    status,
     stop,
-    setMessages,
-    reload,
+    setMessages: setUIMessages,
+    regenerate,
+    sendMessage,
   } = useChat({
     id,
-    body: { id },
-    initialMessages,
-    maxSteps: 10,
+    messages: chatMessagesToUIMessages(initialMessages),
   });
+
+  const messages = uiMessagesToChatMessages(uiMessages);
+  const isLoading = status === "submitted" || status === "streaming";
+
+  const handleSubmit = useCallback(() => {
+    const value = input.trim();
+    if (!value) return;
+
+    sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: value }],
+    });
+    setInput("");
+  }, [input, sendMessage]);
+
+  const append = useCallback((message: ChatMessage) => {
+    if (!message.content?.trim()) return;
+
+    sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: message.content }],
+    });
+  }, [sendMessage]);
+
+  const setMessages = useCallback((updatedMessages: ChatMessage[]) => {
+    setUIMessages(chatMessagesToUIMessages(updatedMessages));
+  }, [setUIMessages]);
+
+  const reload = useCallback(() => {
+    void regenerate();
+  }, [regenerate]);
 
   const startEdit = useCallback((messageId: string, currentContent: string) => {
     setEditingMessageId(messageId);
@@ -258,6 +285,7 @@ export function Chat({
                 key={index}
                 onClick={async () => {
                   append({
+                    id: crypto.randomUUID(),
                     role: "user",
                     content: suggestedAction.action,
                   });

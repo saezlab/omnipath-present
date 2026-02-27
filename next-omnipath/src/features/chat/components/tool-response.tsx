@@ -57,9 +57,9 @@ type ToolResultType = SearchEntitiesResult | SearchInteractionsResult | ToolErro
 // Update CustomToolInvocation args
 interface CustomToolInvocation {
   toolName: string
-  args: Record<string, unknown>
-  state: string // e.g., "pending", "success", "error"
-  result?: ToolResultType
+  args?: Record<string, unknown>
+  state: string
+  result?: unknown
 }
 
 export const ToolResponse = ({
@@ -78,7 +78,7 @@ export const ToolResponse = ({
     return null
   }
 
-  const isError = 'error' in result
+  const isError = typeof result === 'object' && result !== null && 'error' in result
 
   // Error display for any tool
   if (isError) {
@@ -93,7 +93,7 @@ export const ToolResponse = ({
 
   // Transform the result data to match what the results panel expects
   let transformedResults: Array<Record<string, unknown>> = []
-  let query = args
+  let query: Record<string, unknown> = args ?? {}
   let totalCount: number | undefined
 
   switch (toolName) {

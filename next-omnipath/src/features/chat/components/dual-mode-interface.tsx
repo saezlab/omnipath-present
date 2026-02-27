@@ -4,7 +4,7 @@ import { useState, useCallback } from "react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ChatPanel } from "./chat-panel"
 import { ResultsPanel } from "./results-panel"
-import { Message } from "ai"
+import { ChatMessage } from "../types"
 
 export interface ToolResult {
   id: string
@@ -16,15 +16,15 @@ export interface ToolResult {
 }
 
 export interface DualModeInterfaceProps {
-  messages: Message[]
+  messages: ChatMessage[]
   input: string
   handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   handleSubmit: (e?: React.FormEvent<HTMLFormElement>) => void
   isLoading: boolean
-  append: (message: Message) => void
+  append: (message: ChatMessage) => void
   reload: () => void
   stop: () => void
-  setMessages: (messages: Message[]) => void
+  setMessages: (messages: ChatMessage[]) => void
 }
 
 export function DualModeInterface({

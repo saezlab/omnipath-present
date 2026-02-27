@@ -1,5 +1,6 @@
 import { google } from "@/ai";
-import { convertToCoreMessages, smoothStream, streamText } from "ai";
+import { convertToModelMessages, smoothStream, stepCountIs, streamText, validateUIMessages } from "ai";
+import type { UIMessage } from "ai";
 import { z } from "zod";
 import {
   searchMeilisearch,
@@ -41,15 +42,8 @@ interface InteractionHit {
   [key: string]: unknown;
 }
 
-// Define the message schema
-const messageSchema = z.object({
-  role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
-});
-
-// Define the request schema
 const requestSchema = z.object({
-  messages: z.array(messageSchema),
+  messages: z.array(z.unknown()),
 });
 
 // Define the tools
@@ -70,7 +64,7 @@ Examples:
 - "GO:0006915" → cv_terms (GO term ID)
 - "cancer" → cv_terms (disease term)
 - "mitochondria" → cv_terms (cellular component)`,
-    parameters: z.object({
+    inputSchema: z.object({
       query: z.string().describe("The search query (protein name, gene symbol, identifier, or description)"),
       searchType: z.enum(["entities", "cv_terms"]).default("entities").describe("What to search for: 'entities' (proteins/genes/complexes) or 'cv_terms' (controlled vocabulary terms like GO, DO, etc.)"),
       limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
@@ -223,7 +217,7 @@ IMPORTANT: The interactions index CANNOT search by entity names directly - it on
 To find interactions for a specific protein/gene:
 1. First use searchEntities to find the entity and get its ID
 2. Then use this tool with the entity ID`,
-    parameters: z.object({
+    inputSchema: z.object({
       entityIds: z.array(z.string()).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs."),
       limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
     }),
@@ -330,16 +324,18 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { messages } = requestSchema.parse(body);
 
-    // Convert messages to core format
-    const coreMessages = convertToCoreMessages(messages).filter(
-      (message) => message.content.length > 0,
+    const uiMessages = await validateUIMessages<UIMessage>({ messages });
+
+    const normalizedMessages: UIMessage[] = uiMessages.filter((message) =>
+      message.parts.some((part) => part.type !== "text" || part.text.length > 0),
     );
 
     // Add system message if not present
-    if (!coreMessages.some(m => m.role === "system")) {
-      coreMessages.unshift({
+    if (!normalizedMessages.some((m) => m.role === "system")) {
+      normalizedMessages.unshift({
+        id: crypto.randomUUID(),
         role: "system",
-        content: `You are OmniPath AI, a helpful assistant knowledgeable about molecular interactions, pathways, and biological annotations based on the OmniPath database.
+        parts: [{ type: "text", text: `You are OmniPath AI, a helpful assistant knowledgeable about molecular interactions, pathways, and biological annotations based on the OmniPath database.
 
 Your capabilities:
 - Search for proteins, genes, complexes, and controlled vocabulary terms
@@ -409,13 +405,15 @@ After receiving tool responses:
 3. For entities, mention their function, organism, and interaction count
 4. For CV terms, explain their meaning and associated entities
 5. Suggest follow-up queries when appropriate
-`
+` }],
       });
     }
 
+    const modelMessages = await convertToModelMessages(normalizedMessages);
+
     const stream = streamText({
       model: google("gemini-2.5-flash"),
-      messages: coreMessages,
+      messages: modelMessages,
       tools,
       toolChoice: "auto",
       experimental_transform: [
@@ -427,17 +425,17 @@ After receiving tool responses:
         // Here you could save the chat history if needed
         console.log("Chat completed with result:", result);
       },
-      maxSteps: 5,
+      stopWhen: stepCountIs(5),
       temperature: 0.7,
     });
 
-    return stream.toDataStreamResponse({
+    return stream.toUIMessageStreamResponse({
       headers: {
         'Transfer-Encoding': 'chunked',
         Connection: 'keep-alive',
       },
       sendReasoning: true,
-      getErrorMessage: (error) => {
+      onError: (error) => {
         console.error("Chat stream error:", error);
         return `An error occurred, please try again!`;
       },

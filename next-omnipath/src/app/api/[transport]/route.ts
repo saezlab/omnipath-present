@@ -1,11 +1,30 @@
 import { createMcpHandler } from '@vercel/mcp-adapter';
-import { z } from 'zod';
+import { z, type ZodRawShape } from 'zod/v3';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
 
+const executeSqlToolSchema: ZodRawShape = {
+  sqlQuery: z.string().describe("The read-only SQL query (starting with SELECT) to execute."),
+};
+
+type ExecuteSqlToolResponse = {
+  content: Array<{ type: 'text'; text: string }>;
+};
+
+type MinimalMcpServer = {
+  tool: (
+    name: string,
+    description: string,
+    paramsSchema: ZodRawShape,
+    callback: (args: { sqlQuery: string }) => Promise<ExecuteSqlToolResponse> | ExecuteSqlToolResponse,
+  ) => void;
+};
+
 const handler = createMcpHandler(
   server => {
-    server.tool(/* need to update prompt to new schema */
+    const mcpServer = server as unknown as MinimalMcpServer;
+
+    mcpServer.tool(
       'execute_sql_query_on_omnipath_db',
       `Execute a read-only SQL query (must start with SELECT) against the Omnipath database.
 Available tables and their columns:
@@ -15,9 +34,7 @@ Available tables and their columns:
 - interactions: id, source, target, source_genesymbol, target_genesymbol, is_directed, is_stimulation, is_inhibition, consensus_direction, consensus_stimulation, consensus_inhibition, sources (array), references, omnipath, kinaseextra, ligrecextra, pathwayextra, mirnatarget, dorothea, collectri, tf_target, lncrna_mrna, tf_mirna, small_molecule, dorothea_curated, dorothea_chipseq, dorothea_tfbs, dorothea_coexp, dorothea_level (array), type, curation_effort, extra_attrs (jsonb), evidences (jsonb), ncbi_tax_id_source, entity_type_source, ncbi_tax_id_target, entity_type_target
 - intercell: id, category, parent, database, scope, aspect, source, uniprot, genesymbol, entity_type, consensus_score, transmitter, receiver, secreted, plasma_membrane_transmembrane, plasma_membrane_peripheral
 - uniprot_identifiers: id, uniprot_accession, identifier_type, identifier_value`,
-      {
-        sqlQuery: z.string().describe("The read-only SQL query (starting with SELECT) to execute.")
-      },
+      executeSqlToolSchema,
       async ({ sqlQuery }) => {
         console.log(`Executing SQL query: ${sqlQuery}`);
         try {

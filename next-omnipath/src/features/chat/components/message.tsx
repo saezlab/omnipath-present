@@ -1,6 +1,6 @@
 "use client";
 
-import { ToolInvocation } from "ai";
+import { ChatToolInvocation } from "../types";
 import { motion } from "framer-motion";
 import { ReactNode } from "react";
 
@@ -10,9 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Pencil } from "lucide-react";
 import type { ToolResult } from "./dual-mode-interface";
 
-// Extend the ToolInvocation type locally if needed, or handle potential errors defensively.
-// This assumes result might contain an error property.
-type ExtendedToolInvocation = ToolInvocation & { result?: { error?: string } };
+type ExtendedToolInvocation = ChatToolInvocation;
 
 const ToolDetails = ({
   toolInvocation,
@@ -54,7 +52,7 @@ export const Message = ({
 }: {
   role: string;
   content: string | ReactNode;
-  toolInvocations: Array<ToolInvocation> | undefined;
+  toolInvocations: Array<ChatToolInvocation> | undefined;
   isInitialMessage?: boolean;
   id: string;
   startEdit?: (messageId: string, currentContent: string) => void;

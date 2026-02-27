@@ -1,6 +1,6 @@
 "use client"
 
-import { Message } from "ai"
+import { ChatMessage } from "../types"
 import { useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Message as PreviewMessage } from "./message"
@@ -31,15 +31,15 @@ const suggestedActions = [
 ]
 
 interface ChatPanelProps {
-  messages: Message[]
+  messages: ChatMessage[]
   input: string
   handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   handleSubmit: (e?: React.FormEvent<HTMLFormElement>) => void
   isLoading: boolean
-  append: (message: Message) => void
+  append: (message: ChatMessage) => void
   reload: () => void
   stop: () => void
-  setMessages: (messages: Message[]) => void
+  setMessages: (messages: ChatMessage[]) => void
   onToolResultClick: (result: ToolResult) => void
   mode: "chat" | "results"
   onMaximize?: () => void
