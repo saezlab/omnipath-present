@@ -1,4 +1,4 @@
-import { google } from "@/ai";
+import { cerebras } from "@/ai";
 import { convertToModelMessages, smoothStream, stepCountIs, streamText, validateUIMessages } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
@@ -13,12 +13,18 @@ import { INDEXES } from "@/lib/meilisearch/client";
 // Define types for Meilisearch hits
 interface EntityHit {
   id: string | number;
+  entity_id?: string | number;
   canonical_identifier?: string;
   display_name?: string;
+  names?: string[];
   gene_symbol?: string;
+  gene_symbols?: string[];
   description?: string;
+  descriptions?: string[];
+  identifiers?: Array<{ key?: string; value?: string } | Record<string, string>>;
   entity_type?: { name?: string } | string;
   interaction_ids?: unknown[];
+  num_interactions?: number;
   [key: string]: unknown;
 }
 
@@ -86,72 +92,95 @@ Examples:
         console.log(`Search returned ${hits.length} results.`);
         console.log('Sample hit for preview:', JSON.stringify(hits[0], null, 2));
 
+        const getEntityDbId = (hit: EntityHit): string | number | undefined => hit.entity_id ?? hit.id;
+
+        const getCanonicalIdentifier = (hit: EntityHit): string | undefined => {
+          if (hit.canonical_identifier) return hit.canonical_identifier;
+          const identifiers = hit.identifiers || [];
+          for (const identifier of identifiers) {
+            if (identifier && typeof identifier === "object") {
+              if ("value" in identifier && typeof identifier.value === "string") {
+                const key = (identifier as { key?: string }).key?.toLowerCase() || "";
+                if (key.startsWith("uniprot:")) return identifier.value;
+              }
+              for (const [key, value] of Object.entries(identifier)) {
+                if (key.toLowerCase().startsWith("uniprot:") && typeof value === "string") {
+                  return value;
+                }
+              }
+            }
+          }
+          return undefined;
+        };
+
+        const getEntityName = (hit: EntityHit): string => {
+          const display = hit.display_name;
+          const gene = hit.gene_symbol || hit.gene_symbols?.[0];
+          const name = hit.names?.[0];
+          const canonical = getCanonicalIdentifier(hit);
+          const dbId = getEntityDbId(hit);
+          return display || gene || name || canonical || `Entity ${dbId ?? "unknown"}`;
+        };
+
+        const getEntityType = (hit: EntityHit): string => {
+          if (typeof hit.entity_type === "object") {
+            return hit.entity_type?.name || "entity";
+          }
+          if (typeof hit.entity_type === "string") {
+            return hit.entity_type.split(":")[0] || "entity";
+          }
+          return "entity";
+        };
+
         // AI intelligently selects the best match
-        // Since Meilisearch returns results ordered by relevance, we can use scoring heuristics
         let bestMatchId: string | number | undefined = undefined;
 
         if (hits.length > 0) {
           const queryLower = query.toLowerCase();
+          const queryTokens = queryLower
+            .split(/\s+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 1 && !["protein", "gene", "interactions", "interaction", "involving", "find", "all"].includes(token));
+
           let bestScore = -1;
           let bestHit: EntityHit | CVTermHit | null = null;
 
-          // Score each hit to find the best match
-          for (let i = 0; i < Math.min(hits.length, 5); i++) { // Check top 5 results
+          for (let i = 0; i < Math.min(hits.length, 50); i++) {
             const hit = hits[i];
-            let score = 5 - i; // Base score from position (5 for first, 4 for second, etc.)
+            let score = Math.max(1, 50 - i);
 
             if (searchType === "entities") {
               const entityHit = hit as EntityHit;
-              const displayName = (entityHit.display_name || "").toLowerCase();
-              const geneSymbol = (entityHit.gene_symbol || "").toLowerCase();
-              const description = (entityHit.description || "").toLowerCase();
+              const candidates = [
+                entityHit.display_name,
+                entityHit.gene_symbol,
+                entityHit.gene_symbols?.[0],
+                entityHit.names?.[0],
+                getCanonicalIdentifier(entityHit),
+              ]
+                .filter((v): v is string => typeof v === "string" && v.length > 0)
+                .map((v) => v.toLowerCase());
 
-              // Exact matches get highest score
-              if (displayName === queryLower || geneSymbol === queryLower) {
-                score += 100;
-              }
-              // Starts with query gets high score
-              else if (displayName.startsWith(queryLower) || geneSymbol.startsWith(queryLower)) {
-                score += 50;
-              }
-              // Contains query gets moderate score
-              else if (displayName.includes(queryLower) || geneSymbol.includes(queryLower)) {
-                score += 25;
-              }
+              const description = (entityHit.description || entityHit.descriptions?.[0] || "").toLowerCase();
 
-              // Bonus for popular/well-annotated entities
-              if (entityHit.interaction_ids && entityHit.interaction_ids.length > 100) {
-                score += 10;
-              }
-              if (description && description.length > 100) {
-                score += 5;
-              }
+              if (candidates.some((v) => v === queryLower)) score += 100;
+              else if (queryTokens.some((token) => candidates.includes(token))) score += 90;
+              else if (candidates.some((v) => v.startsWith(queryLower))) score += 50;
+              else if (candidates.some((v) => v.includes(queryLower))) score += 25;
+
+              if ((entityHit.interaction_ids?.length || entityHit.num_interactions || 0) > 100) score += 10;
+              if (description.length > 100) score += 5;
             } else {
-              // CV terms
               const cvHit = hit as CVTermHit;
               const name = (cvHit.name || "").toLowerCase();
               const definition = (cvHit.definition || "").toLowerCase();
 
-              // Exact match
-              if (name === queryLower) {
-                score += 100;
-              }
-              // Starts with query
-              else if (name.startsWith(queryLower)) {
-                score += 50;
-              }
-              // Contains query
-              else if (name.includes(queryLower)) {
-                score += 25;
-              }
+              if (name === queryLower) score += 100;
+              else if (name.startsWith(queryLower)) score += 50;
+              else if (name.includes(queryLower)) score += 25;
 
-              // Bonus for well-annotated terms
-              if (cvHit.associated_entity_ids && cvHit.associated_entity_ids.length > 10) {
-                score += 10;
-              }
-              if (definition && definition.length > 50) {
-                score += 5;
-              }
+              if (cvHit.associated_entity_ids && cvHit.associated_entity_ids.length > 10) score += 10;
+              if (definition.length > 50) score += 5;
             }
 
             if (score > bestScore) {
@@ -160,45 +189,47 @@ Examples:
             }
           }
 
-          // Always select the best scored hit as the AI's choice
           if (bestHit) {
             bestMatchId = searchType === "entities"
-              ? ((bestHit as EntityHit).canonical_identifier || bestHit.id)
+              ? getEntityDbId(bestHit as EntityHit)
               : bestHit.id;
           }
         }
 
-        // Return minimal data with component parameters
-        // Include top 3 results as preview for AI context
-        const preview = hits.slice(0, 3).map((hit: EntityHit | CVTermHit) => ({
-          id: hit.id,
-          name: searchType === "entities" ? ((hit as EntityHit).display_name || (hit as EntityHit).gene_symbol || (hit as EntityHit).canonical_identifier || `Entity ${hit.id}`) : ((hit as CVTermHit).name || `Term ${hit.id}`),
-          type: searchType === "entities" ? (typeof (hit as EntityHit).entity_type === 'object' ? ((hit as EntityHit).entity_type as { name?: string })?.name : (hit as EntityHit).entity_type as string) || 'protein' : (typeof (hit as CVTermHit).namespace === 'object' ? ((hit as CVTermHit).namespace as { name?: string })?.name : (hit as CVTermHit).namespace as string) || 'term',
-          ...(searchType === "entities" && {
-            canonical_identifier: (hit as EntityHit).canonical_identifier,
-            interaction_count: (hit as EntityHit).interaction_ids?.length || 0
-          }),
-          ...(searchType === "cv_terms" && {
-            associated_entities: (hit as CVTermHit).associated_entity_ids?.length || 0
-          })
-        }));
+        const preview = hits.slice(0, 3).map((hit: EntityHit | CVTermHit, index) => {
+          if (searchType === "entities") {
+            const entity = hit as EntityHit;
+            return {
+              id: getEntityDbId(entity) ?? `entity-${index}`,
+              name: getEntityName(entity),
+              type: getEntityType(entity),
+              canonical_identifier: getCanonicalIdentifier(entity),
+              interaction_count: entity.interaction_ids?.length || entity.num_interactions || 0,
+            };
+          }
+
+          const cv = hit as CVTermHit;
+          return {
+            id: cv.id,
+            name: cv.name || `Term ${cv.id}`,
+            type: (typeof cv.namespace === 'object' ? cv.namespace?.name : cv.namespace) || 'term',
+            associated_entities: cv.associated_entity_ids?.length || 0,
+          };
+        });
 
         return {
-          // Component parameters for dialog
           componentParams: {
             searchType,
             query,
             limit,
-            bestMatchId
+            bestMatchId,
           },
-          // Minimal preview data for AI context
           preview,
           stats: {
             totalCount: data.estimatedTotalHits || hits.length,
-            hasMore: hits.length < (typeof data.estimatedTotalHits === 'number' ? data.estimatedTotalHits : hits.length)
+            hasMore: hits.length < (typeof data.estimatedTotalHits === 'number' ? data.estimatedTotalHits : hits.length),
           },
-          // For backward compatibility
-          results: [],
+          results: preview,
           totalCount: data.estimatedTotalHits || hits.length,
           searchType,
           query,
@@ -218,11 +249,11 @@ To find interactions for a specific protein/gene:
 1. First use searchEntities to find the entity and get its ID
 2. Then use this tool with the entity ID`,
     inputSchema: z.object({
-      entityIds: z.array(z.string()).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs."),
+      entityIds: z.array(z.union([z.string(), z.number()])).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs."),
       limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
     }),
     execute: async ({ entityIds, limit }: {
-      entityIds?: string[];
+      entityIds?: Array<string | number>;
       limit: number;
     }) => {
       console.log(`Searching interactions with entity IDs: ${entityIds?.join(', ') || 'none'}`);
@@ -232,8 +263,10 @@ To find interactions for a specific protein/gene:
 
         // Add entity IDs filter if provided
         if (entityIds && entityIds.length > 0) {
-          // Convert string IDs to numbers as required by MeilisearchFilters
-          apiFilters.entity_ids = entityIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+          // Convert IDs to numbers as required by MeilisearchFilters
+          apiFilters.entity_ids = entityIds
+            .map((id) => (typeof id === "number" ? id : parseInt(id, 10)))
+            .filter((id) => !isNaN(id));
         }
 
         const requestParams = {
@@ -252,17 +285,20 @@ To find interactions for a specific protein/gene:
         // Extract and format facet statistics for AI analysis
         const facetStats = (data.facetDistribution || {}) as Record<string, Record<string, number>>;
 
-        // Format facet data for better AI understanding
+        // Support both old and new facet keys depending on index version
         const formattedFacets = {
-          interactionTypes: facetStats['interaction_types_facet'] || {},
-          dataSources: facetStats['data_sources_facet'] || {},
+          interactionTypes: facetStats['interaction_types_facet'] || facetStats['interaction_type'] || {},
+          dataSources: facetStats['data_sources_facet'] || facetStats['sources'] || {},
           detectionMethods: facetStats['detection_methods_facet'] || {},
           causalStatements: facetStats['causal_statements_facet'] || {},
           causalMechanisms: facetStats['causal_mechanisms_facet'] || {},
           interactorTypes: facetStats['interactor_types_facet'] || {},
           signs: facetStats['signs'] || {},
-          consensusSign: facetStats['consensus_sign'] || {},
-          isDirected: facetStats['is_directed'] || {},
+          consensusSign: facetStats['consensus_sign'] || {
+            positive: facetStats['has_positive_sign']?.['true'] || 0,
+            negative: facetStats['has_negative_sign']?.['true'] || 0,
+          },
+          isDirected: facetStats['is_directed'] || facetStats['has_direction'] || {},
           consensusDirection: facetStats['consensus_direction'] || {},
           evidenceCountDistribution: facetStats['evidence_count'] || {}
         };
@@ -290,24 +326,24 @@ To find interactions for a specific protein/gene:
             .map(([name, count]) => ({ name, count }))
         };
 
+        const exampleInteractions = hits.slice(0, 2).map((hit: InteractionHit) => ({
+          participants: `${hit.entity_a_name || hit.entity_a_canonical_id} - ${hit.entity_b_name || hit.entity_b_canonical_id}`,
+          type: hit.interaction_types?.[0]?.name || 'interaction',
+          evidences: hit.evidence_count || 0
+        }));
+
         return {
-          // Component parameters for dialog
           componentParams: {
             entityIds,
             limit
           },
-          // Focus on facet statistics for AI analysis
           facetStatistics: formattedFacets,
           summary: summaryStats,
-          // Minimal interaction preview (just 1-2 examples)
-          exampleInteractions: hits.slice(0, 2).map((hit: InteractionHit) => ({
-            participants: `${hit.entity_a_name || hit.entity_a_canonical_id} - ${hit.entity_b_name || hit.entity_b_canonical_id}`,
-            type: hit.interaction_types?.[0]?.name || 'interaction',
-            evidences: hit.evidence_count || 0
-          })),
-          // For backward compatibility
+          exampleInteractions,
+          // Keep a generic results field for tool UI compatibility
+          results: exampleInteractions,
           totalCount: data.estimatedTotalHits || hits.length,
-          entityIds,
+          entityIds: entityIds?.map((id) => String(id)),
         };
       } catch (error: unknown) {
         console.error("Error searching interactions:", error);
@@ -412,7 +448,7 @@ After receiving tool responses:
     const modelMessages = await convertToModelMessages(normalizedMessages);
 
     const stream = streamText({
-      model: google("gemini-2.5-flash"),
+      model: cerebras("gpt-oss-120b"),
       messages: modelMessages,
       tools,
       toolChoice: "auto",

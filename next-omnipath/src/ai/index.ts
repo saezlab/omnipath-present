@@ -1,6 +1,6 @@
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createCerebras } from '@ai-sdk/cerebras';
 
-export const google = createGoogleGenerativeAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+export const cerebras = createCerebras({
+  apiKey: process.env.CEREBRAS_API_KEY,
 });
 

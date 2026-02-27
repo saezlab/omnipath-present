@@ -50,7 +50,7 @@ export default function ChatPage() {
 
   return (
     <SiteLayout>
-      <div className="flex-1 flex flex-col h-[100vh] mt-2">
+      <div className="flex-1 flex flex-col h-[100vh]">
         <DualModeInterface
           messages={chatMessages}
           input={input}

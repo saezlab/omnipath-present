@@ -94,7 +94,7 @@ services:
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
             ENTITY_SERVICE_URL: http://entity-service:8080
             ONTOLOGY_SERVICE_URL: http://ontology-service:8081
-            GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
+            CEREBRAS_API_KEY: ${CEREBRAS_API_KEY}
         networks:
             - dokploy-network
         depends_on:
