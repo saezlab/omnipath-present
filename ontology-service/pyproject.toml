@@ -20,7 +20,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-ontograph = { path = "../../ontograph", editable = true }
+ontograph = { git = "https://github.com/saezlab/ontograph.git", branch = "main" }
 
 [build-system]
 requires = ["hatchling"]

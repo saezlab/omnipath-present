@@ -2,25 +2,19 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install uv for fast dependency management
+# Install git (required for git-based dependencies) and uv
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 # Copy dependency files
 COPY omnipath-present/ontology-service/pyproject.toml .
 COPY omnipath-present/ontology-service/README.md .
 
-# Adjust ontograph path for container build context
-RUN sed -i 's#../../ontograph#/ontograph#' pyproject.toml
-
-# Copy ontograph package (needed as path dependency)
-# In this workspace layout, ontograph lives under omnipath_build/ontograph
-COPY omnipath_build/ontograph /ontograph
-
 # Copy application code
 COPY omnipath-present/ontology-service/ontology_service/ ontology_service/
 
-# Install dependencies
-RUN uv pip install --system -e . -e /ontograph
+# Install dependencies (ontograph is pulled from git via tool.uv.sources)
+RUN uv pip install --system -e .
 
 # Create data and cache directories
 RUN mkdir -p /app/data /app/cache
