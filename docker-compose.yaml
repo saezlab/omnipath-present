@@ -99,6 +99,8 @@ services:
             ENTITY_SERVICE_URL: http://entity-service:8080
             ONTOLOGY_SERVICE_URL: http://ontology-service:8081
             CEREBRAS_API_KEY: ${CEREBRAS_API_KEY}
+        ports:
+            - "8082:8082"
         networks:
             - dokploy-network
         depends_on:
