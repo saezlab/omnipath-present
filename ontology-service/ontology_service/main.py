@@ -20,6 +20,8 @@ from .models import (
     OntologyInfo,
     OntologiesResponse,
     InteractionExportRequest,
+    EntityExportRequest,
+    AssociationExportRequest,
 )
 from .registry import registry
 
@@ -278,7 +280,7 @@ async def get_tree(request: TermsRequest):
 
 def _run_export(
     *,
-    request: InteractionExportRequest,
+    request: InteractionExportRequest | EntityExportRequest | AssociationExportRequest,
     background_tasks: BackgroundTasks,
     fetch_ids,
     write_subset,
@@ -288,7 +290,7 @@ def _run_export(
     try:
         matched_ids = fetch_ids(
             query=request.query or "",
-            filters=request.filters or {},
+            filters=request.filters.model_dump(exclude_none=True),
         )
 
         temp_file = tempfile.NamedTemporaryFile(prefix=f"{default_filename}_", suffix=".parquet", delete=False)
@@ -332,7 +334,7 @@ def export_interactions_parquet(request: InteractionExportRequest, background_ta
 
 
 @app.post("/exports/entities/parquet")
-def export_entities_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
+def export_entities_parquet(request: EntityExportRequest, background_tasks: BackgroundTasks):
     from .exports import fetch_matching_entity_ids, write_entity_subset_parquet
 
     return _run_export(
@@ -346,7 +348,7 @@ def export_entities_parquet(request: InteractionExportRequest, background_tasks:
 
 
 @app.post("/exports/associations/parquet")
-def export_associations_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
+def export_associations_parquet(request: AssociationExportRequest, background_tasks: BackgroundTasks):
     from .exports import fetch_matching_association_ids, write_association_subset_parquet
 
     return _run_export(

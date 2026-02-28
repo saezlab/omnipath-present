@@ -1,12 +1,15 @@
 """Pydantic models for API request/response schemas."""
 
 from __future__ import annotations
-from typing import Any
+
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class TermInfo(BaseModel):
     """Basic term information."""
+
     id: str
     name: str | None = None
     definition: str | None = None
@@ -15,22 +18,26 @@ class TermInfo(BaseModel):
 
 class TermWithRelations(TermInfo):
     """Term with parent/child relationships."""
+
     parents: list[str] = []
     children: list[str] = []
 
 
 class TermsRequest(BaseModel):
     """Request for batch term lookup."""
+
     term_ids: list[str]
 
 
 class TermsResponse(BaseModel):
     """Response for batch term lookup."""
+
     terms: dict[str, TermInfo | None]
 
 
 class TrajectoryNode(BaseModel):
     """Node in a trajectory path."""
+
     id: str
     name: str | None = None
     distance: int = 0
@@ -38,25 +45,29 @@ class TrajectoryNode(BaseModel):
 
 class TreeNode(BaseModel):
     """Node in a hierarchy tree with children (recursive)."""
+
     id: str
     name: str | None = None
     distance: int = 0
-    children: list[TreeNode] = []
+    children: list["TreeNode"] = []
 
 
 class TrajectoryResponse(BaseModel):
     """Response for single term trajectory (all paths from root)."""
+
     term_id: str
     trajectories: list[list[TrajectoryNode]]
 
 
 class TreeResponse(BaseModel):
     """Response with merged tree structure for multiple terms."""
+
     root: TreeNode | None = None
 
 
 class OntologyInfo(BaseModel):
     """Information about an available ontology."""
+
     id: str
     description: str
     loaded: bool
@@ -64,16 +75,110 @@ class OntologyInfo(BaseModel):
 
 class OntologiesResponse(BaseModel):
     """Response listing available ontologies."""
+
     ontologies: list[OntologyInfo]
+
+
+class InteractionDirectionFilter(str):
+    ANY = "any"
+    DIRECTED = "directed"
+    UNDIRECTED = "undirected"
+
+
+class InteractionSignFilter(str):
+    ANY = "any"
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    MIXED = "mixed"
+
+
+class InteractionExportFilters(BaseModel):
+    """Typed filters for interaction exports."""
+
+    entity_ids: list[int] = Field(default_factory=list)
+    member_a_id: int | None = None
+    member_b_id: int | None = None
+    interaction_types: list[str] = Field(default_factory=list)
+
+    # New, clearer API fields
+    direction: Literal["any", "directed", "undirected"] | None = None
+    sign: Literal["any", "positive", "negative", "mixed"] | None = None
+
+    # Backward-compatible fields currently used in UI
+    has_direction: bool | None = None
+    has_positive_sign: bool | None = None
+    has_negative_sign: bool | None = None
+
+    # Ontology term filters
+    interaction_annotation_terms: list[str] = Field(default_factory=list)
+    ontology_terms: list[str] = Field(default_factory=list)
+
+    sources: list[str] = Field(default_factory=list)
+
+
+class EntityExportFilters(BaseModel):
+    """Typed filters for entity exports."""
+
+    entity_ids: list[int] = Field(default_factory=list)
+    entity_types: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+
+    # New API alias for species filtering
+    taxonomy_ids: list[str] = Field(default_factory=list)
+    # Backward-compatible key used by current clients
+    ncbi_tax_id: list[str] = Field(default_factory=list)
+
+    # Prefix-scoped ontology filters
+    cv_terms_go: list[str] = Field(default_factory=list)
+    cv_terms_mi: list[str] = Field(default_factory=list)
+    cv_terms_om: list[str] = Field(default_factory=list)
+    cv_terms_hp: list[str] = Field(default_factory=list)
+    cv_terms_kw: list[str] = Field(default_factory=list)
+
+    # Optional generic ontology term list; routed by prefix (GO/MI/OM/HP/KW)
+    ontology_terms: list[str] = Field(default_factory=list)
+
+
+class AssociationExportFilters(BaseModel):
+    """Typed filters for association exports."""
+
+    parent_entity_ids: list[int] = Field(default_factory=list)
+    member_entity_ids: list[int] = Field(default_factory=list)
+
+    parent_entity_types: list[str] = Field(default_factory=list)
+    member_entity_types: list[str] = Field(default_factory=list)
+
+    sources: list[str] = Field(default_factory=list)
+
+    association_annotation_terms: list[str] = Field(default_factory=list)
+    ontology_terms: list[str] = Field(default_factory=list)
 
 
 class InteractionExportRequest(BaseModel):
     """Request payload for interaction subset export."""
+
     query: str = ""
-    filters: dict[str, Any] = Field(default_factory=dict)
+    filters: InteractionExportFilters = Field(default_factory=InteractionExportFilters)
+    filename: str | None = None
+
+
+class EntityExportRequest(BaseModel):
+    """Request payload for entity subset export."""
+
+    query: str = ""
+    filters: EntityExportFilters = Field(default_factory=EntityExportFilters)
+    filename: str | None = None
+
+
+class AssociationExportRequest(BaseModel):
+    """Request payload for association subset export."""
+
+    query: str = ""
+    filters: AssociationExportFilters = Field(default_factory=AssociationExportFilters)
     filename: str | None = None
 
 
 class ErrorResponse(BaseModel):
     """Error response."""
+
     detail: str

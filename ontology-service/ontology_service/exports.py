@@ -25,7 +25,160 @@ def _escape(value: str) -> str:
     return value.replace('"', '\\"')
 
 
+def _merge_list_values(*lists: list[Any]) -> list[Any]:
+    merged: list[Any] = []
+    seen: set[Any] = set()
+    for values in lists:
+        for value in values or []:
+            if value not in seen:
+                seen.add(value)
+                merged.append(value)
+    return merged
+
+
+def _expand_ontology_term_variants(term: str) -> list[str]:
+    """Expand a canonical ontology ID into likely indexed string variants.
+
+    Search indexes often store term strings as:
+    - "<name>:<TERM_ID>"
+    - "<name>:<TERM_ID>:<TERM_ID>"
+
+    We keep the original input and add these two variants when possible.
+    """
+    variants = [term]
+    if ":" not in term:
+        return variants
+
+    # Already looks like an indexed term with embedded label.
+    if term.count(":") >= 2:
+        return variants
+
+    try:
+        from .config import get_ontology_for_term
+        from .registry import registry
+
+        ontology_id = get_ontology_for_term(term)
+        if not ontology_id:
+            return variants
+
+        client = registry.get(ontology_id)
+        if client is None:
+            return variants
+
+        ont_term = client.get_term(term)
+        term_name = getattr(ont_term, "name", None)
+        if not term_name:
+            return variants
+
+        name = str(term_name)
+        variants.extend([
+            f"{name}:{term}",
+            f"{name}:{term}:{term}",
+        ])
+        return _merge_list_values(variants)
+    except Exception:
+        return variants
+
+
+def _normalize_interaction_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(filters)
+
+    # Accept generic ontology term key as alias
+    expanded_ontology_terms: list[str] = []
+    for term in normalized.get("ontology_terms") or []:
+        expanded_ontology_terms.extend(_expand_ontology_term_variants(str(term)))
+
+    normalized["interaction_annotation_terms"] = _merge_list_values(
+        list(normalized.get("interaction_annotation_terms") or []),
+        expanded_ontology_terms,
+    )
+
+    # direction enum -> boolean helper field
+    if normalized.get("has_direction") is None:
+        direction = normalized.get("direction")
+        if direction == "directed":
+            normalized["has_direction"] = True
+        elif direction == "undirected":
+            normalized["has_direction"] = False
+
+    # sign enum -> helper booleans
+    if normalized.get("has_positive_sign") is None and normalized.get("has_negative_sign") is None:
+        sign = normalized.get("sign")
+        if sign == "positive":
+            normalized["has_positive_sign"] = True
+            normalized["has_negative_sign"] = False
+        elif sign == "negative":
+            normalized["has_positive_sign"] = False
+            normalized["has_negative_sign"] = True
+        elif sign == "mixed":
+            normalized["has_positive_sign"] = True
+            normalized["has_negative_sign"] = True
+
+    return normalized
+
+
+def _normalize_entity_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(filters)
+
+    # taxonomy_ids is the new API name; ncbi_tax_id remains supported
+    normalized["ncbi_tax_id"] = _merge_list_values(
+        list(normalized.get("ncbi_tax_id") or []),
+        list(normalized.get("taxonomy_ids") or []),
+    )
+
+    # Route generic ontology terms by prefix to cv_terms_* arrays.
+    # If bare IDs are provided (e.g. GO:0005634), also include likely indexed variants.
+    for term in normalized.get("ontology_terms") or []:
+        term_str = str(term)
+        if ":" not in term_str:
+            continue
+
+        expanded = _expand_ontology_term_variants(term_str)
+
+        # Determine namespace from canonical ID when possible.
+        # For already-expanded strings, fall back to containment checks.
+        prefix = term_str.split(":", 1)[0].upper()
+        if prefix not in {"GO", "MI", "OM", "HP", "KW"}:
+            if ":GO:" in term_str:
+                prefix = "GO"
+            elif ":MI:" in term_str:
+                prefix = "MI"
+            elif ":OM:" in term_str:
+                prefix = "OM"
+            elif ":HP:" in term_str:
+                prefix = "HP"
+            elif ":KW:" in term_str:
+                prefix = "KW"
+
+        if prefix == "GO":
+            normalized["cv_terms_go"] = _merge_list_values(normalized.get("cv_terms_go") or [], expanded)
+        elif prefix == "MI":
+            normalized["cv_terms_mi"] = _merge_list_values(normalized.get("cv_terms_mi") or [], expanded)
+        elif prefix == "OM":
+            normalized["cv_terms_om"] = _merge_list_values(normalized.get("cv_terms_om") or [], expanded)
+        elif prefix == "HP":
+            normalized["cv_terms_hp"] = _merge_list_values(normalized.get("cv_terms_hp") or [], expanded)
+        elif prefix == "KW":
+            normalized["cv_terms_kw"] = _merge_list_values(normalized.get("cv_terms_kw") or [], expanded)
+
+    return normalized
+
+
+def _normalize_association_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(filters)
+    expanded_ontology_terms: list[str] = []
+    for term in normalized.get("ontology_terms") or []:
+        expanded_ontology_terms.extend(_expand_ontology_term_variants(str(term)))
+
+    normalized["association_annotation_terms"] = _merge_list_values(
+        list(normalized.get("association_annotation_terms") or []),
+        expanded_ontology_terms,
+    )
+    return normalized
+
+
 def build_interaction_filter_string(filters: dict[str, Any]) -> str:
+    filters = _normalize_interaction_filters(filters)
     parts: list[str] = []
 
     entity_ids = filters.get("entity_ids") or []
@@ -79,6 +232,7 @@ def build_interaction_filter_string(filters: dict[str, Any]) -> str:
 
 
 def build_entity_filter_string(filters: dict[str, Any]) -> str:
+    filters = _normalize_entity_filters(filters)
     parts: list[str] = []
 
     entity_ids = filters.get("entity_ids") or []
@@ -122,6 +276,7 @@ def build_entity_filter_string(filters: dict[str, Any]) -> str:
 
 
 def build_association_filter_string(filters: dict[str, Any]) -> str:
+    filters = _normalize_association_filters(filters)
     parts: list[str] = []
 
     parent_entity_ids = filters.get("parent_entity_ids") or []
