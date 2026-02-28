@@ -6,6 +6,7 @@
 // Core configuration from environment
 const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || process.env.NODE_ENV || 'development';
 const DOMAIN = process.env.NEXT_PUBLIC_DOMAIN || 'localhost';
+const PORT = process.env.NEXT_PUBLIC_PORT || '8082';
 const IS_PRODUCTION = ENVIRONMENT === 'production';
 const IS_DOCKERIZED = process.env.DOCKERIZED === 'true';
 
@@ -17,7 +18,7 @@ const API_CONFIG = {
   // Frontend URL
   siteUrl: IS_PRODUCTION
     ? `${PROTOCOL}://${DOMAIN}`
-    : `${PROTOCOL}://${DOMAIN}:3000`,
+    : `${PROTOCOL}://${DOMAIN}:${PORT}`,
 
   // Meilisearch URL - use env var or fall back to Docker/local default
   meilisearchUrl: process.env.MEILISEARCH_HOST

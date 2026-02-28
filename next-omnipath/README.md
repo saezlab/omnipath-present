@@ -57,7 +57,7 @@ pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser.
+Open [http://localhost:8082](http://localhost:8082) with your browser.
 
 ## Database Requirements
 
