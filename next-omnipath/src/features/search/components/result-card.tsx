@@ -622,14 +622,16 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
     const visibleFunctionRecords = (result.function_records || []).filter(
       (fn) => fn.function?.toLowerCase() !== "resource"
     );
+    const cvLabel = (value?: string) => {
+      if (!value) return undefined;
+      const match = value.match(/^(.+):([A-Z]{2,}:\d+)$/);
+      return match ? match[1] : value;
+    };
 
     return (
       <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card">
         <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
           <CardTitle className="text-lg line-clamp-2">{result.source_name || result.name || result.source_ref}</CardTitle>
-          {result.source_ref && (
-            <p className="text-xs text-muted-foreground mt-1 truncate">{result.source_ref}</p>
-          )}
         </CardHeader>
 
         {result.resource_description && (
@@ -660,7 +662,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
             )}
           </div>
           <Badge variant="secondary" className="text-xs">
-            {result.license_cv || "Source"}
+            {cvLabel(result.license_cv) || "Source"}
           </Badge>
         </CardFooter>
       </Card>

@@ -29,6 +29,12 @@ interface FilterSectionProps {
   onToggle: (value: string) => void;
 }
 
+function displayCvLabel(value: string): string {
+  // Convert "label:PREFIX:1234" -> "label"
+  const match = value.match(/^(.+):([A-Z]{2,}:\d+)$/);
+  return match ? match[1] : value;
+}
+
 function FilterSection({ title, filterKey, selectedValues, options, onToggle }: FilterSectionProps) {
   if (options.length === 0) return null;
 
@@ -50,7 +56,7 @@ function FilterSection({ title, filterKey, selectedValues, options, onToggle }: 
                   onCheckedChange={() => onToggle(value)}
                   className="h-3.5 w-3.5 flex-shrink-0"
                 />
-                <span className="truncate">{value}</span>
+                <span className="truncate">{displayCvLabel(value)}</span>
               </Label>
               <Badge variant={isSelected ? "default" : "outline"} className="text-xs h-5 px-1.5 py-0">
                 {formatNumber(count)}
