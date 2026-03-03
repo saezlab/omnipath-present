@@ -1,11 +1,12 @@
 # Development docker-compose: Runs backend services only
 # Use this with `npm run dev` in next-omnipath for local frontend development
 #
-# Services use the unified ./data/ directory:
-#   - data/entity_identifier.parquet  (entity-service)
-#   - data/omnipath_mi.obo            (ontology-service)
-#   - data/search_*.parquet           (ontology-service export endpoints)
-#   - data/.data_version              (optional version marker)
+# Services read from DATA_DIR (defaults to omnipath_build latest output):
+#   DATA_DIR=../omnipath_build/data/latest/output
+#   - entity_identifier.parquet  (entity-service)
+#   - omnipath_mi.obo            (ontology-service)
+#   - search_*.parquet           (ontology-service export endpoints)
+#   - .data_version              (optional version marker)
 
 services:
     # Meilisearch - Full-text search engine
@@ -45,7 +46,7 @@ services:
         ports:
             - "8080:8080"
         volumes:
-            - ./data:/data:ro
+            - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
         healthcheck:
             test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
             interval: 30s
@@ -67,7 +68,7 @@ services:
         ports:
             - "8081:8081"
         volumes:
-            - ./data:/data:ro
+            - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
             - ./ontology-service/cache:/app/cache
             # Mount source for hot reload during development
             - ./ontology-service/ontology_service:/app/ontology_service

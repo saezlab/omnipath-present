@@ -21,6 +21,20 @@ interface EntityDetailsDialogProps {
     entity: SearchResult | null;
 }
 
+const getDescriptionEntries = (definition: string | undefined, descriptions: string[] = []): string[] => {
+    const unique = Array.from(
+        new Set([definition, ...descriptions].filter((value): value is string => Boolean(value?.trim())))
+    );
+
+    return unique.sort((a, b) => {
+        const aIsFunction = a.trim().toLowerCase().startsWith("function:");
+        const bIsFunction = b.trim().toLowerCase().startsWith("function:");
+        if (aIsFunction && !bIsFunction) return -1;
+        if (!aIsFunction && bIsFunction) return 1;
+        return 0;
+    });
+};
+
 // Helper to detect if entity is a small molecule
 const isSmallMolecule = (result: SearchResult): boolean => {
     const entityType = result._formatted?.entity_type || result.entity_type || '';
@@ -41,6 +55,7 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
     const geneSymbols = entity._formatted?.gene_symbols || entity.gene_symbols || [];
     const descriptions = entity._formatted?.descriptions || entity.descriptions || [];
     const definition = entity._formatted?.definition || entity.definition;
+    const descriptionEntries = getDescriptionEntries(definition, descriptions);
     // Get display name
     const displayName = geneSymbols[0] || names[0] || `Entity ${entity.entity_id || entity.id}`;
 
@@ -85,9 +100,9 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
                 </div>
 
                 {/* Description */}
-                {(definition || descriptions[0]) && (
+                {descriptionEntries.length > 0 && (
                     <p className="text-sm text-muted-foreground line-clamp-2">
-                        {definition || descriptions[0]}
+                        {descriptionEntries[0]}
                     </p>
                 )}
 

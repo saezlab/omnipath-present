@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import React, { useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ArrowRight, ListOrdered, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
@@ -152,6 +153,104 @@ export function CvTermHoverCard({
 const convertEmToHighlight = (text: string | undefined) => {
   if (!text) return '';
   return text.replace(/<em>/g, '<span class="bg-yellow-200 dark:bg-blue-500 px-1 rounded">').replace(/<\/em>/g, '</span>');
+};
+
+const stripHtml = (text: string): string => text.replace(/<[^>]*>/g, '');
+
+type DescriptionSection = {
+  label: string;
+  items: string[];
+};
+
+const DESCRIPTION_SECTION_LABELS = [
+  "FUNCTION",
+  "DISEASE",
+  "SUBCELLULAR LOCATION",
+  "PATHWAY",
+  "CATALYTIC ACTIVITY",
+  "COFACTOR",
+  "ACTIVITY REGULATION",
+  "TISSUE SPECIFICITY",
+  "SIMILARITY",
+  "DEVELOPMENTAL STAGE",
+  "INDUCTION",
+  "DOMAIN",
+  "NOTE",
+] as const;
+
+const SECTION_MATCH_PATTERN = `(${DESCRIPTION_SECTION_LABELS.map(label => label.replace(/\s+/g, "\\s+")).join("|")}):`;
+
+const cleanDescriptionText = (text: string): string => {
+  return stripHtml(text)
+    .replace(/\{[^{}]*(?:ECO:|PubMed:|UniProtKB:)[^{}]*\}/g, "")
+    .replace(/\[[^\]]*(?:MIM:|PubMed:|UniProtKB:)[^\]]*\]/g, "")
+    .replace(/\((?:[^)]*(?:PubMed:|ECO:|UniProtKB:|MIM:)[^)]*)\)/g, "")
+    .replace(/\b(?:PubMed|ECO|UniProtKB|MIM):[^\s;,.)]*/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([;,.])/g, "$1")
+    .trim();
+};
+
+const getDescriptionEntries = (definition: string | undefined, descriptions: string[] = []): string[] => {
+  const unique = Array.from(
+    new Set([definition, ...descriptions].filter((value): value is string => Boolean(value?.trim())))
+  );
+
+  return unique.sort((a, b) => {
+    const aIsFunction = stripHtml(a).trim().toLowerCase().startsWith("function:");
+    const bIsFunction = stripHtml(b).trim().toLowerCase().startsWith("function:");
+    if (aIsFunction && !bIsFunction) return -1;
+    if (!aIsFunction && bIsFunction) return 1;
+    return 0;
+  });
+};
+
+const getDescriptionSections = (definition: string | undefined, descriptions: string[] = []): DescriptionSection[] => {
+  const entries = getDescriptionEntries(definition, descriptions);
+  const grouped = new Map<string, string[]>();
+
+  for (const entry of entries) {
+    const normalized = stripHtml(entry);
+    const matches = Array.from(normalized.matchAll(new RegExp(SECTION_MATCH_PATTERN, "gi")));
+
+    if (matches.length === 0) {
+      const cleaned = cleanDescriptionText(normalized);
+      if (cleaned) {
+        const existing = grouped.get("DESCRIPTION") || [];
+        existing.push(cleaned);
+        grouped.set("DESCRIPTION", existing);
+      }
+      continue;
+    }
+
+    for (let i = 0; i < matches.length; i++) {
+      const current = matches[i];
+      const next = matches[i + 1];
+      const label = (current[1] || "DESCRIPTION").toUpperCase();
+      const start = current.index! + current[0].length;
+      const end = next ? next.index! : normalized.length;
+      const rawContent = normalized.slice(start, end).replace(/^\s*[;,-]\s*/, "").trim();
+      const cleaned = cleanDescriptionText(rawContent);
+
+      if (!cleaned) continue;
+
+      const existing = grouped.get(label) || [];
+      if (!existing.includes(cleaned)) {
+        existing.push(cleaned);
+      }
+      grouped.set(label, existing);
+    }
+  }
+
+  const sectionOrder = ["FUNCTION", "DISEASE", "SUBCELLULAR LOCATION", ...DESCRIPTION_SECTION_LABELS.filter(label => !["FUNCTION", "DISEASE", "SUBCELLULAR LOCATION"].includes(label)), "DESCRIPTION"];
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => {
+      const aIdx = sectionOrder.indexOf(a);
+      const bIdx = sectionOrder.indexOf(b);
+      return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+    })
+    .map(([label, items]) => ({ label, items }));
 };
 
 // Helper to detect if entity is a small molecule or lipid (displayed similarly)
@@ -617,6 +716,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const type = result.type || "entity";
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [descriptionsOpen, setDescriptionsOpen] = useState(false);
 
   if (type === "source") {
     const visibleFunctionRecords = (result.function_records || []).filter(
@@ -717,6 +817,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;
+  const descriptionSections = getDescriptionSections(definition, descriptions);
 
   // Extract entity type label (e.g., "Protein" from "Protein:385235")
   const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
@@ -834,6 +935,33 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
         entity={result}
       />
 
+      {/* Full-screen descriptions dialog */}
+      <Dialog open={descriptionsOpen} onOpenChange={setDescriptionsOpen}>
+        <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 flex flex-col">
+          <DialogHeader className="px-6 py-4 border-b">
+            <DialogTitle className="text-left">Descriptions</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="flex-1 px-6 py-4">
+            <div className="space-y-6">
+              {descriptionSections.map((section) => (
+                <section key={`${result.id}-description-section-${section.label}`} className="space-y-2">
+                  <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    {section.label}
+                  </h3>
+                  <div className="space-y-2">
+                    {section.items.map((item, idx) => (
+                      <p key={`${result.id}-description-section-item-${section.label}-${idx}`} className="text-sm leading-relaxed text-foreground">
+                        <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
+                      </p>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
       <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
         <CardTitle className="text-lg line-clamp-3">
           <span dangerouslySetInnerHTML={{ __html: title }} />
@@ -841,17 +969,31 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
       </CardHeader>
 
       {/* Show content section if there's a description, definition, reaction, or pathway */}
-      {((descriptions.length > 0) || definition ||
+      {(descriptionSections.length > 0 ||
         entityTypeLabel.toLowerCase() === 'reaction' ||
         entityTypeLabel.toLowerCase() === 'pathway') && (
           <div className="flex flex-col min-h-0 flex-grow">
-            <CardContent className="px-4 overflow-hidden flex-grow min-h-0">
+            <CardContent className="px-4 overflow-hidden flex flex-col flex-grow min-h-0">
               {/* Description */}
-              {((descriptions.length > 0) || definition) && (
-                <ScrollArea className="h-24 w-full mb-2">
-                  <p className="text-sm text-muted-foreground">
-                    <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(definition || descriptions[0] || '') }} />
-                  </p>
+              {descriptionSections.length > 0 && (
+                <ScrollArea
+                  className="flex-1 min-h-0 max-h-56 w-full mb-2 cursor-zoom-in"
+                  onClick={() => setDescriptionsOpen(true)}
+                >
+                  <div className="space-y-3 text-sm text-muted-foreground pr-1">
+                    {descriptionSections.map((section) => (
+                      <div key={`${result.id}-description-preview-${section.label}`} className="space-y-1">
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+                          {section.label}
+                        </h4>
+                        {section.items.map((item, index) => (
+                          <p key={`${result.id}-description-preview-item-${section.label}-${index}`}>
+                            <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </ScrollArea>
               )}
 
@@ -871,7 +1013,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
       {/* Identifiers section */}
       {type === 'entity' && <IdentifiersDisplay identifiers={identifiers} />}
 
-      <CardFooter className={`flex items-center justify-between shrink-0 p-2.5 ${((descriptions.length > 0) || definition || identifiers.length > 0) ? 'border-t' : ''}`}>
+      <CardFooter className={`flex items-center justify-between shrink-0 p-2.5 ${(descriptionSections.length > 0 || identifiers.length > 0) ? 'border-t' : ''}`}>
         {/* Stats */}
         <div className="flex items-center gap-3 text-sm flex-wrap">
           {type === 'entity' && interactionCount > 0 && (
@@ -939,6 +1081,7 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;
+  const descriptionSections = getDescriptionSections(definition, descriptions);
 
   const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
 
@@ -954,8 +1097,6 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
     subtitle = namespaceName || entityTypeLabel;
   }
 
-  const descriptionText = definition || descriptions[0] || '';
-
   return (
     <div className="space-y-2 p-3">
       {/* Header */}
@@ -969,11 +1110,20 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
       </div>
 
       {/* Definition/Description */}
-      {descriptionText && (
+      {descriptionSections.length > 0 && (
         <div className="h-24 overflow-y-auto">
-          <p className="text-xs text-muted-foreground pr-2">
-            {descriptionText}
-          </p>
+          <div className="space-y-2 pr-2">
+            {descriptionSections.map((section) => (
+              <div key={`${result.id}-hover-description-section-${section.label}`} className="space-y-1">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground/70">{section.label}</p>
+                {section.items.slice(0, 1).map((item, index) => (
+                  <p key={`${result.id}-hover-description-${section.label}-${index}`} className="text-xs text-muted-foreground">
+                    {item}
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -26,6 +26,7 @@ import {
   ListChecks,
   GitBranch,
   Database,
+  BookOpen,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -55,6 +56,11 @@ const navigationItems = [
     title: "Chat",
     url: "/chat",
     icon: MessageSquare,
+  },
+  {
+    title: "API Docs",
+    url: "/api-docs",
+    icon: BookOpen,
   }
 ]
 
