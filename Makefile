@@ -1,8 +1,8 @@
 # Makefile for omnipath-present development
 #
-# Prerequisites: Run `make export` from the parent directory to populate data/
+# Prerequisites: Run `make export` from the omnipath_build repo to populate data/
 
-.PHONY: dev stop restart validate-data reimport-meilisearch reset
+.PHONY: dev stop restart validate-data
 
 # Validate that all required data files exist
 validate-data:
@@ -20,21 +20,17 @@ validate-data:
 	else \
 		echo "  ✓ data/omnipath_mi.obo"; \
 	fi; \
-	if [ ! -f data/dumps/.dump_file ]; then \
-		echo "  ✗ Missing: data/dumps/.dump_file"; \
-		missing=1; \
-	else \
-		DUMP_NAME=$$(cat data/dumps/.dump_file); \
-		if [ ! -f "data/dumps/$$DUMP_NAME" ]; then \
-			echo "  ✗ Missing: data/dumps/$$DUMP_NAME (referenced in .dump_file)"; \
+	for f in search_entities.parquet search_interactions.parquet search_associations.parquet search_sources.parquet; do \
+		if [ ! -f "data/$$f" ]; then \
+			echo "  ✗ Missing: data/$$f"; \
 			missing=1; \
 		else \
-			echo "  ✓ data/dumps/$$DUMP_NAME"; \
+			echo "  ✓ data/$$f"; \
 		fi; \
-	fi; \
+	done; \
 	if [ $$missing -eq 1 ]; then \
 		echo ""; \
-		echo "Run 'make export' from the parent directory to generate data files."; \
+		echo "Run export from omnipath_build to generate data files."; \
 		exit 1; \
 	fi
 	@echo ""
@@ -68,12 +64,3 @@ restart: validate-data
 	@echo "  - Meilisearch:      http://localhost:7700"
 	@echo "  - Entity Service:   http://localhost:8080"
 	@echo "  - Ontology Service: http://localhost:8081"
-
-# Force reimport of meilisearch data (useful when dump file changes)
-reimport-meilisearch:
-	@echo "Removing meilisearch volume to force reimport..."
-	docker volume rm omnipath_build_meilisearch_data 2>/dev/null || true
-	@echo "Next 'make dev' will import fresh data."
-
-# Start dev with fresh meilisearch data (resets indexes)
-reset: reimport-meilisearch

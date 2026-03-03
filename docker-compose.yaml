@@ -10,7 +10,7 @@
 
 services:
     # Meilisearch - Full-text search engine
-    # Automatically imports dump when data version changes
+    # NOTE: Data is populated by omnipath_build (direct import), not by omnipath-present.
     omnipath-meilisearch:
         image: getmeili/meilisearch:v1.36
         restart: unless-stopped
@@ -24,10 +24,6 @@ services:
             MEILI_NO_ANALYTICS: "true"
         volumes:
             - meilisearch_data:/meili_data
-            - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
-            - ./scripts/meilisearch-start.sh:/scripts/meilisearch-start.sh:ro
-        # Auto-import dump when data version changes (script reads from /data/)
-        command: ["sh", "/scripts/meilisearch-start.sh"]
         ports:
             - "${MEILISEARCH_PORT:-7700}:7700"
         networks:

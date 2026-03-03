@@ -1,17 +1,15 @@
 # Development docker-compose: Runs backend services only
 # Use this with `npm run dev` in next-omnipath for local frontend development
 #
-# All services use the unified ./data/ directory:
+# Services use the unified ./data/ directory:
 #   - data/entity_identifier.parquet  (entity-service)
 #   - data/omnipath_mi.obo            (ontology-service)
-#   - data/dumps/latest.dump          (meilisearch)
-#   - data/.data_version              (version marker)
-#
-# Run `make export` from the root to populate this directory.
+#   - data/search_*.parquet           (ontology-service export endpoints)
+#   - data/.data_version              (optional version marker)
 
 services:
     # Meilisearch - Full-text search engine
-    # Auto-imports dump when data version changes
+    # NOTE: Data is populated by omnipath_build (direct import), not by omnipath-present.
     omnipath-meilisearch:
         image: getmeili/meilisearch:v1.36
         restart: unless-stopped
@@ -23,14 +21,10 @@ services:
             MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-devkey123}
             MEILI_ENV: ${MEILI_ENV:-development}
             MEILI_NO_ANALYTICS: "true"
-        # Smart startup: auto-import dump when data version changes
         volumes:
             - meilisearch_data:/meili_data
-            - ./data:/data:ro
-            - ./scripts/meilisearch-start.sh:/scripts/meilisearch-start.sh:ro
         ports:
             - "7700:7700"
-        command: ["/scripts/meilisearch-start.sh"]
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
             interval: 30s
