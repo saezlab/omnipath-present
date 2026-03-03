@@ -99,7 +99,7 @@ export async function fetchEntitiesByIds(entityIds: number[]): Promise<Map<numbe
       const names = doc.names as string[] | undefined;
       const geneSymbols = doc.gene_symbols as string[] | undefined;
       const entityType = doc.entity_type as string | undefined;
-      const identifiers = doc.identifiers as Array<Record<string, string>> | undefined;
+      const identifiers = doc.identifiers as Array<{ key?: string; value?: string }> | undefined;
       // entity_type format is "TypeLabel:id", extract just the label
       const entityTypeName = entityType?.split(':')[0];
 
@@ -107,13 +107,9 @@ export async function fetchEntitiesByIds(entityIds: number[]): Promise<Map<numbe
       const getIdentifierByType = (types: string[]): string | undefined => {
         if (!identifiers) return undefined;
         for (const id of identifiers) {
-          const entries = Object.entries(id);
-          if (entries.length > 0) {
-            const [key, value] = entries[0];
-            const idType = key.split(':')[0].toLowerCase();
-            if (types.some(t => idType.includes(t))) {
-              return value;
-            }
+          const idType = id.key?.split(':')[0].toLowerCase();
+          if (idType && id.value && types.some(t => idType.includes(t))) {
+            return id.value;
           }
         }
         return undefined;

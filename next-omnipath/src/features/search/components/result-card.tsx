@@ -171,7 +171,7 @@ const isSmallMolecule = (result: SearchResult): boolean => {
 // Identifier object structure from search_entities
 // New format: {key: "type:accession", value: "identifier_value"}
 // e.g., {key: "uniprot:OM:0001", value: "P0A6M2"}
-export type Identifier = { key: string; value: string } | Record<string, string>;
+export type Identifier = { key: string; value: string };
 
 export interface SearchResult {
   id: string;
@@ -270,15 +270,14 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
 
   if (!identifiers || identifiers.length === 0) return null;
 
-  const parsedIdentifiers = identifiers.map(id => {
-    // Fallback for old format: {"type": "value"}
-    const entries = Object.entries(id);
-    if (entries.length === 0) return null;
-    const [key, value] = entries[0];
-    const colonIndex = key.indexOf(':');
-    const idType = colonIndex > 0 ? key.substring(0, colonIndex) : key;
-    return { type: idType, value: value as string };
-  }).filter(Boolean) as { type: string; value: string }[];
+  const parsedIdentifiers = identifiers
+    .map(id => {
+      if (!id?.key || !id?.value) return null;
+      const colonIndex = id.key.indexOf(':');
+      const idType = colonIndex > 0 ? id.key.substring(0, colonIndex) : id.key;
+      return { type: idType, value: id.value };
+    })
+    .filter(Boolean) as { type: string; value: string }[];
 
   if (parsedIdentifiers.length === 0) return null;
 
@@ -442,13 +441,9 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
 
     // Try to find names from identifiers
     for (const id of identifiers) {
-      const entries = Object.entries(id);
-      if (entries.length > 0) {
-        const [key, value] = entries[0];
-        const idType = key.split(':')[0].toLowerCase();
-        if (['name', 'common_name', 'preferred_name'].includes(idType) && typeof value === 'string') {
-          validNames.push(value);
-        }
+      const idType = id.key?.split(':')[0].toLowerCase();
+      if (idType && ['name', 'common_name', 'preferred_name'].includes(idType) && typeof id.value === 'string') {
+        validNames.push(id.value);
       }
     }
 
@@ -471,13 +466,9 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
   const smiles = useMemo(() => {
     const identifiers = result._formatted?.identifiers || result.identifiers || [];
     for (const id of identifiers) {
-      const entries = Object.entries(id);
-      if (entries.length > 0) {
-        const [key, value] = entries[0];
-        const idType = key.split(':')[0].toLowerCase().trim();
-        if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
-          return value as string;
-        }
+      const idType = id.key?.split(':')[0].toLowerCase().trim();
+      if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
+        return id.value;
       }
     }
     return result.canonical_smiles || null;
@@ -692,15 +683,10 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
     if (isProtein) {
       // Try to find UniProt identifier
       const uniprotId = identifiers.find(id => {
-        const entries = Object.entries(id);
-        if (entries.length > 0) {
-          const [key] = entries[0];
-          const idType = key.split(':')[0].toLowerCase();
-          return idType === 'uniprot' || idType === 'uniprot_id' || idType === 'uniprotkb';
-        }
-        return false;
+        const idType = id.key?.split(':')[0].toLowerCase();
+        return idType === 'uniprot' || idType === 'uniprot_id' || idType === 'uniprotkb';
       });
-      const uniprotValue = uniprotId ? Object.values(uniprotId)[0] as string : undefined;
+      const uniprotValue = uniprotId?.value;
 
       // For proteins: gene symbol first, fallback to UniProt
       displayName = geneSymbol || uniprotValue || name || firstIdentifier || `Entity ${result.id}`;

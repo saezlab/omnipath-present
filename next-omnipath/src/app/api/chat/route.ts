@@ -21,7 +21,7 @@ interface EntityHit {
   gene_symbols?: string[];
   description?: string;
   descriptions?: string[];
-  identifiers?: Array<{ key?: string; value?: string } | Record<string, string>>;
+  identifiers?: Array<{ key?: string; value?: string }>;
   entity_type?: { name?: string } | string;
   interaction_ids?: unknown[];
   num_interactions?: number;
@@ -98,16 +98,9 @@ Examples:
           if (hit.canonical_identifier) return hit.canonical_identifier;
           const identifiers = hit.identifiers || [];
           for (const identifier of identifiers) {
-            if (identifier && typeof identifier === "object") {
-              if ("value" in identifier && typeof identifier.value === "string") {
-                const key = (identifier as { key?: string }).key?.toLowerCase() || "";
-                if (key.startsWith("uniprot:")) return identifier.value;
-              }
-              for (const [key, value] of Object.entries(identifier)) {
-                if (key.toLowerCase().startsWith("uniprot:") && typeof value === "string") {
-                  return value;
-                }
-              }
+            const key = identifier?.key?.toLowerCase() || "";
+            if (key.startsWith("uniprot:") && typeof identifier.value === "string") {
+              return identifier.value;
             }
           }
           return undefined;

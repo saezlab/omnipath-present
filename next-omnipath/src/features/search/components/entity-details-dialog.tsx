@@ -49,13 +49,9 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
         if (!isSmallMolecule(entity)) return null;
         const identifiers = entity._formatted?.identifiers || entity.identifiers || [];
         for (const id of identifiers) {
-            const entries = Object.entries(id);
-            if (entries.length > 0) {
-                const [key, value] = entries[0];
-                const idType = key.split(':')[0].toLowerCase().trim();
-                if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
-                    return value as string;
-                }
+            const idType = id.key?.split(':')[0].toLowerCase().trim();
+            if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
+                return id.value;
             }
         }
         return entity.canonical_smiles || null;
