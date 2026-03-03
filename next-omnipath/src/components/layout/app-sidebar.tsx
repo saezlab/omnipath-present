@@ -25,6 +25,7 @@ import {
   Moon,
   ListChecks,
   GitBranch,
+  Database,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -44,6 +45,11 @@ const navigationItems = [
     title: "Interactions",
     url: "/explore/interactions",
     icon: GitBranch,
+  },
+  {
+    title: "Sources",
+    url: "/sources",
+    icon: Database,
   },
   {
     title: "Chat",

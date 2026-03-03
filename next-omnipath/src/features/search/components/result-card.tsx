@@ -227,6 +227,21 @@ export interface SearchResult {
   stoichiometry?: string[]; // "ID:Stoich"
   // Pathway fields
   pathway_steps?: string[]; // "Order:ID"
+  // Source-browser fields
+  source_name?: string;
+  source_ref?: string;
+  source?: string;
+  source_accession?: string;
+  resource_url?: string;
+  resource_description?: string;
+  function_records?: Array<{ function: string; records: number }>;
+  function_names?: string[];
+  content_category_cv_terms?: string[];
+  total_records?: number;
+  license_cv?: string;
+  update_category_cv?: string;
+  pubmed?: string[];
+  finished_at?: string;
   [key: string]: unknown; // Add index signature for compatibility with DataRow
 }
 
@@ -602,6 +617,55 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const type = result.type || "entity";
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  if (type === "source") {
+    const visibleFunctionRecords = (result.function_records || []).filter(
+      (fn) => fn.function?.toLowerCase() !== "resource"
+    );
+
+    return (
+      <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card">
+        <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
+          <CardTitle className="text-lg line-clamp-2">{result.source_name || result.name || result.source_ref}</CardTitle>
+          {result.source_ref && (
+            <p className="text-xs text-muted-foreground mt-1 truncate">{result.source_ref}</p>
+          )}
+        </CardHeader>
+
+        {result.resource_description && (
+          <CardContent className="px-4 py-3 flex-grow min-h-0">
+            <p className="text-sm text-muted-foreground line-clamp-4">{result.resource_description}</p>
+          </CardContent>
+        )}
+
+        {visibleFunctionRecords.length > 0 && (
+          <div className="border-t px-3 py-2 bg-muted/30">
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {visibleFunctionRecords.map((fn) => (
+                <Badge key={`${result.id}-${fn.function}`} variant="outline" className="text-xs">
+                  {fn.function} ({fn.records})
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <CardFooter className="flex items-center justify-between shrink-0 p-2.5 border-t">
+          <div className="flex items-center gap-3 text-sm flex-wrap">
+            {result.total_records !== undefined && (
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Database className="h-4 w-4" />
+                <span>{result.total_records}</span>
+              </div>
+            )}
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            {result.license_cv || "Source"}
+          </Badge>
+        </CardFooter>
+      </Card>
+    );
+  }
 
   // Check if this is a small molecule and render specialized card
   if (isSmallMolecule(result)) {

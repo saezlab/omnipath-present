@@ -2,7 +2,7 @@
 
 import { meilisearchClient, INDEXES, type IndexName } from './client';
 import type { MeilisearchFilters } from '@/types/meilisearch';
-import { buildEntityFilterString, buildInteractionFilterString } from './filters';
+import { buildEntityFilterString, buildInteractionFilterString, buildSourceFilterString } from './filters';
 
 // Re-export INDEXES for other modules
 //export { INDEXES } from './client';
@@ -47,7 +47,6 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
 
     // Add filters and facets for entity search
     if (index === INDEXES.ENTITIES) {
-      // Always request facets for entity search
       searchOptions.facets = [
         'entity_type',
         'sources',
@@ -59,9 +58,25 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
         'cv_terms_kw',
       ];
 
-      // Add filters if present
       if (Object.keys(filters).length > 0) {
         const filterString = buildEntityFilterString(filters);
+        if (filterString) {
+          searchOptions.filter = filterString;
+        }
+      }
+    }
+
+    // Add filters and facets for source browser search
+    if (index === INDEXES.SOURCES) {
+      searchOptions.facets = [
+        'source',
+        'license_cv',
+        'update_category_cv',
+        'content_category_cv_terms',
+      ];
+
+      if (Object.keys(filters).length > 0) {
+        const filterString = buildSourceFilterString(filters);
         if (filterString) {
           searchOptions.filter = filterString;
         }
@@ -118,6 +133,11 @@ export async function searchInteractionsMeilisearch(
         'has_positive_sign',
         'has_negative_sign',
         'interaction_annotation_terms',
+        'participant_annotation_terms_go',
+        'participant_annotation_terms_mi',
+        'participant_annotation_terms_om',
+        'participant_annotation_terms_hp',
+        'participant_annotation_terms_kw',
         'sources',
       ],
     };

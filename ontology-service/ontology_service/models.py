@@ -111,6 +111,11 @@ class InteractionExportFilters(BaseModel):
 
     # Ontology term filters
     interaction_annotation_terms: list[str] = Field(default_factory=list)
+    participant_annotation_terms_go: list[str] = Field(default_factory=list)
+    participant_annotation_terms_mi: list[str] = Field(default_factory=list)
+    participant_annotation_terms_om: list[str] = Field(default_factory=list)
+    participant_annotation_terms_hp: list[str] = Field(default_factory=list)
+    participant_annotation_terms_kw: list[str] = Field(default_factory=list)
     ontology_terms: list[str] = Field(default_factory=list)
 
     sources: list[str] = Field(default_factory=list)

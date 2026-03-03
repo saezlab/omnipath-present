@@ -49,6 +49,11 @@ export interface MeilisearchInteraction {
   has_positive_sign: boolean;
   has_negative_sign: boolean;
   interaction_annotation_terms: string[];
+  participant_annotation_terms_go?: string[];
+  participant_annotation_terms_mi?: string[];
+  participant_annotation_terms_om?: string[];
+  participant_annotation_terms_hp?: string[];
+  participant_annotation_terms_kw?: string[];
   sources?: string[];
 
   // Index signature to satisfy DataRow constraint
@@ -120,10 +125,18 @@ export interface MeilisearchFilters {
   has_positive_sign?: boolean | null;
   has_negative_sign?: boolean | null;
   interaction_annotation_terms?: string[];
+  participant_annotation_terms_go?: string[];
+  participant_annotation_terms_mi?: string[];
+  participant_annotation_terms_om?: string[];
+  participant_annotation_terms_hp?: string[];
+  participant_annotation_terms_kw?: string[];
 
-  // Entity search filters
+  // Entity + source-browser filters
   entity_types?: string[];
   sources?: string[];
+  license_cv?: string[];
+  update_category_cv?: string[];
+  content_category_cv_terms?: string[];
   ncbi_tax_id?: string[];
   cv_terms_go?: string[];
   cv_terms_mi?: string[];
@@ -144,6 +157,32 @@ export interface MeilisearchSearchParams {
   filters: MeilisearchFilters;
   limit: number;
   offset: number;
+}
+
+export interface MeilisearchSourceFunctionRecord {
+  function: string;
+  records: number;
+}
+
+export interface MeilisearchSource {
+  __doc_id?: string;
+  content_hash?: string;
+  source_ref: string;
+  source: string;
+  source_name: string;
+  source_accession: string;
+  license_cv: string;
+  update_category_cv: string;
+  resource_url?: string;
+  resource_description?: string;
+  pubmed: string[];
+  finished_at: string;
+  function_names: string[];
+  content_category_cv_terms?: string[];
+  function_records: MeilisearchSourceFunctionRecord[];
+  total_records: number;
+  function_records_json?: string;
+  [key: string]: unknown;
 }
 
 export interface MeilisearchSearchResponse {

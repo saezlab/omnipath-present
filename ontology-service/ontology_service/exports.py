@@ -220,6 +220,21 @@ def build_interaction_filter_string(filters: dict[str, Any]) -> str:
         )
         parts.append(f"({term_filters})")
 
+    for key in (
+        "participant_annotation_terms_go",
+        "participant_annotation_terms_mi",
+        "participant_annotation_terms_om",
+        "participant_annotation_terms_hp",
+        "participant_annotation_terms_kw",
+    ):
+        participant_terms = filters.get(key) or []
+        if participant_terms:
+            term_filters = " OR ".join(
+                f'{key} = "{_escape(str(term))}"'
+                for term in participant_terms
+            )
+            parts.append(f"({term_filters})")
+
     sources = filters.get("sources") or []
     if sources:
         source_filters = " OR ".join(

@@ -89,9 +89,54 @@ export function buildInteractionFilterString(filters: MeilisearchFilters): strin
     filterParts.push(`(${termFilters})`);
   }
 
+  const participantFilterKeys: Array<keyof MeilisearchFilters> = [
+    "participant_annotation_terms_go",
+    "participant_annotation_terms_mi",
+    "participant_annotation_terms_om",
+    "participant_annotation_terms_hp",
+    "participant_annotation_terms_kw",
+  ];
+
+  participantFilterKeys.forEach((key) => {
+    const values = filters[key] as string[] | undefined;
+    if (!values?.length) return;
+    const termFilters = values.map((term) => `${key} = "${term}"`).join(" OR ");
+    filterParts.push(`(${termFilters})`);
+  });
+
   if (filters.sources?.length) {
     const sourceFilters = filters.sources.map((source) => `sources = "${source}"`).join(" OR ");
     filterParts.push(`(${sourceFilters})`);
+  }
+
+  return filterParts.join(" AND ");
+}
+
+export function buildSourceFilterString(filters: MeilisearchFilters): string {
+  const filterParts: string[] = [];
+
+  if (filters.sources?.length) {
+    const sourceFilters = filters.sources.map((source) => `source = "${source}"`).join(" OR ");
+    filterParts.push(`(${sourceFilters})`);
+  }
+
+  if (filters.license_cv?.length) {
+    const licenseFilters = filters.license_cv.map((license) => `license_cv = "${license}"`).join(" OR ");
+    filterParts.push(`(${licenseFilters})`);
+  }
+
+  if (filters.update_category_cv?.length) {
+    const updateCategoryFilters = filters.update_category_cv
+      .map((category) => `update_category_cv = "${category}"`)
+      .join(" OR ");
+    filterParts.push(`(${updateCategoryFilters})`);
+  }
+
+  if (filters.content_category_cv_terms?.length) {
+    const contentCategoryFilters = filters.content_category_cv_terms
+      .map((term) => `content_category_cv_terms = "${term}"`)
+      .join(" OR ");
+    filterParts.push(`(${contentCategoryFilters})`);
   }
 
   return filterParts.join(" AND ");

@@ -19,6 +19,8 @@ interface FilterOption {
   count: number;
   label?: string;
   icon?: string;
+  prefix?: string;
+  filterKey?: keyof MeilisearchFilters;
 }
 
 
@@ -57,6 +59,16 @@ const ENTITY_ONTOLOGY_FACET_MAP: Record<string, string> = {
   KW: "cv_terms_kw",
 };
 
+const PARTICIPANT_ONTOLOGY_FACET_MAP: Record<string, keyof MeilisearchFilters> = {
+  GO: "participant_annotation_terms_go",
+  MI: "participant_annotation_terms_mi",
+  OM: "participant_annotation_terms_om",
+  HP: "participant_annotation_terms_hp",
+  KW: "participant_annotation_terms_kw",
+};
+
+type InteractionAnnotationScope = "interaction" | "participant";
+
 function extractPrefix(termId: string): string {
   const resolved = extractTermId(termId) || termId;
   const match = resolved.match(/^([A-Z]{2,}):/);
@@ -73,6 +85,30 @@ function getEntityFilterKeyForValue(value: string): keyof MeilisearchFilters | n
     KW: "cv_terms_kw",
   };
   return keyByPrefix[prefix] ?? null;
+}
+
+function extractTermLabel(value: string): string {
+  const termId = extractTermId(value);
+  if (!termId) {
+    return value.includes(":") ? value.split(":")[0] : value;
+  }
+
+  if (value === termId) {
+    return value;
+  }
+
+  const repeatedSuffix = `:${termId}:${termId}`;
+  const singleSuffix = `:${termId}`;
+
+  if (value.endsWith(repeatedSuffix)) {
+    return value.slice(0, -repeatedSuffix.length);
+  }
+
+  if (value.endsWith(singleSuffix)) {
+    return value.slice(0, -singleSuffix.length);
+  }
+
+  return value.split(":")[0];
 }
 
 // Helper component for array filter sections
@@ -273,11 +309,7 @@ export function FilterSidebar({
         const termId = extractTermId(value);
         const label = filterKey === 'interaction_type'
           ? value.split('|').map((part) => part.split(':')[0]).join(' ↔ ')
-          : termId && termId === value
-            ? value
-            : value.includes(':')
-              ? value.split(':')[0]
-              : value;
+          : extractTermLabel(value);
         // Get emoji icon for interaction_type and sources filters
         const icon = filterKey === 'interaction_type'
           ? '🔗'
@@ -453,10 +485,35 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   const interactionFilterCounts = mode === "interactions" ? props.filterCounts : undefined;
   const [annotationQuery, setAnnotationQuery] = useState("");
   const [activeTab, setActiveTab] = useState<string>("");
+  const [interactionScope, setInteractionScope] = useState<InteractionAnnotationScope>("interaction");
   const [facetSearchCountsByPrefix, setFacetSearchCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [facetSearchCounts, setFacetSearchCounts] = useState<Record<string, number>>({});
 
-  const annotationOptions = useMemo(() => {
+  useEffect(() => {
+    if (mode !== "interactions") return;
+
+    const hasInteractionTerms = !!interactionFilterCounts?.interaction_annotation_terms &&
+      Object.keys(interactionFilterCounts.interaction_annotation_terms).length > 0;
+    const hasParticipantTerms = Object.values(PARTICIPANT_ONTOLOGY_FACET_MAP).some((key) => {
+      const counts = interactionFilterCounts?.[key as string];
+      return !!counts && Object.keys(counts).length > 0;
+    });
+
+    if (!hasInteractionTerms && hasParticipantTerms && interactionScope !== "participant") {
+      setInteractionScope("participant");
+    }
+    if (!hasParticipantTerms && hasInteractionTerms && interactionScope !== "interaction") {
+      setInteractionScope("interaction");
+    }
+  }, [interactionFilterCounts, interactionScope, mode]);
+
+  useEffect(() => {
+    if (mode !== "interactions") return;
+    setFacetSearchCounts({});
+    setFacetSearchCountsByPrefix({});
+  }, [interactionScope, mode]);
+
+  const annotationOptions = useMemo<FilterOption[]>(() => {
     if (mode === "entities") {
       const countsByPrefix = annotationQuery.trim()
         ? facetSearchCountsByPrefix
@@ -466,8 +523,30 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
           Object.entries(counts).map(([value, count]) => ({
             value,
             count,
-            label: value.includes(":") ? value.split(":").slice(0, -2).join(":") : value,
+            label: extractTermLabel(value),
             icon: prefix,
+          }))
+        )
+        .sort((a, b) => b.count - a.count);
+    }
+
+    if (interactionScope === "participant") {
+      const countsByPrefix = annotationQuery.trim()
+        ? facetSearchCountsByPrefix
+        : Object.entries(PARTICIPANT_ONTOLOGY_FACET_MAP).reduce<Record<string, Record<string, number>>>((acc, [prefix, filterKey]) => {
+            acc[prefix] = interactionFilterCounts?.[filterKey as string] || {};
+            return acc;
+          }, {});
+
+      return Object.entries(countsByPrefix)
+        .flatMap(([prefix, counts]) =>
+          Object.entries(counts).map(([value, count]) => ({
+            value,
+            count,
+            label: extractTermLabel(value),
+            icon: prefix,
+            prefix,
+            filterKey: PARTICIPANT_ONTOLOGY_FACET_MAP[prefix],
           }))
         )
         .sort((a, b) => b.count - a.count);
@@ -479,16 +558,12 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     if (!counts) return [];
     return Object.entries(counts)
       .map(([value, count]) => {
-        const termId = extractTermId(value);
-        const label = termId && termId === value
-          ? value
-          : value.includes(':')
-            ? value.split(':')[0]
-            : value;
+        const label = extractTermLabel(value);
         return {
           value,
           count,
-          label
+          label,
+          filterKey: "interaction_annotation_terms" as keyof MeilisearchFilters,
         };
       })
       .sort((a, b) => b.count - a.count);
@@ -497,6 +572,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     facetSearchCounts,
     facetSearchCountsByPrefix,
     interactionFilterCounts,
+    interactionScope,
     mode,
     ontologyFacetCountsByPrefix
   ]);
@@ -508,11 +584,10 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     for (const option of annotationOptions) {
       const termId = extractTermId(option.value);
       if (termId) {
-        mapped.set(termId, option);
-      } else {
-        if (mode === "interactions") {
-          unmatched.push(option);
-        }
+        const key = option.prefix ? `${option.prefix}|${termId}` : termId;
+        mapped.set(key, option);
+      } else if (mode === "interactions") {
+        unmatched.push(option);
       }
     }
 
@@ -539,10 +614,11 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     }
 
     const groups = new Map<string, { termIds: string[]; totalCount: number }>();
-    for (const [termId, option] of annotationTermOptions.mapped.entries()) {
-      const prefix = extractPrefix(termId);
+    for (const [mappedKey, option] of annotationTermOptions.mapped.entries()) {
+      const termId = extractTermId(option.value) || mappedKey;
+      const prefix = option.prefix || extractPrefix(termId);
       const group = groups.get(prefix) ?? { termIds: [], totalCount: 0 };
-      group.termIds.push(termId);
+      group.termIds.push(mappedKey);
       group.totalCount += option.count;
       groups.set(prefix, group);
     }
@@ -617,6 +693,57 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
           return;
         }
 
+        if (interactionScope === "participant") {
+          const availablePrefixes = Object.entries(PARTICIPANT_ONTOLOGY_FACET_MAP)
+            .filter(([, key]) => {
+              const counts = interactionFilterCounts?.[key as string];
+              return !!counts && Object.keys(counts).length > 0;
+            })
+            .map(([prefix]) => prefix);
+          const fallbackPrefix = availablePrefixes[0] || Object.keys(PARTICIPANT_ONTOLOGY_FACET_MAP)[0];
+          const selectedPrefix =
+            (activeTab && PARTICIPANT_ONTOLOGY_FACET_MAP[activeTab] ? activeTab : fallbackPrefix) || "";
+          const facetName = PARTICIPANT_ONTOLOGY_FACET_MAP[selectedPrefix];
+
+          if (!facetName) {
+            if (!cancelled) {
+              setFacetSearchCountsByPrefix({});
+            }
+            return;
+          }
+
+          const response = await fetch("/api/meilisearch/facet-search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              facetName,
+              facetQuery: trimmedQuery,
+              filters,
+              index: "interactions",
+              limit: 100,
+            }),
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            if (!cancelled) {
+              setFacetSearchCountsByPrefix({ [selectedPrefix]: {} });
+            }
+            return;
+          }
+
+          const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
+          const counts: Record<string, number> = {};
+          (data.facetHits || []).forEach((hit) => {
+            counts[hit.value] = hit.count;
+          });
+
+          if (!cancelled) {
+            setFacetSearchCountsByPrefix({ [selectedPrefix]: counts });
+          }
+          return;
+        }
+
         const response = await fetch("/api/meilisearch/facet-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -663,6 +790,8 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     activeTab,
     annotationQuery,
     filters,
+    interactionFilterCounts,
+    interactionScope,
     mode,
     ontologyFacetCountsByPrefix,
   ]);
@@ -787,41 +916,36 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     }
   }, [activeTab, filteredTabs, normalizedQuery]);
 
-  const handleAnnotationToggle = (value: string) => {
-    if (mode === "entities") {
-      const prefix = extractPrefix(value);
-      const filterKeyByPrefix: Record<string, keyof MeilisearchFilters> = {
-        GO: "cv_terms_go",
-        MI: "cv_terms_mi",
-        OM: "cv_terms_om",
-        HP: "cv_terms_hp",
-        KW: "cv_terms_kw",
-      };
-      const filterKey = filterKeyByPrefix[prefix];
-      if (!filterKey) return;
+  const handleAnnotationToggle = (value: string, explicitFilterKey?: keyof MeilisearchFilters) => {
+    let filterKey = explicitFilterKey;
 
-      const currentValues = (filters[filterKey] as string[] | undefined) || [];
-      const newValues = currentValues.includes(value)
-        ? currentValues.filter((v) => v !== value)
-        : [...currentValues, value];
-
-      onFilterChange({
-        ...filters,
-        [filterKey]: newValues.length > 0 ? newValues : undefined,
-      });
-      return;
+    if (!filterKey) {
+      if (mode === "entities") {
+        filterKey = getEntityFilterKeyForValue(value) || undefined;
+      } else {
+        filterKey = "interaction_annotation_terms";
+      }
     }
 
-    const currentValues = filters.interaction_annotation_terms || [];
+    if (!filterKey) return;
+
+    const currentValues = (filters[filterKey] as string[] | undefined) || [];
     const newValues = currentValues.includes(value)
       ? currentValues.filter((v) => v !== value)
       : [...currentValues, value];
 
     onFilterChange({
       ...filters,
-      interaction_annotation_terms: newValues.length > 0 ? newValues : undefined,
+      [filterKey]: newValues.length > 0 ? newValues : undefined,
     });
   };
+
+  const hasInteractionScopeTerms = !!interactionFilterCounts?.interaction_annotation_terms &&
+    Object.keys(interactionFilterCounts.interaction_annotation_terms).length > 0;
+  const hasParticipantScopeTerms = Object.values(PARTICIPANT_ONTOLOGY_FACET_MAP).some((key) => {
+    const counts = interactionFilterCounts?.[key as string];
+    return !!counts && Object.keys(counts).length > 0;
+  });
 
   const renderTabContent = (tab: FilteredOntologyTab) => {
     const unmatched: FilterOption[] = tab.filteredUnmatched ?? tab.unmatched;
@@ -841,37 +965,24 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
       <>
         {hasFlatTerms ? (
           <div className="space-y-1">
-            {flatTerms.map((option) => (
-              (() => {
-                if (mode === "entities") {
-                  const filterKey = getEntityFilterKeyForValue(option.value);
-                  if (!filterKey) return null;
-                  return (
-                    <FilterOptionRow
-                      key={option.value}
-                      filterKey={filterKey}
-                      option={option}
-                      selectedValues={(filters[filterKey] as string[] | undefined) || []}
-                      onToggle={handleAnnotationToggle}
-                      showHoverCard={true}
-                      highlighted={matchesQuery(option.label || option.value)}
-                    />
-                  );
-                }
+            {flatTerms.map((option) => {
+              const filterKey = option.filterKey || (mode === "entities"
+                ? getEntityFilterKeyForValue(option.value)
+                : "interaction_annotation_terms");
+              if (!filterKey) return null;
 
-                return (
-                  <FilterOptionRow
-                    key={option.value}
-                    filterKey="interaction_annotation_terms"
-                    option={option}
-                    selectedValues={filters.interaction_annotation_terms || []}
-                    onToggle={handleAnnotationToggle}
-                    showHoverCard={true}
-                    highlighted={matchesQuery(option.label || option.value)}
-                  />
-                );
-              })()
-            ))}
+              return (
+                <FilterOptionRow
+                  key={option.value}
+                  filterKey={filterKey}
+                  option={option}
+                  selectedValues={(filters[filterKey] as string[] | undefined) || []}
+                  onToggle={(value) => handleAnnotationToggle(value, filterKey)}
+                  showHoverCard={true}
+                  highlighted={matchesQuery(option.label || option.value)}
+                />
+              );
+            })}
           </div>
         ) : null}
 
@@ -883,7 +994,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
                 filterKey="interaction_annotation_terms"
                 option={option}
                 selectedValues={filters.interaction_annotation_terms || []}
-                onToggle={handleAnnotationToggle}
+                onToggle={(value) => handleAnnotationToggle(value, "interaction_annotation_terms")}
                 showHoverCard={true}
                 highlighted={matchesQuery(option.label || option.value)}
               />
@@ -918,6 +1029,19 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
           ) : null}
         </div>
       </div>
+
+      {mode === "interactions" ? (
+        <div className="space-y-2">
+          <Label className="text-xs font-medium text-muted-foreground">Annotation level</Label>
+          <Tabs value={interactionScope} onValueChange={(value) => setInteractionScope(value as InteractionAnnotationScope)}>
+            <TabsList className="grid w-full grid-cols-2 h-9">
+              <TabsTrigger value="interaction" disabled={!hasInteractionScopeTerms}>Interaction</TabsTrigger>
+              <TabsTrigger value="participant" disabled={!hasParticipantScopeTerms}>Participant</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      ) : null}
+
       {filteredTabs.length > 0 ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1">

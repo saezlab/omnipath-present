@@ -14,6 +14,7 @@ interface SearchBarProps {
   autoFocus?: boolean
   selectedSpecies?: string
   onSpeciesChange?: (species: string) => void
+  showSpeciesSelector?: boolean
   className?: string
 }
 
@@ -25,6 +26,7 @@ export function SearchBar({
   autoFocus = false,
   selectedSpecies = "9606",
   onSpeciesChange,
+  showSpeciesSelector = true,
   className,
 }: SearchBarProps) {
   const [query, setQuery] = useState(initialQuery)
@@ -73,7 +75,7 @@ export function SearchBar({
       <Input
         type="search"
         placeholder={placeholder}
-        className="w-full pl-12 pr-[240px] h-12 text-lg rounded-full shadow-sm transition-all focus:shadow-md focus:ring-2 focus:ring-primary/20"
+        className={`w-full pl-12 ${showSpeciesSelector ? 'pr-[240px]' : 'pr-[100px]'} h-12 text-lg rounded-full shadow-sm transition-all focus:shadow-md focus:ring-2 focus:ring-primary/20`}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value)
@@ -81,21 +83,23 @@ export function SearchBar({
         onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         autoFocus={autoFocus}
       />
-      <div className="absolute right-28 top-1/2 -translate-y-1/2 z-10">
-        <Select value={selectedSpecies} onValueChange={onSpeciesChange}>
-          <SelectTrigger className="h-8 w-auto text-xs border-0 bg-transparent dark:bg-transparent hover:bg-transparent dark:hover:bg-transparent data-[state=open]:bg-transparent shadow-none px-0 gap-1 focus:ring-0 focus:ring-offset-0 [&>span]:text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="9606">Human</SelectItem>
-            <SelectItem value="10090">Mouse</SelectItem>
-            <SelectItem value="10116">Rat</SelectItem>
-            <SelectItem value="7227">Fruit fly</SelectItem>
-            <SelectItem value="6239">C. elegans</SelectItem>
-            <SelectItem value="7955">Zebrafish</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {showSpeciesSelector && (
+        <div className="absolute right-28 top-1/2 -translate-y-1/2 z-10">
+          <Select value={selectedSpecies} onValueChange={onSpeciesChange}>
+            <SelectTrigger className="h-8 w-auto text-xs border-0 bg-transparent dark:bg-transparent hover:bg-transparent dark:hover:bg-transparent data-[state=open]:bg-transparent shadow-none px-0 gap-1 focus:ring-0 focus:ring-offset-0 [&>span]:text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="9606">Human</SelectItem>
+              <SelectItem value="10090">Mouse</SelectItem>
+              <SelectItem value="10116">Rat</SelectItem>
+              <SelectItem value="7227">Fruit fly</SelectItem>
+              <SelectItem value="6239">C. elegans</SelectItem>
+              <SelectItem value="7955">Zebrafish</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
         <Button
           onClick={handleSearch}
