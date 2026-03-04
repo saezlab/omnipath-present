@@ -46,8 +46,6 @@ async function forwardExport(payload: ExportRequestPayload) {
   if (contentDisposition) headers.set("Content-Disposition", contentDisposition);
   const rowCount = upstream.headers.get("X-Export-Row-Count");
   if (rowCount) headers.set("X-Export-Row-Count", rowCount);
-  const strategy = upstream.headers.get("X-Export-Strategy");
-  if (strategy) headers.set("X-Export-Strategy", strategy);
   const durationMs = upstream.headers.get("X-Export-Duration-Ms");
   if (durationMs) headers.set("X-Export-Duration-Ms", durationMs);
 

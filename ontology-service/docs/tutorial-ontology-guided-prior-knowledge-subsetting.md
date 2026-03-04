@@ -15,7 +15,7 @@ All commands below are exactly what was used locally.
 ## Prerequisites
 
 - Ontology service running on `http://localhost:8081`
-- Meilisearch running and populated
+- Export Parquet tables available under `ONTOLOGY_DATA_DIR` (`search_entities.parquet`, `search_interactions.parquet`, `search_associations.parquet`)
 - `python` with `polars` available locally (or use the ontology-service venv)
 
 Optional convenience:
