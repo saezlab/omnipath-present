@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MeilisearchFilters } from "@/types/meilisearch"
 import { ArrowRight, Plus, Minus, X, Filter, Search } from "lucide-react"
-import { cn, formatNumber } from "@/lib/utils"
+import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { EntityHoverCard, CvTermHoverCard } from "@/features/search/components/result-card"
 
@@ -306,16 +306,19 @@ export function FilterSidebar({
     if (!counts) return [];
     return Object.entries(counts)
       .map(([value, count]) => {
-        const termId = extractTermId(value);
         const label = filterKey === 'interaction_type'
-          ? value.split('|').map((part) => part.split(':')[0]).join(' ↔ ')
+          ? value
+            .split('|')
+            .map((part) => {
+              const typeLabel = part.split(':')[0]?.trim() || part;
+              const emoji = getEntityTypeEmoji(typeLabel);
+              return emoji ? `${emoji} ${typeLabel}` : typeLabel;
+            })
+            .join(' · ')
           : extractTermLabel(value);
-        // Get emoji icon for interaction_type and sources filters
-        const icon = filterKey === 'interaction_type'
-          ? '🔗'
-          : filterKey === 'sources'
-            ? '📚'
-            : undefined;
+
+        const icon = filterKey === 'sources' ? '📚' : undefined;
+
         return {
           value,
           count,
