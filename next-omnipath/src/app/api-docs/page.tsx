@@ -1,5 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getSiteUrl } from "@/lib/api/config"
 import { INDEXES, meilisearchClient } from "@/lib/meilisearch/client"
+import { headers } from "next/headers"
 import { ExportTryNow, JsonTryNow } from "./try-now"
 
 export const dynamic = "force-dynamic"
@@ -342,6 +344,14 @@ function Code({ children }: { children: string }) {
 export default async function ApiDocsPage() {
   const facetExamples = await getAllFacetExamples()
 
+  const requestHeaders = await headers()
+  const forwardedProto = requestHeaders.get("x-forwarded-proto")?.split(",")[0]
+  const forwardedHost = requestHeaders.get("x-forwarded-host")?.split(",")[0]
+  const host = requestHeaders.get("host")
+  const resolvedHost = forwardedHost || host
+  const protocol = forwardedProto || (resolvedHost?.includes("localhost") ? "http" : "https")
+  const baseUrl = resolvedHost ? `${protocol}://${resolvedHost}` : getSiteUrl()
+
   const entityExampleUrl = buildDownloadUrl(
     "/api/exports/entities/parquet",
     { taxonomy_ids: ["9606"], entity_types: ["protein:MI:0326"] },
@@ -408,7 +418,7 @@ export default async function ApiDocsPage() {
               <p className="text-xs text-muted-foreground">Resolve ontology term IDs to metadata (name/definition/namespace).</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST http://localhost:8082/api/ontology/terms \\
+            <Code>{`curl -X POST ${baseUrl}/api/ontology/terms \\
   -H "Content-Type: application/json" \\
   -d '{ "termIds": ["GO:0006915", "MI:0624", "OM:0001"] }'`}</Code>
             <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0006915", "MI:0624", "OM:0001"] }} />
@@ -427,7 +437,7 @@ export default async function ApiDocsPage() {
               <p className="text-xs text-muted-foreground">Build a merged hierarchy tree for selected terms to decide whether to broaden (ancestors) or narrow (descendants) filter choices.</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST http://localhost:8082/api/ontology/tree \\
+            <Code>{`curl -X POST ${baseUrl}/api/ontology/tree \\
   -H "Content-Type: application/json" \\
   -d '{ "termIds": ["GO:0006915", "GO:0008219"] }'`}</Code>
             <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0006915", "GO:0008219"] }} />
@@ -448,7 +458,7 @@ export default async function ApiDocsPage() {
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 1 — Resolve identifiers to canonical entity IDs</div>
             <p className="text-xs text-muted-foreground">Requires the entity-service backend to be reachable from the frontend API.</p>
-            <Code>{`curl -X POST http://localhost:8082/api/entity-lookup \\
+            <Code>{`curl -X POST ${baseUrl}/api/entity-lookup \\
   -H "Content-Type: application/json" \\
   -d '{ "identifiers": ["TP53", "AKT1", "P31749"] }'`}</Code>
             <JsonTryNow endpoint="/api/entity-lookup" initialBody={{ identifiers: ["TP53", "AKT1", "P31749"] }} />
@@ -456,11 +466,11 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 2 — Resolve ontology terms and inspect hierarchy</div>
-            <Code>{`curl -X POST http://localhost:8082/api/ontology/terms \\
+            <Code>{`curl -X POST ${baseUrl}/api/ontology/terms \\
   -H "Content-Type: application/json" \\
   -d '{ "termIds": ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }'`}</Code>
             <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }} />
-            <Code>{`curl -X POST http://localhost:8082/api/ontology/tree \\
+            <Code>{`curl -X POST ${baseUrl}/api/ontology/tree \\
   -H "Content-Type: application/json" \\
   -d '{ "termIds": ["GO:0005634", "HP:0001250"] }'`}</Code>
             <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0005634", "HP:0001250"] }} />
@@ -468,7 +478,7 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 3 — Export entity cohort (human proteins annotated with nucleus + seizure)</div>
-            <Code>{`curl -X POST http://localhost:8082/api/exports/entities/parquet \\
+            <Code>{`curl -X POST ${baseUrl}/api/exports/entities/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "filename": "tutorial_human_nucleus_seizure_entities",
@@ -483,7 +493,7 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 4 — Export directed positive phosphorylation interactions for TP53/AKT1</div>
-            <Code>{`curl -X POST http://localhost:8082/api/exports/interactions/parquet \\
+            <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "filename": "tutorial_tp53_akt1_phospho_interactions",
@@ -499,7 +509,7 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 5 — Export reaction associations where TP53/AKT1 act as reactants</div>
-            <Code>{`curl -X POST http://localhost:8082/api/exports/associations/parquet \\
+            <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "filename": "tutorial_tp53_akt1_reaction_associations",
@@ -533,7 +543,7 @@ export default async function ApiDocsPage() {
           </Tabs>
 
           <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST http://localhost:8082/api/exports/entities/parquet \\
+          <Code>{`curl -X POST ${baseUrl}/api/exports/entities/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -570,7 +580,7 @@ export default async function ApiDocsPage() {
           </Tabs>
 
           <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST http://localhost:8082/api/exports/interactions/parquet \\
+          <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -606,7 +616,7 @@ export default async function ApiDocsPage() {
           </Tabs>
 
           <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST http://localhost:8082/api/exports/associations/parquet \\
+          <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -636,7 +646,7 @@ export default async function ApiDocsPage() {
               <p className="text-xs text-muted-foreground">Resolves raw identifiers to candidate entity IDs and returns matching entity documents.</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST http://localhost:8082/api/entity-lookup \\
+            <Code>{`curl -X POST ${baseUrl}/api/entity-lookup \\
   -H "Content-Type: application/json" \\
   -d '{
     "identifiers": ["P04637", "TP53", "Q9Y6K9"]
@@ -663,7 +673,7 @@ export default async function ApiDocsPage() {
               <p className="text-xs text-muted-foreground">Helper endpoint: resolve entity IDs to display names.</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST http://localhost:8082/api/entity-names \\
+            <Code>{`curl -X POST ${baseUrl}/api/entity-names \\
   -H "Content-Type: application/json" \\
   -d '{ "ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }'`}</Code>
             <JsonTryNow endpoint="/api/entity-names" initialBody={{ ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }} />
