@@ -4,6 +4,7 @@ import logging
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -282,22 +283,20 @@ def _run_export(
     *,
     request: InteractionExportRequest | EntityExportRequest | AssociationExportRequest,
     background_tasks: BackgroundTasks,
-    fetch_ids,
-    write_subset,
+    write_subset_direct,
     default_filename: str,
     log_label: str,
 ):
     try:
-        matched_ids = fetch_ids(
-            query=request.query or "",
-            filters=request.filters.model_dump(exclude_none=True),
-        )
+        filters_payload = request.filters.model_dump(exclude_none=True)
 
         temp_file = tempfile.NamedTemporaryFile(prefix=f"{default_filename}_", suffix=".parquet", delete=False)
         temp_path = Path(temp_file.name)
         temp_file.close()
 
-        row_count = write_subset(matched_ids, temp_path)
+        started = perf_counter()
+        row_count = write_subset_direct(request.query or "", filters_payload, temp_path)
+        elapsed_ms = int((perf_counter() - started) * 1000)
 
         safe_name = (request.filename or default_filename).strip() or default_filename
         download_name = safe_name if safe_name.lower().endswith(".parquet") else f"{safe_name}.parquet"
@@ -310,6 +309,8 @@ def _run_export(
             filename=download_name,
         )
         response.headers["X-Export-Row-Count"] = str(row_count)
+        response.headers["X-Export-Strategy"] = "parquet"
+        response.headers["X-Export-Duration-Ms"] = str(elapsed_ms)
         return response
 
     except ValueError as exc:
@@ -321,13 +322,12 @@ def _run_export(
 
 @app.post("/exports/interactions/parquet")
 def export_interactions_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
-    from .exports import fetch_matching_interaction_ids, write_interaction_subset_parquet
+    from .exports import write_interaction_subset_parquet_direct
 
     return _run_export(
         request=request,
         background_tasks=background_tasks,
-        fetch_ids=fetch_matching_interaction_ids,
-        write_subset=write_interaction_subset_parquet,
+        write_subset_direct=write_interaction_subset_parquet_direct,
         default_filename="interactions_subset",
         log_label="Interaction",
     )
@@ -335,13 +335,12 @@ def export_interactions_parquet(request: InteractionExportRequest, background_ta
 
 @app.post("/exports/entities/parquet")
 def export_entities_parquet(request: EntityExportRequest, background_tasks: BackgroundTasks):
-    from .exports import fetch_matching_entity_ids, write_entity_subset_parquet
+    from .exports import write_entity_subset_parquet_direct
 
     return _run_export(
         request=request,
         background_tasks=background_tasks,
-        fetch_ids=fetch_matching_entity_ids,
-        write_subset=write_entity_subset_parquet,
+        write_subset_direct=write_entity_subset_parquet_direct,
         default_filename="entities_subset",
         log_label="Entity",
     )
@@ -349,13 +348,12 @@ def export_entities_parquet(request: EntityExportRequest, background_tasks: Back
 
 @app.post("/exports/associations/parquet")
 def export_associations_parquet(request: AssociationExportRequest, background_tasks: BackgroundTasks):
-    from .exports import fetch_matching_association_ids, write_association_subset_parquet
+    from .exports import write_association_subset_parquet_direct
 
     return _run_export(
         request=request,
         background_tasks=background_tasks,
-        fetch_ids=fetch_matching_association_ids,
-        write_subset=write_association_subset_parquet,
+        write_subset_direct=write_association_subset_parquet_direct,
         default_filename="associations_subset",
         log_label="Association",
     )
