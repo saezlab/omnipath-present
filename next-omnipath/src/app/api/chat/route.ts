@@ -256,10 +256,7 @@ To find interactions for a specific protein/gene:
 
         // Add entity IDs filter if provided
         if (entityIds && entityIds.length > 0) {
-          // Convert IDs to numbers as required by MeilisearchFilters
-          apiFilters.entity_ids = entityIds
-            .map((id) => (typeof id === "number" ? id : parseInt(id, 10)))
-            .filter((id) => !isNaN(id));
+          apiFilters.entity_ids = entityIds.map((id) => String(id));
         }
 
         const requestParams = {
@@ -364,7 +361,8 @@ export async function POST(req: Request) {
       normalizedMessages.unshift({
         id: crypto.randomUUID(),
         role: "system",
-        parts: [{ type: "text", text: `You are OmniPath AI, a helpful assistant knowledgeable about molecular interactions, pathways, and biological annotations based on the OmniPath database.
+        parts: [{
+          type: "text", text: `You are OmniPath AI, a helpful assistant knowledgeable about molecular interactions, pathways, and biological annotations based on the OmniPath database.
 
 Your capabilities:
 - Search for proteins, genes, complexes, and controlled vocabulary terms
