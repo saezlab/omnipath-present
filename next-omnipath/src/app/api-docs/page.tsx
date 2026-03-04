@@ -302,18 +302,16 @@ function FiltersTable({ rows, examples }: { rows: FilterRow[]; examples?: Record
           <tr>
             <th className="px-4 py-2">Filter</th>
             <th className="px-4 py-2">Type</th>
-            <th className="px-4 py-2">Meaning</th>
             <th className="px-4 py-2">Example values</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(([f, t, d]) => {
+          {rows.map(([f, t]) => {
             const ex = examples?.[f]
             return (
               <tr key={f} className="border-t align-top">
                 <td className="px-4 py-2 font-mono text-xs">{f}</td>
                 <td className="px-4 py-2 text-xs">{t}</td>
-                <td className="px-4 py-2 text-xs text-muted-foreground">{d}</td>
                 <td className="px-4 py-2 text-xs">
                   {ex && ex.length > 0 ? (
                     <select className="h-8 w-full max-w-md rounded-md border bg-background px-2 text-[11px] font-mono" defaultValue="">
@@ -521,29 +519,29 @@ export default async function ApiDocsPage() {
   }'`}</Code>
             <ExportTryNow url={tutorialAssociationsUrl} />
           </div>
-
-          <div className="rounded-lg border p-4 text-xs text-muted-foreground">
-            Discuss results by comparing <span className="font-mono">X-Export-Row-Count</span> across runs. Broaden by switching to ancestor terms in the ontology tree; narrow by choosing descendants or adding source/type/sign filters.
-          </div>
         </TabsContent>
 
         <TabsContent value="entities-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/entities/parquet</h2>
-          <Tabs defaultValue="filters" className="space-y-3">
-            <TabsList>
-              <TabsTrigger value="filters">Filters</TabsTrigger>
-              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
-            </TabsList>
-            <TabsContent value="filters" className="space-y-2">
-              <FiltersTable rows={filters.entities} examples={facetExamples.entities} />
-            </TabsContent>
-            <TabsContent value="response-schema" className="space-y-2">
-              <SchemaTable rows={schemas.entities} />
-            </TabsContent>
-          </Tabs>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Filters</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <FiltersTable rows={filters.entities} examples={facetExamples.entities} />
+              </div>
+            </div>
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Response schema</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <SchemaTable rows={schemas.entities} />
+              </div>
+            </div>
+          </div>
 
-          <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST ${baseUrl}/api/exports/entities/parquet \\
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-medium">Try this (POST)</div>
+              <Code>{`curl -X POST ${baseUrl}/api/exports/entities/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -554,33 +552,39 @@ export default async function ApiDocsPage() {
       "ontology_terms": ["GO:0004672"]
     }
   }'`}</Code>
+            </div>
 
-          <div className="rounded-lg border p-4 text-sm space-y-3">
-            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
-            <a href={entityExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
-              {entityExampleUrl}
-            </a>
-            <ExportTryNow url={entityExampleUrl} />
+            <div className="rounded-xl border bg-card/60 p-4 text-sm space-y-3">
+              <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+              <a href={entityExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
+                {entityExampleUrl}
+              </a>
+              <ExportTryNow url={entityExampleUrl} />
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="interactions-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/interactions/parquet</h2>
-          <Tabs defaultValue="filters" className="space-y-3">
-            <TabsList>
-              <TabsTrigger value="filters">Filters</TabsTrigger>
-              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
-            </TabsList>
-            <TabsContent value="filters" className="space-y-2">
-              <FiltersTable rows={filters.interactions} examples={facetExamples.interactions} />
-            </TabsContent>
-            <TabsContent value="response-schema" className="space-y-2">
-              <SchemaTable rows={schemas.interactions} />
-            </TabsContent>
-          </Tabs>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Filters</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <FiltersTable rows={filters.interactions} examples={facetExamples.interactions} />
+              </div>
+            </div>
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Response schema</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <SchemaTable rows={schemas.interactions} />
+              </div>
+            </div>
+          </div>
 
-          <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-medium">Try this (POST)</div>
+              <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -590,33 +594,39 @@ export default async function ApiDocsPage() {
       "sign": "positive"
     }
   }'`}</Code>
+            </div>
 
-          <div className="rounded-lg border p-4 text-sm space-y-3">
-            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
-            <a href={interactionExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
-              {interactionExampleUrl}
-            </a>
-            <ExportTryNow url={interactionExampleUrl} />
+            <div className="rounded-xl border bg-card/60 p-4 text-sm space-y-3">
+              <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+              <a href={interactionExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
+                {interactionExampleUrl}
+              </a>
+              <ExportTryNow url={interactionExampleUrl} />
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="associations-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/associations/parquet</h2>
-          <Tabs defaultValue="filters" className="space-y-3">
-            <TabsList>
-              <TabsTrigger value="filters">Filters</TabsTrigger>
-              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
-            </TabsList>
-            <TabsContent value="filters" className="space-y-2">
-              <FiltersTable rows={filters.associations} examples={facetExamples.associations} />
-            </TabsContent>
-            <TabsContent value="response-schema" className="space-y-2">
-              <SchemaTable rows={schemas.associations} />
-            </TabsContent>
-          </Tabs>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Filters</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <FiltersTable rows={filters.associations} examples={facetExamples.associations} />
+              </div>
+            </div>
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Response schema</div>
+              <div className="max-h-[34rem] overflow-auto">
+                <SchemaTable rows={schemas.associations} />
+              </div>
+            </div>
+          </div>
 
-          <div className="text-xs font-medium">Try this (POST)</div>
-          <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div className="rounded-xl border bg-card/60 p-4 space-y-3">
+              <div className="text-xs font-medium">Try this (POST)</div>
+              <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -626,13 +636,15 @@ export default async function ApiDocsPage() {
       "member_entity_types": ["protein:MI:0326"]
     }
   }'`}</Code>
+            </div>
 
-          <div className="rounded-lg border p-4 text-sm space-y-3">
-            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
-            <a href={associationExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
-              {associationExampleUrl}
-            </a>
-            <ExportTryNow url={associationExampleUrl} />
+            <div className="rounded-xl border bg-card/60 p-4 text-sm space-y-3">
+              <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+              <a href={associationExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
+                {associationExampleUrl}
+              </a>
+              <ExportTryNow url={associationExampleUrl} />
+            </div>
           </div>
         </TabsContent>
 

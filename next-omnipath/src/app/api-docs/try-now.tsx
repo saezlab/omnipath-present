@@ -58,18 +58,50 @@ export function JsonTryNow({ endpoint, initialBody, className }: JsonTryNowProps
   }
 
   return (
-    <div className={`rounded-lg border p-4 space-y-3 ${className || ""}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-xs font-medium">Try now</div>
-        <Button size="sm" onClick={run} disabled={loading}>
-          {loading ? "Running..." : "Run request"}
-        </Button>
+    <div className={`rounded-xl border bg-card/60 p-4 md:p-5 ${className || ""}`}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Try now</div>
+        {status !== null ? <div className="text-xs text-muted-foreground">Status <span className="font-mono text-foreground">{status}</span></div> : null}
       </div>
-      <div className="text-[11px] text-muted-foreground font-mono">POST {endpoint}</div>
-      <Textarea className="font-mono text-xs min-h-36" value={bodyText} onChange={(e) => setBodyText(e.target.value)} />
-      {status !== null ? <div className="text-xs">Status: <span className="font-mono">{status}</span></div> : null}
-      {errorText ? <pre className="rounded-md border bg-destructive/5 p-3 text-xs overflow-x-auto">{errorText}</pre> : null}
-      {responseText ? <pre className="rounded-md border bg-muted/20 p-3 text-xs overflow-x-auto">{responseText}</pre> : null}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <div className="space-y-3">
+          <div className="rounded-lg border bg-background/80 p-3">
+            <div className="text-[11px] text-muted-foreground font-mono">POST {endpoint}</div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-medium text-muted-foreground">Request payload (filters + options)</div>
+            <Textarea
+              className="min-h-64 font-mono text-xs"
+              value={bodyText}
+              onChange={(e) => setBodyText(e.target.value)}
+            />
+          </div>
+
+          {errorText ? <pre className="max-h-36 overflow-auto rounded-md border bg-destructive/5 p-3 text-xs">{errorText}</pre> : null}
+        </div>
+
+        <div className="rounded-lg border bg-background/80 p-3">
+          {responseText ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-medium text-muted-foreground">Response</div>
+                <Button size="sm" onClick={run} disabled={loading}>
+                  {loading ? "Running..." : "Run request"}
+                </Button>
+              </div>
+              <pre className="max-h-[34rem] overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{responseText}</pre>
+            </div>
+          ) : (
+            <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/10 p-4 text-center">
+              <div className="text-xs text-muted-foreground">Response will appear here</div>
+              <Button size="sm" onClick={run} disabled={loading}>
+                {loading ? "Running..." : "Run request"}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -80,66 +112,17 @@ type ExportTryNowProps = {
 }
 
 export function ExportTryNow({ url, className }: ExportTryNowProps) {
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState<number | null>(null)
-  const [summary, setSummary] = useState<string>("")
-  const [errorText, setErrorText] = useState<string>("")
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
-  const [filename, setFilename] = useState<string>("export.parquet")
-
-  async function run() {
-    setLoading(true)
-    setStatus(null)
-    setSummary("")
-    setErrorText("")
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl)
-    setDownloadUrl(null)
-
-    try {
-      const response = await fetch(url, { method: "GET" })
-      setStatus(response.status)
-
-      if (!response.ok) {
-        const text = await response.text()
-        setErrorText(text || `Export request failed with status ${response.status}`)
-        return
-      }
-
-      const rowCount = response.headers.get("X-Export-Row-Count") || "unknown"
-      const disposition = response.headers.get("Content-Disposition") || ""
-      const matchedName = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i)
-      const nameFromHeader = decodeURIComponent(matchedName?.[1] || matchedName?.[2] || "").trim()
-      const resolvedFilename = nameFromHeader || "export.parquet"
-
-      const blob = await response.blob()
-      const localUrl = URL.createObjectURL(blob)
-      setFilename(resolvedFilename)
-      setDownloadUrl(localUrl)
-      setSummary(`Rows: ${rowCount} | Bytes: ${blob.size.toLocaleString()} | Type: ${blob.type || "application/x-parquet"}`)
-    } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Export request failed")
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div className={`rounded-lg border p-4 space-y-3 ${className || ""}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-medium">Try now</div>
-        <Button size="sm" onClick={run} disabled={loading}>
-          {loading ? "Running..." : "Run export"}
+        <Button size="sm" asChild>
+          <a href={url}>
+            Run export
+          </a>
         </Button>
       </div>
       <div className="text-[11px] text-muted-foreground font-mono break-all">GET {url}</div>
-      {status !== null ? <div className="text-xs">Status: <span className="font-mono">{status}</span></div> : null}
-      {summary ? <div className="text-xs text-muted-foreground">{summary}</div> : null}
-      {errorText ? <pre className="rounded-md border bg-destructive/5 p-3 text-xs overflow-x-auto">{errorText}</pre> : null}
-      {downloadUrl ? (
-        <a className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" href={downloadUrl} download={filename}>
-          Download {filename}
-        </a>
-      ) : null}
     </div>
   )
 }
