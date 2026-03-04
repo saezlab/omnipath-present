@@ -42,14 +42,14 @@ validate-data:
 	fi
 	@echo "✓ All data files present"
 
-# Start all development services: Meilisearch, Entity Service, Ontology Service, and Next.js dev server
+# Start all development services: Meilisearch, Entity Service, API Service, and Next.js dev server
 dev: validate-data
 	DATA_DIR="$(DATA_DIR)" COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml up -d
 	@echo ""
 	@echo "Backend services starting..."
 	@echo "  - Meilisearch:      http://localhost:7700"
 	@echo "  - Entity Service:   http://localhost:8080"
-	@echo "  - Ontology Service: http://localhost:8081"
+	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"
 	@echo ""
 	@echo "Starting Next.js dev server..."
@@ -67,5 +67,5 @@ restart: validate-data
 	@echo "Backend services rebuilt and restarted"
 	@echo "  - Meilisearch:      http://localhost:7700"
 	@echo "  - Entity Service:   http://localhost:8080"
-	@echo "  - Ontology Service: http://localhost:8081"
+	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"

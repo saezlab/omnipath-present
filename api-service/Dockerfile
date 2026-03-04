@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 # Copy dependency files
-COPY omnipath-present/ontology-service/pyproject.toml .
-COPY omnipath-present/ontology-service/README.md .
+COPY omnipath-present/api-service/pyproject.toml .
+COPY omnipath-present/api-service/README.md .
 
 # Copy application code
-COPY omnipath-present/ontology-service/ontology_service/ ontology_service/
+COPY omnipath-present/api-service/ontology_service/ ontology_service/
 
 # Install dependencies (ontograph is pulled from git via tool.uv.sources)
 RUN uv pip install --system -e .

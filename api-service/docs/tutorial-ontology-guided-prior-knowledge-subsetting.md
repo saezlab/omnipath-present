@@ -16,12 +16,12 @@ All commands below are exactly what was used locally.
 
 - Ontology service running on `http://localhost:8081`
 - Export Parquet tables available under `ONTOLOGY_DATA_DIR` (`search_entities.parquet`, `search_interactions.parquet`, `search_associations.parquet`)
-- `python` with `polars` available locally (or use the ontology-service venv)
+- `python` with `polars` available locally (or use the api-service venv)
 
 Optional convenience:
 
 ```bash
-source /Users/jschaul/Code/omnipath-present/ontology-service/.venv/bin/activate
+source /Users/jschaul/Code/omnipath-present/api-service/.venv/bin/activate
 ```
 
 Create a workspace for tutorial artifacts:

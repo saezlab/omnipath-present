@@ -1,4 +1,4 @@
-"""FastAPI application for ontology service."""
+"""FastAPI application for API service."""
 
 import logging
 import tempfile
@@ -33,15 +33,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Preload core ontologies on startup."""
-    logger.info("Starting ontology service - preloading core ontologies...")
+    logger.info("Starting API service - preloading core ontologies...")
     registry.preload_core_ontologies()
     logger.info("Core ontologies loaded, service ready")
     yield
-    logger.info("Shutting down ontology service")
+    logger.info("Shutting down API service")
 
 
 app = FastAPI(
-    title="Ontology Service",
+    title="API Service",
     description="REST API for querying biological ontologies",
     version="0.1.0",
     lifespan=lifespan,

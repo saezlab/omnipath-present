@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 # Copy dependency files
-COPY ontology-service/pyproject.toml .
-COPY ontology-service/README.md .
+COPY api-service/pyproject.toml .
+COPY api-service/README.md .
 
 # Copy application code
-COPY ontology-service/ontology_service/ ontology_service/
+COPY api-service/ontology_service/ ontology_service/
 
 # Install dependencies
 # ARG busts cache when ontograph version changes - update this arg value to force reinstall

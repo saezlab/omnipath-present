@@ -4,8 +4,8 @@
 # Services read from DATA_DIR (defaults to omnipath_build latest output):
 #   DATA_DIR=../omnipath_build/data/latest/output
 #   - entity_identifier.parquet  (entity-service)
-#   - omnipath_mi.obo            (ontology-service)
-#   - search_*.parquet           (ontology-service export endpoints)
+#   - omnipath_mi.obo            (api-service)
+#   - search_*.parquet           (api-service export endpoints)
 #   - .data_version              (optional version marker)
 
 services:
@@ -54,11 +54,11 @@ services:
             retries: 3
             start_period: 10s
 
-    # Ontology Service - FastAPI wrapper for ontograph
-    ontology-service:
+    # API Service - FastAPI wrapper for ontograph + exports
+    api-service:
         build:
             context: ..
-            dockerfile: omnipath-present/ontology-service/Dockerfile
+            dockerfile: omnipath-present/api-service/Dockerfile
         restart: unless-stopped
         environment:
             ONTOLOGY_DATA_DIR: /data
@@ -69,9 +69,9 @@ services:
             - "8081:8081"
         volumes:
             - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
-            - ./ontology-service/cache:/app/cache
+            - ./api-service/cache:/app/cache
             # Mount source for hot reload during development
-            - ./ontology-service/ontology_service:/app/ontology_service
+            - ./api-service/ontology_service:/app/ontology_service
 
 volumes:
     meilisearch_data:

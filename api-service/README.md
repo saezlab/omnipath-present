@@ -1,4 +1,4 @@
-# Ontology Service
+# API Service
 
 REST API for querying biological ontologies using [ontograph](https://github.com/saezlab/ontograph).
 
@@ -101,6 +101,6 @@ The `/tree` endpoint merges multiple term paths into a single tree with shared a
 ## Docker
 
 ```bash
-docker build -t ontology-service .
-docker run -p 8081:8081 ontology-service
+docker build -t api-service .
+docker run -p 8081:8081 api-service
 ```

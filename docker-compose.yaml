@@ -56,11 +56,11 @@ services:
             retries: 3
             start_period: 10s
 
-    # Ontology Service - FastAPI wrapper for ontograph
-    ontology-service:
+    # API Service - FastAPI wrapper for ontograph + exports
+    api-service:
         build:
             context: .
-            dockerfile: ontology-service/Dockerfile.prod
+            dockerfile: api-service/Dockerfile.prod
         restart: unless-stopped
         environment:
             ONTOLOGY_DATA_DIR: /data
@@ -93,7 +93,7 @@ services:
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
             ENTITY_SERVICE_URL: http://entity-service:8080
-            ONTOLOGY_SERVICE_URL: http://ontology-service:8081
+            API_SERVICE_URL: http://api-service:8081
             CEREBRAS_API_KEY: ${CEREBRAS_API_KEY}
         ports:
             - "8082:8082"
@@ -104,7 +104,7 @@ services:
                 condition: service_healthy
             entity-service:
                 condition: service_healthy
-            ontology-service:
+            api-service:
                 condition: service_healthy
 
 networks:

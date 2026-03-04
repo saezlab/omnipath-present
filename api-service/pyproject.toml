@@ -1,5 +1,5 @@
 [project]
-name = "ontology-service"
+name = "api-service"
 version = "0.1.0"
 description = "REST API for querying biological ontologies"
 readme = "README.md"

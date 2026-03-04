@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOntologyServiceUrl } from "@/lib/api/config";
+import { getApiServiceUrl } from "@/lib/api/config";
 
 interface TreeRequestPayload {
   termIds?: string[];
@@ -14,8 +14,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No term IDs provided" }, { status: 400 });
     }
 
-    const ontologyServiceUrl = getOntologyServiceUrl();
-    const response = await fetch(`${ontologyServiceUrl}/tree`, {
+    const apiServiceUrl = getApiServiceUrl();
+    const response = await fetch(`${apiServiceUrl}/tree`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ term_ids: termIds }),
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const text = await response.text();
       return NextResponse.json(
-        { error: `Ontology service error: ${response.status} ${text}` },
+        { error: `API service error: ${response.status} ${text}` },
         { status: 502 }
       );
     }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOntologyServiceUrl } from "@/lib/api/config";
+import { getApiServiceUrl } from "@/lib/api/config";
 
 interface ExportRequestPayload {
   query?: string;
@@ -21,8 +21,8 @@ function parseGetPayload(req: NextRequest): ExportRequestPayload {
 }
 
 async function forwardExport(payload: ExportRequestPayload) {
-  const ontologyServiceUrl = getOntologyServiceUrl();
-  const upstream = await fetch(`${ontologyServiceUrl}/exports/interactions/parquet`, {
+  const apiServiceUrl = getApiServiceUrl();
+  const upstream = await fetch(`${apiServiceUrl}/exports/interactions/parquet`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -35,7 +35,7 @@ async function forwardExport(payload: ExportRequestPayload) {
   if (!upstream.ok) {
     const text = await upstream.text();
     return NextResponse.json(
-      { error: `Ontology export error: ${upstream.status} ${text}` },
+      { error: `API export error: ${upstream.status} ${text}` },
       { status: 502 }
     );
   }
