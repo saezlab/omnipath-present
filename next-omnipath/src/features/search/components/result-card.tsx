@@ -609,7 +609,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
   );
 }
 
-export function ResultCard({ result, entityNamesMap: _entityNamesMap }: { result: SearchResult, entityNamesMap?: Record<string, string> }) {
+export function ResultCard({ result }: { result: SearchResult }) {
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const type = result.type || "entity";
   const [detailsOpen, setDetailsOpen] = useState(false);

@@ -2,7 +2,6 @@
 import React from "react";
 import { ResultCard, type SearchResult } from "./result-card";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 
 interface SearchResultsProps {
   results: Array<SearchResult>;
@@ -19,53 +18,6 @@ export function SearchResults({
   hasMore = false,
   sentinelRef
 }: SearchResultsProps) {
-
-  // Collect all IDs that need name resolution
-  const idsToFetch = React.useMemo(() => {
-    const ids = new Set<string>();
-    results.forEach(result => {
-      // Add reactants
-      if (result.reactants) {
-        result.reactants.forEach(id => ids.add(String(id)));
-      }
-      // Add products
-      if (result.products) {
-        result.products.forEach(id => ids.add(String(id)));
-      }
-      // Add pathway steps
-      if (result.pathway_steps) {
-        result.pathway_steps.forEach(step => {
-          if (!step) return;
-          const parts = step.split(':');
-          if (parts.length > 1) ids.add(parts[1]);
-        });
-      }
-    });
-    return Array.from(ids);
-  }, [results]);
-
-  const { data: entityNames = {} } = useQuery({
-    queryKey: ['entity-names', idsToFetch],
-    queryFn: async () => {
-      if (idsToFetch.length === 0) return {};
-
-      const res = await fetch('/api/entity-names', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ids: idsToFetch }),
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to fetch entity names');
-      }
-
-      return res.json() as Promise<Record<string, string>>;
-    },
-    enabled: idsToFetch.length > 0,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-  });
 
   if (loading && !results.length) {
     return null;
@@ -105,14 +57,14 @@ export function SearchResults({
           if (!href) {
             return (
               <div key={key}>
-                <ResultCard result={result} entityNamesMap={entityNames} />
+                <ResultCard result={result} />
               </div>
             );
           }
 
           return (
             <Link key={key} href={href}>
-              <ResultCard result={result} entityNamesMap={entityNames} />
+              <ResultCard result={result} />
             </Link>
           );
         })}
@@ -138,4 +90,4 @@ export function SearchResults({
 
     </div>
   );
-} 
+}

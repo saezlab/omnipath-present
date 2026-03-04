@@ -679,21 +679,6 @@ export default async function ApiDocsPage() {
 }`}</Code>
           </div>
 
-          <div className="rounded-lg border p-4 space-y-3">
-            <div>
-              <div className="font-medium">POST /api/entity-names</div>
-              <p className="text-xs text-muted-foreground">Helper endpoint: resolve entity IDs to display names.</p>
-            </div>
-            <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST ${baseUrl}/api/entity-names \\
-  -H "Content-Type: application/json" \\
-  -d '{ "ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }'`}</Code>
-            <JsonTryNow endpoint="/api/entity-names" initialBody={{ ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }} />
-            <Code>{`{
-  "P:UP:P04637:UNK": "Cellular tumor antigen p53",
-  "P:UP:AKT1_HUMAN:UNK": "3-phosphoinositide-dependent protein kinase 1"
-}`}</Code>
-          </div>
         </TabsContent>
       </Tabs>
     </div>
