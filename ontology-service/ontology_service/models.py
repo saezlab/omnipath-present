@@ -95,9 +95,9 @@ class InteractionSignFilter(str):
 class InteractionExportFilters(BaseModel):
     """Typed filters for interaction exports."""
 
-    entity_ids: list[int] = Field(default_factory=list)
-    member_a_id: int | None = None
-    member_b_id: int | None = None
+    entity_ids: list[str] = Field(default_factory=list)
+    member_a_id: str | None = None
+    member_b_id: str | None = None
     interaction_types: list[str] = Field(default_factory=list)
 
     # New, clearer API fields
@@ -124,7 +124,7 @@ class InteractionExportFilters(BaseModel):
 class EntityExportFilters(BaseModel):
     """Typed filters for entity exports."""
 
-    entity_ids: list[int] = Field(default_factory=list)
+    entity_ids: list[str] = Field(default_factory=list)
     entity_types: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
 
@@ -147,8 +147,8 @@ class EntityExportFilters(BaseModel):
 class AssociationExportFilters(BaseModel):
     """Typed filters for association exports."""
 
-    parent_entity_ids: list[int] = Field(default_factory=list)
-    member_entity_ids: list[int] = Field(default_factory=list)
+    parent_entity_ids: list[str] = Field(default_factory=list)
+    member_entity_ids: list[str] = Field(default_factory=list)
 
     parent_entity_types: list[str] = Field(default_factory=list)
     member_entity_types: list[str] = Field(default_factory=list)

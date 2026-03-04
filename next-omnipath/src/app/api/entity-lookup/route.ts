@@ -8,7 +8,7 @@ interface LookupPayload {
 }
 
 interface LookupServiceResponse {
-  results: Record<string, number[]>;
+  results: Record<string, string[]>;
 }
 
 export async function POST(req: NextRequest) {
@@ -46,9 +46,7 @@ export async function POST(req: NextRequest) {
     }));
 
     // Fetch entity details for all returned IDs (if any)
-    const allEntityIds = Array.from(
-      new Set(matches.flatMap((m) => m.entityIds.map((id) => id.toString())))
-    );
+    const allEntityIds = Array.from(new Set(matches.flatMap((m) => m.entityIds)));
 
     const documents = allEntityIds.length
       ? await fetchMeilisearchDocuments(INDEXES.ENTITIES, allEntityIds, "entity_id")

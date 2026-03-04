@@ -25,6 +25,25 @@ def _escape(value: str) -> str:
     return value.replace('"', '\\"')
 
 
+def _normalize_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_id_list(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        parsed = _normalize_id(value)
+        if parsed is None or parsed in seen:
+            continue
+        seen.add(parsed)
+        normalized.append(parsed)
+    return normalized
+
+
 def _merge_list_values(*lists: list[Any]) -> list[Any]:
     merged: list[Any] = []
     seen: set[Any] = set()
@@ -181,23 +200,34 @@ def build_interaction_filter_string(filters: dict[str, Any]) -> str:
     filters = _normalize_interaction_filters(filters)
     parts: list[str] = []
 
-    entity_ids = filters.get("entity_ids") or []
-    if entity_ids:
+    raw_entity_ids = list(filters.get("entity_ids") or [])
+    entity_ids = _normalize_id_list(raw_entity_ids)
+    if raw_entity_ids and not entity_ids:
+        parts.append("(member_a_id = \"\" AND member_b_id = \"\")")
+    elif entity_ids:
         entity_filters = " OR ".join(
-            f"(member_a_id = {int(entity_id)} OR member_b_id = {int(entity_id)})"
+            f'(member_a_id = "{_escape(entity_id)}" OR member_b_id = "{_escape(entity_id)}")'
             for entity_id in entity_ids
         )
         parts.append(f"({entity_filters})")
 
-    member_a_id = filters.get("member_a_id")
-    if member_a_id is not None:
-        member_a_id = int(member_a_id)
-        parts.append(f"(member_a_id = {member_a_id} OR member_b_id = {member_a_id})")
+    raw_member_a_id = filters.get("member_a_id")
+    member_a_id = _normalize_id(raw_member_a_id)
+    if raw_member_a_id is not None and member_a_id is None:
+        parts.append("(member_a_id = \"\" AND member_b_id = \"\")")
+    elif member_a_id is not None:
+        parts.append(
+            f'(member_a_id = "{_escape(member_a_id)}" OR member_b_id = "{_escape(member_a_id)}")'
+        )
 
-    member_b_id = filters.get("member_b_id")
-    if member_b_id is not None:
-        member_b_id = int(member_b_id)
-        parts.append(f"(member_a_id = {member_b_id} OR member_b_id = {member_b_id})")
+    raw_member_b_id = filters.get("member_b_id")
+    member_b_id = _normalize_id(raw_member_b_id)
+    if raw_member_b_id is not None and member_b_id is None:
+        parts.append("(member_a_id = \"\" AND member_b_id = \"\")")
+    elif member_b_id is not None:
+        parts.append(
+            f'(member_a_id = "{_escape(member_b_id)}" OR member_b_id = "{_escape(member_b_id)}")'
+        )
 
     interaction_types = filters.get("interaction_types") or []
     if interaction_types:
@@ -250,10 +280,13 @@ def build_entity_filter_string(filters: dict[str, Any]) -> str:
     filters = _normalize_entity_filters(filters)
     parts: list[str] = []
 
-    entity_ids = filters.get("entity_ids") or []
-    if entity_ids:
-        ids = ", ".join(str(int(entity_id)) for entity_id in entity_ids)
-        parts.append(f"entity_id IN [{ids}]")
+    raw_entity_ids = list(filters.get("entity_ids") or [])
+    entity_ids = _normalize_id_list(raw_entity_ids)
+    if raw_entity_ids and not entity_ids:
+        parts.append('entity_id = ""')
+    elif entity_ids:
+        id_filters = " OR ".join(f'entity_id = "{_escape(entity_id)}"' for entity_id in entity_ids)
+        parts.append(f"({id_filters})")
 
     entity_types = filters.get("entity_types") or []
     if entity_types:
@@ -294,17 +327,23 @@ def build_association_filter_string(filters: dict[str, Any]) -> str:
     filters = _normalize_association_filters(filters)
     parts: list[str] = []
 
-    parent_entity_ids = filters.get("parent_entity_ids") or []
-    if parent_entity_ids:
+    raw_parent_entity_ids = list(filters.get("parent_entity_ids") or [])
+    parent_entity_ids = _normalize_id_list(raw_parent_entity_ids)
+    if raw_parent_entity_ids and not parent_entity_ids:
+        parts.append('parent_entity_id = ""')
+    elif parent_entity_ids:
         parent_filters = " OR ".join(
-            f"parent_entity_id = {int(entity_id)}" for entity_id in parent_entity_ids
+            f'parent_entity_id = "{_escape(entity_id)}"' for entity_id in parent_entity_ids
         )
         parts.append(f"({parent_filters})")
 
-    member_entity_ids = filters.get("member_entity_ids") or []
-    if member_entity_ids:
+    raw_member_entity_ids = list(filters.get("member_entity_ids") or [])
+    member_entity_ids = _normalize_id_list(raw_member_entity_ids)
+    if raw_member_entity_ids and not member_entity_ids:
+        parts.append('member_entity_id = ""')
+    elif member_entity_ids:
         member_filters = " OR ".join(
-            f"member_entity_id = {int(entity_id)}" for entity_id in member_entity_ids
+            f'member_entity_id = "{_escape(entity_id)}"' for entity_id in member_entity_ids
         )
         parts.append(f"({member_filters})")
 
@@ -339,13 +378,13 @@ def build_association_filter_string(filters: dict[str, Any]) -> str:
     return " AND ".join(parts)
 
 
-def fetch_matching_ids(index: str, id_field: str, query: str, filter_string: str) -> list[int]:
+def fetch_matching_ids(index: str, id_field: str, query: str, filter_string: str) -> list[str]:
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if MEILI_API_KEY:
         headers["Authorization"] = f"Bearer {MEILI_API_KEY}"
 
     offset = 0
-    found_ids: list[int] = []
+    found_ids: list[str] = []
 
     with httpx.Client(timeout=60.0) as client:
         while True:
@@ -373,7 +412,7 @@ def fetch_matching_ids(index: str, id_field: str, query: str, filter_string: str
             for hit in hits:
                 value = hit.get(id_field)
                 if value is not None:
-                    found_ids.append(int(value))
+                    found_ids.append(str(value))
 
             if len(found_ids) > MAX_EXPORT_HITS:
                 raise ValueError(
@@ -389,8 +428,8 @@ def fetch_matching_ids(index: str, id_field: str, query: str, filter_string: str
 
             offset += DEFAULT_PAGE_SIZE
 
-    seen: set[int] = set()
-    deduped: list[int] = []
+    seen: set[str] = set()
+    deduped: list[str] = []
     for value in found_ids:
         if value not in seen:
             seen.add(value)
@@ -399,7 +438,13 @@ def fetch_matching_ids(index: str, id_field: str, query: str, filter_string: str
     return deduped
 
 
-def write_subset_parquet(parquet_path: Path, id_column: str, ids: list[int], output_path: Path) -> int:
+def write_subset_parquet(
+    parquet_path: Path,
+    id_column: str,
+    ids: list[str],
+    output_path: Path,
+    exclude_columns: list[str] | None = None,
+) -> int:
     if not parquet_path.exists():
         raise FileNotFoundError(f"Missing parquet file: {parquet_path}")
 
@@ -408,21 +453,29 @@ def write_subset_parquet(parquet_path: Path, id_column: str, ids: list[int], out
     if id_column not in schema_names:
         raise RuntimeError(
             f"Column '{id_column}' not found in {parquet_path.name}. "
-            "Rebuild and reimport search data with numeric IDs."
+            "Rebuild and reimport search data with the expected ID column."
         )
+
+    exclude_columns = exclude_columns or []
 
     if not ids:
         empty_df = scan.limit(0).collect()
+        drop_cols = [col for col in exclude_columns if col in empty_df.columns]
+        if drop_cols:
+            empty_df = empty_df.drop(drop_cols)
         empty_df.write_parquet(str(output_path), compression="zstd")
         return 0
 
-    id_series = pl.Series(id_column, ids, dtype=pl.Int64)
-    df = scan.filter(pl.col(id_column).is_in(id_series)).collect(streaming=True)
+    id_series = pl.Series(id_column, [str(value) for value in ids], dtype=pl.Utf8)
+    df = scan.filter(pl.col(id_column).cast(pl.Utf8).is_in(id_series)).collect(streaming=True)
+    drop_cols = [col for col in exclude_columns if col in df.columns]
+    if drop_cols:
+        df = df.drop(drop_cols)
     df.write_parquet(str(output_path), compression="zstd")
     return df.height
 
 
-def fetch_matching_interaction_ids(query: str, filters: dict[str, Any]) -> list[int]:
+def fetch_matching_interaction_ids(query: str, filters: dict[str, Any]) -> list[str]:
     return fetch_matching_ids(
         index="search_interactions",
         id_field="interaction_id",
@@ -431,7 +484,7 @@ def fetch_matching_interaction_ids(query: str, filters: dict[str, Any]) -> list[
     )
 
 
-def fetch_matching_entity_ids(query: str, filters: dict[str, Any]) -> list[int]:
+def fetch_matching_entity_ids(query: str, filters: dict[str, Any]) -> list[str]:
     return fetch_matching_ids(
         index="search_entities",
         id_field="entity_id",
@@ -440,7 +493,7 @@ def fetch_matching_entity_ids(query: str, filters: dict[str, Any]) -> list[int]:
     )
 
 
-def fetch_matching_association_ids(query: str, filters: dict[str, Any]) -> list[int]:
+def fetch_matching_association_ids(query: str, filters: dict[str, Any]) -> list[str]:
     return fetch_matching_ids(
         index="search_associations",
         id_field="association_id",
@@ -449,13 +502,19 @@ def fetch_matching_association_ids(query: str, filters: dict[str, Any]) -> list[
     )
 
 
-def write_interaction_subset_parquet(interaction_ids: list[int], output_path: Path) -> int:
+def write_interaction_subset_parquet(interaction_ids: list[str], output_path: Path) -> int:
     return write_subset_parquet(INTERACTIONS_PARQUET, "interaction_id", interaction_ids, output_path)
 
 
-def write_entity_subset_parquet(entity_ids: list[int], output_path: Path) -> int:
-    return write_subset_parquet(ENTITIES_PARQUET, "entity_id", entity_ids, output_path)
+def write_entity_subset_parquet(entity_ids: list[str], output_path: Path) -> int:
+    return write_subset_parquet(
+        ENTITIES_PARQUET,
+        "entity_id",
+        entity_ids,
+        output_path,
+        exclude_columns=["names", "synonyms", "gene_symbols"],
+    )
 
 
-def write_association_subset_parquet(association_ids: list[int], output_path: Path) -> int:
+def write_association_subset_parquet(association_ids: list[str], output_path: Path) -> int:
     return write_subset_parquet(ASSOCIATIONS_PARQUET, "association_id", association_ids, output_path)
