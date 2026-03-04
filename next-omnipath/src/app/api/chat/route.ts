@@ -4,7 +4,8 @@ import type { UIMessage } from "ai";
 import { z } from "zod";
 import {
   searchMeilisearch,
-  searchInteractionsMeilisearch
+  searchInteractionsMeilisearch,
+  searchAssociationsMeilisearch
 } from "@/lib/meilisearch/search";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { INDEXES } from "@/lib/meilisearch/client";
@@ -34,6 +35,18 @@ interface CVTermHit {
   definition?: string;
   namespace?: { name?: string } | string;
   associated_entity_ids?: unknown[];
+  [key: string]: unknown;
+}
+
+interface AssociationHit {
+  id?: string | number;
+  association_key?: string;
+  parent_entity_id?: string;
+  parent_name?: string;
+  parent_entity_type?: string;
+  member_entity_id?: string;
+  member_name?: string;
+  member_entity_type?: string;
   [key: string]: unknown;
 }
 
@@ -74,10 +87,35 @@ Examples:
       query: z.string().describe("The search query (protein name, gene symbol, identifier, or description)"),
       searchType: z.enum(["entities", "cv_terms"]).default("entities").describe("What to search for: 'entities' (proteins/genes/complexes) or 'cv_terms' (controlled vocabulary terms like GO, DO, etc.)"),
       limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+      entityTypes: z.array(z.string()).optional().describe("Optional filter by entity type ontology terms (e.g. protein:MI:0326)"),
+      taxonomyIds: z.array(z.string()).optional().describe("Optional filter by NCBI taxonomy IDs (e.g. 9606 for human)"),
+      ontologyTerms: z.array(z.string()).optional().describe("Optional filter by broad ontology terms (GO, MI, OM, HP, KW)"),
+      sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ query, searchType, limit }: { query: string; searchType: "entities" | "cv_terms"; limit: number }) => {
+    execute: async ({ query, searchType, limit, entityTypes, taxonomyIds, ontologyTerms, sources }: {
+      query: string;
+      searchType: "entities" | "cv_terms";
+      limit: number;
+      entityTypes?: string[];
+      taxonomyIds?: string[];
+      ontologyTerms?: string[];
+      sources?: string[];
+    }) => {
       console.log(`Searching ${searchType} for: ${query}`);
       try {
+        const filters: MeilisearchFilters = {};
+        if (entityTypes?.length) filters.entity_types = entityTypes;
+        if (taxonomyIds?.length) filters.ncbi_tax_id = taxonomyIds;
+        if (sources?.length) filters.sources = sources;
+        if (ontologyTerms?.length) {
+          // Broadly search across all cv_terms
+          filters.cv_terms_go = ontologyTerms;
+          filters.cv_terms_mi = ontologyTerms;
+          filters.cv_terms_om = ontologyTerms;
+          filters.cv_terms_hp = ontologyTerms;
+          filters.cv_terms_kw = ontologyTerms;
+        }
+
         // Use the common ENTITIES index for both types
         // We could add filters here if needed to distinguish between entities and cv_terms
         // but for now we'll rely on the query matching relevant documents
@@ -86,6 +124,7 @@ Examples:
           index: INDEXES.ENTITIES,
           limit,
           offset: 0,
+          filters
         });
 
         const hits = (data.hits || []) as (EntityHit | CVTermHit)[];
@@ -242,14 +281,26 @@ To find interactions for a specific protein/gene:
 1. First use searchEntities to find the entity and get its ID
 2. Then use this tool with the entity ID`,
     inputSchema: z.object({
-      entityIds: z.array(z.union([z.string(), z.number()])).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs."),
+      entityIds: z.array(z.union([z.string(), z.number()])).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs if you want to anchor to a specific protein."),
       limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+      interactionTypes: z.array(z.string()).optional().describe("Optional filter by interaction types (e.g. 'protein:MI:0326|protein:MI:0326' or just a specific term if known)"),
+      ontologyTerms: z.array(z.string()).optional().describe("Optional filter by annotation terms (GO, MI, HP, OM, KW) found on the interaction or participants. E.g. 'MI:0217' for phosphorylation."),
+      hasDirection: z.boolean().optional().describe("Optional filter for directed (true) or undirected (false) interactions."),
+      isPositive: z.boolean().optional().describe("Optional filter for positive (activation/upregulation) interactions."),
+      isNegative: z.boolean().optional().describe("Optional filter for negative (inhibition/downregulation) interactions."),
+      sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ entityIds, limit }: {
+    execute: async ({ entityIds, limit, interactionTypes, ontologyTerms, hasDirection, isPositive, isNegative, sources }: {
       entityIds?: Array<string | number>;
       limit: number;
+      interactionTypes?: string[];
+      ontologyTerms?: string[];
+      hasDirection?: boolean;
+      isPositive?: boolean;
+      isNegative?: boolean;
+      sources?: string[];
     }) => {
-      console.log(`Searching interactions with entity IDs: ${entityIds?.join(', ') || 'none'}`);
+      console.log(`Searching interactions.`);
       try {
         // Build the request with filters
         const apiFilters: MeilisearchFilters = {};
@@ -257,6 +308,20 @@ To find interactions for a specific protein/gene:
         // Add entity IDs filter if provided
         if (entityIds && entityIds.length > 0) {
           apiFilters.entity_ids = entityIds.map((id) => String(id));
+        }
+
+        if (interactionTypes?.length) apiFilters.interaction_types = interactionTypes;
+        if (hasDirection !== undefined) apiFilters.has_direction = hasDirection;
+        if (isPositive !== undefined) apiFilters.has_positive_sign = isPositive;
+        if (isNegative !== undefined) apiFilters.has_negative_sign = isNegative;
+        if (sources?.length) apiFilters.sources = sources;
+        if (ontologyTerms?.length) {
+          apiFilters.interaction_annotation_terms = ontologyTerms;
+          apiFilters.participant_annotation_terms_go = ontologyTerms;
+          apiFilters.participant_annotation_terms_hp = ontologyTerms;
+          apiFilters.participant_annotation_terms_mi = ontologyTerms;
+          apiFilters.participant_annotation_terms_om = ontologyTerms;
+          apiFilters.participant_annotation_terms_kw = ontologyTerms;
         }
 
         const requestParams = {
@@ -341,6 +406,75 @@ To find interactions for a specific protein/gene:
       }
     },
   },
+
+  searchAssociations: {
+    description: `Search for associations (complex memberships, pathways, and reactions).
+IMPORTANT: The associations index does NOT search by abstract entity names. Use searchEntities first.`,
+    inputSchema: z.object({
+      parentEntityIds: z.array(z.string()).optional().describe("IDs of the parent entity (e.g. the Complex ID)."),
+      memberEntityIds: z.array(z.string()).optional().describe("IDs of the member entities (e.g. a specific protein in the complex)."),
+      parentEntityTypes: z.array(z.string()).optional().describe("Ontology terms for the parent (e.g. 'complex:MI:0314')."),
+      memberEntityTypes: z.array(z.string()).optional().describe("Ontology terms for the members."),
+      ontologyTerms: z.array(z.string()).optional().describe("Association annotation terms."),
+      sources: z.array(z.string()).optional().describe("Source prefixes."),
+      limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+    }),
+    execute: async ({ parentEntityIds, memberEntityIds, parentEntityTypes, memberEntityTypes, ontologyTerms, sources, limit }: {
+      parentEntityIds?: string[];
+      memberEntityIds?: string[];
+      parentEntityTypes?: string[];
+      memberEntityTypes?: string[];
+      ontologyTerms?: string[];
+      sources?: string[];
+      limit: number;
+    }) => {
+      console.log(`Searching associations.`);
+      try {
+        const apiFilters: MeilisearchFilters = {};
+
+        if (parentEntityIds?.length) apiFilters.parent_entity_ids = parentEntityIds;
+        if (memberEntityIds?.length) apiFilters.member_entity_ids = memberEntityIds;
+        if (parentEntityTypes?.length) apiFilters.parent_entity_types = parentEntityTypes;
+        if (memberEntityTypes?.length) apiFilters.member_entity_types = memberEntityTypes;
+        if (ontologyTerms?.length) apiFilters.association_annotation_terms = ontologyTerms;
+        if (sources?.length) apiFilters.sources = sources;
+
+        const requestParams = {
+          query: "",
+          limit,
+          offset: 0,
+          index: INDEXES.ASSOCIATIONS,
+          filters: apiFilters,
+        };
+
+        const data = await searchAssociationsMeilisearch(requestParams);
+        const hits = (data.hits || []) as AssociationHit[];
+
+        const exampleAssociations = hits.slice(0, 5).map(hit => ({
+          parent: hit.parent_name || hit.parent_entity_id,
+          member: hit.member_name || hit.member_entity_id,
+          parentType: hit.parent_entity_type,
+          memberType: hit.member_entity_type,
+        }));
+
+        const facetStats = (data.facetDistribution || {}) as Record<string, Record<string, number>>;
+
+        return {
+          totalCount: data.estimatedTotalHits || hits.length,
+          exampleAssociations,
+          facetStatistics: {
+            parentEntityTypes: facetStats['parent_entity_type'] || {},
+            memberEntityTypes: facetStats['member_entity_type'] || {},
+            sources: facetStats['sources'] || {},
+            associationAnnotationTerms: facetStats['association_annotation_terms'] || {},
+          },
+        };
+      } catch (error: unknown) {
+        console.error("Error searching associations:", error);
+        return { error: error instanceof Error ? error.message : 'Unknown search error' };
+      }
+    },
+  },
 };
 
 
@@ -362,76 +496,38 @@ export async function POST(req: Request) {
         id: crypto.randomUUID(),
         role: "system",
         parts: [{
-          type: "text", text: `You are OmniPath AI, a helpful assistant knowledgeable about molecular interactions, pathways, and biological annotations based on the OmniPath database.
+          type: "text", text: `You are OmniPath AI, a powerful assistant for OmniPath, a database of molecular interactions, pathways, and biological annotations.
 
 Your capabilities:
-- Search for proteins, genes, complexes, and controlled vocabulary terms
-- Find molecular interactions and their evidence
+1. Search Entities: Find proteins, genes, complexes, or resolve ontology terms (searchType="cv_terms").
+2. Search Interactions: Find directed/undirected, positive/negative edges, filtered by entity, ontology term, or source.
+3. Search Associations: Find complex memberships, pathways, and reactions.
 
-Guidelines:
-- Use the search tools when users ask about specific proteins, genes, or interactions
-- Be concise but informative
-- Today's date is ${new Date().toLocaleDateString()}
+Today's date is ${new Date().toLocaleDateString()}.
 
-CRITICAL: Finding interactions for proteins/genes:
-When users ask about interactions involving specific proteins or genes (e.g., "Show me p53 interactions", "what interacts with EGFR"):
-1. FIRST use searchEntities to find the protein/gene and get its DATABASE ID (the 'id' field, NOT the canonical_identifier)
-2. Tell the user: "I found [entity name] ([canonical_identifier]). Let me search for its interactions..."
-3. THEN YOU MUST IMMEDIATELY call searchInteractions with the entity's DATABASE ID (the numeric 'id' field from the search results)
-4. DO NOT use canonical_identifier (like P00533) for searchInteractions - use the numeric 'id' field
-5. This two-step process is REQUIRED because the interactions index cannot search by name
+CRITICAL: EXPLORATION WORKFLOW
+Users often ask vague queries (e.g., "phosphorylation interactions"). You don't always need a specific anchor protein!
+To handle abstract concepts:
+1. Resolve the abstract term FIRST. Call searchEntities with \`searchType: "cv_terms"\` and \`query: "phosphorylation"\`.
+2. Inspect the result to find its ontology ID (e.g., \`MI:0217\`).
+3. Use that exact ID in the \`ontologyTerms\` filter when calling \`searchInteractions\` or \`searchAssociations\`.
 
-Example flow:
-User: "Show me EGFR interactions"
-You: [Call searchEntities for "EGFR"]
-Result has: {id: "12345", canonical_identifier: "P00533", display_name: "EGFR", ...}
-You: "I found EGFR (P00533). Let me search for its interactions..."
-You: [Call searchInteractions with entityIds: ["12345"]] // Use the id field, NOT P00533
-You: [Display the interaction results]
+CRITICAL: ANCHORED SEARCHES
+If someone asks "What does EGFR interact with?" or "Interactions for TP53":
+1. First use \`searchEntities\` to find the specific database ID (the numeric 'id' field, NOT a canonical identifier).
+2. Call \`searchInteractions\` (or \`searchAssociations\`) using that numeric ID in \`entityIds\` (or \`parent/memberEntityIds\`).
 
-CRITICAL: When presenting interaction search results:
-The searchInteractions tool returns detailed facet statistics that provide a comprehensive overview of the interaction data. You MUST focus on these statistics when describing results:
+CRITICAL: PRESENTING RESULTS
+- You MUST focus on summarizing facet statistics.
+- DO NOT list more than 1 or 2 interactions directly unless asked.
+- Provide a summary of: total interactions/entities found, top sources, top interaction types, directionality splits, and causal info.
 
-1. START with the total number of interactions found
-2. EMPHASIZE the facet statistics:
-   - Mention the NUMBER of unique interaction types, data sources, and detection methods
-   - List the TOP 3-5 interaction types with their counts (e.g., "physical association (523), direct interaction (312)")
-   - List the TOP 3-5 data sources with their counts
-   - Highlight detection methods if relevant
-   - Mention the breakdown of directed vs undirected interactions
-   - Note any causal information (activation/inhibition) if present
-
-3. Only briefly mention 1-2 example interactions at the end
-4. DO NOT list individual interactions unless specifically asked
-
-Example response format:
-"I found 847 interactions involving EGFR. Here's an overview of the interaction data:
-
-**Interaction Types:** The interactions span 12 different types, with the most common being:
-- Physical association (234 interactions)
-- Direct interaction (189 interactions)
-- Phosphorylation (98 interactions)
-- Activation (67 interactions)
-- Binding (45 interactions)
-
-**Data Sources:** These interactions come from 8 different databases:
-- BioGRID (312 interactions)
-- IntAct (245 interactions)
-- SIGNOR (178 interactions)
-- STRING (89 interactions)
-
-**Detection Methods:** 15 different experimental methods were used, including affinity chromatography technology (123), two hybrid (89), and anti bait coimmunoprecipitation (67).
-
-**Directionality:** 523 interactions are directed (showing regulatory relationships) while 324 are undirected.
-
-For example, EGFR phosphorylates STAT3 (supported by 12 evidence records) and physically associates with GRB2 (23 evidence records)."
-
-After receiving tool responses:
-1. Transform raw data into natural, conversational responses
-2. The search results will highlight the best match automatically
-3. For entities, mention their function, organism, and interaction count
-4. For CV terms, explain their meaning and associated entities
-5. Suggest follow-up queries when appropriate
+Example response format for a facet summary:
+"I found 847 interactions. Here's an overview:
+**Interaction Types:** Physical association (234), Direct interaction (189), Phosphorylation (98).
+**Data Sources:** BioGRID (312), IntAct (245).
+...
+For example, EGFR phosphorylates STAT3."
 ` }],
       });
     }
