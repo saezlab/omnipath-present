@@ -94,10 +94,12 @@ export function AssociationsExploreTab({
     const [error, setError] = useState<string | null>(null);
 
     // Get selected entity IDs
-    const selectedEntityIds = useMemo(() =>
-        selectedEntities
-            .map(e => e.entityId || parseInt(e.id, 10))
-            .filter(id => !isNaN(id)),
+    const selectedEntityIds = useMemo(
+        () =>
+            selectedEntities
+                .map((e) => e.entityId ?? e.id)
+                .map((id) => String(id).trim())
+                .filter((id) => id.length > 0),
         [selectedEntities]
     );
 

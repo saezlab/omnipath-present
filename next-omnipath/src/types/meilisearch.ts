@@ -25,12 +25,12 @@ export interface MeilisearchInteraction {
   // Deterministic numeric identifier for exports/subsetting
   interaction_id?: number;
 
-  // Primary key - pair key like "123-456"
+  // Primary key - pair key like "idA-idB"
   interaction_key: string;
 
-  // Member entity IDs
-  member_a_id: number;
-  member_b_id: number;
+  // Member entity IDs (string IDs)
+  member_a_id: string;
+  member_b_id: string;
 
   // Member types as "TypeName:EntityId" format
   member_types: string[];
@@ -88,13 +88,13 @@ export interface MeilisearchAssociation {
   association_key: string;
 
   // Parent entity info
-  parent_entity_id: number;
+  parent_entity_id: string;
   parent_entity_type: string;
   parent_name: string;
   parent_identifiers: IdentifierEntry[];
 
   // Member entity info
-  member_entity_id: number;
+  member_entity_id: string;
   member_entity_type: string;
   member_name: string;
   member_identifiers: IdentifierEntry[];
@@ -117,9 +117,9 @@ export interface CvTermReference {
 
 export interface MeilisearchFilters {
   // Interaction filters (new schema)
-  member_a_id?: number;
-  member_b_id?: number;
-  entity_ids?: number[];  // Filter by multiple entity IDs (matches member_a_id OR member_b_id)
+  member_a_id?: string | number;
+  member_b_id?: string | number;
+  entity_ids?: Array<string | number>;  // Filter by multiple entity IDs (matches member_a_id OR member_b_id)
   interaction_types?: string[];
   has_direction?: boolean | null;
   has_positive_sign?: boolean | null;
@@ -145,8 +145,8 @@ export interface MeilisearchFilters {
   cv_terms_kw?: string[];
 
   // Association filters
-  parent_entity_ids?: number[];
-  member_entity_ids?: number[];
+  parent_entity_ids?: Array<string | number>;
+  member_entity_ids?: Array<string | number>;
   parent_entity_types?: string[];
   member_entity_types?: string[];
   association_annotation_terms?: string[];

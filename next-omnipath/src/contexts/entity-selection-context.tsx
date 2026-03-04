@@ -8,7 +8,7 @@ import type { MeilisearchAssociation } from "@/types/meilisearch"
 
 export interface SelectedEntity {
   id: string
-  entityId?: number
+  entityId?: string | number
   name: string
   type?: string
   // CV terms - now stored as string accessions (e.g., GO:0006915)
@@ -17,7 +17,7 @@ export interface SelectedEntity {
   // Store full search result for proper display
   fullResult?: SearchResult
   // Associated entity IDs (from complexes, pathways, etc.)
-  associated_entity_ids?: number[]
+  associated_entity_ids?: Array<string | number>
 }
 
 
@@ -49,7 +49,7 @@ export function EntitySelectionProvider({ children }: { children: ReactNode }) {
     }
 
     // Fetch associated entity IDs if we have a numeric entity ID
-    let associated_entity_ids: number[] = []
+    let associated_entity_ids: Array<string | number> = []
     if (entity.entityId) {
       try {
         // Query associations in both directions
@@ -71,7 +71,7 @@ export function EntitySelectionProvider({ children }: { children: ReactNode }) {
         ])
 
         // Extract unique entity IDs from both queries
-        const entityIdSet = new Set<number>()
+        const entityIdSet = new Set<string | number>()
         const parentHits = parentsResponse.hits as MeilisearchAssociation[]
         const memberHits = membersResponse.hits as MeilisearchAssociation[]
 

@@ -138,7 +138,7 @@ export function InteractionsExploreTab({
   const [allInteractions, setAllInteractions] = useState<MeilisearchInteraction[]>([]);
   const [isLoadingAll, setIsLoadingAll] = useState(false);
   const [hasLoadedGraphData, setHasLoadedGraphData] = useState(false);
-  const [entityMap, setEntityMap] = useState<Map<number, EntityInfo>>(new Map());
+  const [entityMap, setEntityMap] = useState<Map<string, EntityInfo>>(new Map());
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("search");
 
   // Check if there are ontology terms available
@@ -162,7 +162,7 @@ export function InteractionsExploreTab({
       if (results.length === 0) return;
 
       // Collect all unique entity IDs from results
-      const entityIds = new Set<number>();
+      const entityIds = new Set<string>();
       for (const interaction of results) {
         entityIds.add(interaction.member_a_id);
         entityIds.add(interaction.member_b_id);

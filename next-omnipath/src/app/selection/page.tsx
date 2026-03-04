@@ -18,18 +18,23 @@ export default function SelectionPage() {
   const [loadingCounts, setLoadingCounts] = useState(true);
 
   // Get selected entity IDs for filtering
-  const selectedEntityIds = useMemo(() =>
-    selectedEntities
-      .map(e => e.entityId || parseInt(e.id, 10))
-      .filter(id => !isNaN(id)),
+  const selectedEntityIds = useMemo(
+    () =>
+      selectedEntities
+        .map((e) => e.entityId ?? e.id)
+        .map((id) => String(id).trim())
+        .filter((id) => id.length > 0),
     [selectedEntities]
   );
 
   // Get associated entity IDs from context
   const associatedEntityIds = useMemo(() => {
-    const entityIdSet = new Set<number>();
-    selectedEntities.forEach(entity => {
-      entity.associated_entity_ids?.forEach(id => entityIdSet.add(id));
+    const entityIdSet = new Set<string>();
+    selectedEntities.forEach((entity) => {
+      entity.associated_entity_ids?.forEach((id) => {
+        const normalized = String(id).trim();
+        if (normalized) entityIdSet.add(normalized);
+      });
     });
     return Array.from(entityIdSet);
   }, [selectedEntities]);
@@ -121,27 +126,37 @@ export default function SelectionPage() {
         </div>
 
         <TabsContent value="selection" className="flex-1 overflow-hidden mt-0">
-          <SearchPage
-            embedded={true}
-            allowOntologyInEmbedded={true}
-            showLayoutSwitcherInEmbedded={true}
-            showFilters={true}
-            initialFilters={{ entity_ids: selectedEntityIds }}
-          />
+          {selectedEntityIds.length > 0 ? (
+            <SearchPage
+              key={`selection:${selectedEntityIds.join(",")}`}
+              embedded={true}
+              allowOntologyInEmbedded={true}
+              showLayoutSwitcherInEmbedded={true}
+              showFilters={true}
+              initialFilters={{ entity_ids: selectedEntityIds }}
+              lockedEntityIds={selectedEntityIds}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <p className="text-muted-foreground">No valid selected entity IDs found</p>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="interactions" className="flex-1 overflow-hidden mt-0">
-          <InteractionsPage />
+          <InteractionsPage lockedEntityIds={selectedEntityIds} />
         </TabsContent>
 
         <TabsContent value="associations" className="flex-1 overflow-hidden mt-0">
           {associatedEntityIds.length > 0 ? (
             <SearchPage
+              key={`associations:${associatedEntityIds.join(",")}`}
               embedded={true}
               allowOntologyInEmbedded={true}
               showLayoutSwitcherInEmbedded={true}
               showFilters={true}
               initialFilters={{ entity_ids: associatedEntityIds }}
+              lockedEntityIds={associatedEntityIds}
             />
           ) : (
             <div className="flex items-center justify-center py-12">

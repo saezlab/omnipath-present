@@ -4,7 +4,7 @@ export function buildEntityFilterString(filters: MeilisearchFilters): string {
   const filterParts: string[] = [];
 
   if (filters.entity_ids?.length) {
-    const ids = filters.entity_ids.join(", ");
+    const ids = filters.entity_ids.map((id) => `"${id}"`).join(", ");
     filterParts.push(`entity_id IN [${ids}]`);
   }
 
@@ -52,17 +52,17 @@ export function buildInteractionFilterString(filters: MeilisearchFilters): strin
 
   if (filters.entity_ids?.length) {
     const entityFilters = filters.entity_ids
-      .map((id) => `(member_a_id = ${id} OR member_b_id = ${id})`)
+      .map((id) => `(member_a_id = "${id}" OR member_b_id = "${id}")`)
       .join(" OR ");
     filterParts.push(`(${entityFilters})`);
   }
 
   if (filters.member_a_id !== undefined) {
-    filterParts.push(`(member_a_id = ${filters.member_a_id} OR member_b_id = ${filters.member_a_id})`);
+    filterParts.push(`(member_a_id = "${filters.member_a_id}" OR member_b_id = "${filters.member_a_id}")`);
   }
 
   if (filters.member_b_id !== undefined) {
-    filterParts.push(`(member_a_id = ${filters.member_b_id} OR member_b_id = ${filters.member_b_id})`);
+    filterParts.push(`(member_a_id = "${filters.member_b_id}" OR member_b_id = "${filters.member_b_id}")`);
   }
 
   if (filters.interaction_types?.length) {

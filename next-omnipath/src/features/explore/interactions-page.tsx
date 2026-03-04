@@ -10,88 +10,107 @@ import { useEntitySelection } from "@/contexts/entity-selection-context";
 
 interface InteractionsPageProps {
     useEntityFilters?: boolean;
+    lockedEntityIds?: Array<string | number>;
 }
 
-export default function InteractionsPage({ useEntityFilters = true }: InteractionsPageProps) {
+const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
+
+export default function InteractionsPage({ useEntityFilters = true, lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS }: InteractionsPageProps) {
     const { setSidebarContent } = useSidebarContent();
     const searchParams = useSearchParams();
     const { selectedEntities } = useEntitySelection();
 
     // Get selected entity IDs from context
-    const selectedEntityIds = useMemo(() =>
-        selectedEntities
-            .map(e => e.entityId || parseInt(e.id, 10))
-            .filter(id => !isNaN(id)),
+    const selectedEntityIds = useMemo(
+        () =>
+            selectedEntities
+                .map((e) => e.entityId ?? e.id)
+                .map((id) => String(id).trim())
+                .filter((id) => id.length > 0),
         [selectedEntities]
     );
 
-    // Parse entity IDs from URL params
-    const parseEntityIds = useCallback(() => {
-        const singleEntity = searchParams.get("entity");
-        const multipleEntities = searchParams.get("entities");
+    const normalizedLockedEntityIds = useMemo(
+        () => lockedEntityIds.map((id) => String(id).trim()).filter((id) => id.length > 0),
+        [lockedEntityIds]
+    );
 
-        if (multipleEntities) {
-            const ids = multipleEntities.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+    const singleEntityParam = searchParams.get("entity") || "";
+    const multiEntityParam = searchParams.get("entities") || "";
+
+    // Parse entity IDs from URL params
+    const urlEntityIds = useMemo(() => {
+        if (multiEntityParam) {
+            const ids = multiEntityParam
+                .split(',')
+                .map((id) => id.trim())
+                .filter((id) => id.length > 0);
             return ids.length > 0 ? ids : undefined;
         }
-        if (singleEntity) {
-            const id = parseInt(singleEntity, 10);
-            return !isNaN(id) ? [id] : undefined;
+        if (singleEntityParam) {
+            const id = singleEntityParam.trim();
+            return id ? [id] : undefined;
         }
         return undefined;
-    }, [searchParams]);
+    }, [singleEntityParam, multiEntityParam]);
 
-    // Interactions filter state - use URL params first, then fall back to entity selection context
+    const enforceEntityScope = useCallback((next: MeilisearchFilters): MeilisearchFilters => {
+        if (!useEntityFilters) return next;
+
+        const scopedEntityIds =
+            normalizedLockedEntityIds.length > 0
+                ? normalizedLockedEntityIds
+                : urlEntityIds ?? (selectedEntityIds.length > 0 ? selectedEntityIds : undefined);
+
+        if (!scopedEntityIds || scopedEntityIds.length === 0) {
+            return next;
+        }
+
+        const prevIds = (next.entity_ids || []).map((id) => String(id));
+        const sameLength = prevIds.length === scopedEntityIds.length;
+        const sameValues = sameLength && prevIds.every((id, idx) => id === scopedEntityIds[idx]);
+        const alreadyScoped = sameValues && next.member_a_id === undefined && next.member_b_id === undefined;
+        if (alreadyScoped) {
+            return next;
+        }
+
+        return {
+            ...next,
+            entity_ids: scopedEntityIds,
+            member_a_id: undefined,
+            member_b_id: undefined,
+        };
+    }, [useEntityFilters, normalizedLockedEntityIds, urlEntityIds, selectedEntityIds]);
+
+    // Interactions filter state - use locked IDs first, then URL params, then selection context
     const [filters, setFilters] = useState<MeilisearchFilters>(() => {
         if (!useEntityFilters) {
             return {};
         }
-        const urlEntityIds = parseEntityIds();
-        if (urlEntityIds?.length) {
-            return { entity_ids: urlEntityIds };
-        }
-        if (selectedEntityIds.length > 0) {
-            return { entity_ids: selectedEntityIds };
-        }
-        return {};
+        return enforceEntityScope({});
     });
     const [filterCounts, setFilterCounts] = useState<Record<string, Record<string, number>>>({});
 
     // Handlers for interactions filters
     const handleFilterChange = useCallback((newFilters: MeilisearchFilters) => {
-        setFilters(newFilters);
-    }, []);
+        setFilters(enforceEntityScope(newFilters));
+    }, [enforceEntityScope]);
 
     const handleClearFilters = useCallback(() => {
-        setFilters({});
-    }, []);
+        setFilters(enforceEntityScope({}));
+    }, [enforceEntityScope]);
 
     const handleFilterCountsUpdate = useCallback((counts: Record<string, Record<string, number>>) => {
         setFilterCounts(counts);
     }, []);
 
-    // Sync URL params and entity selection context with filter state
+    // Sync URL params / selection / locked scope with filter state
     useEffect(() => {
         if (!useEntityFilters) {
             return;
         }
-        const urlEntityIds = parseEntityIds();
-        if (urlEntityIds?.length) {
-            // URL params take priority
-            setFilters(prev => ({
-                ...prev,
-                entity_ids: urlEntityIds,
-                member_a_id: undefined
-            }));
-        } else if (selectedEntityIds.length > 0) {
-            // Fall back to entity selection context
-            setFilters(prev => ({
-                ...prev,
-                entity_ids: selectedEntityIds,
-                member_a_id: undefined
-            }));
-        }
-    }, [searchParams, parseEntityIds, selectedEntityIds, useEntityFilters]);
+        setFilters((prev) => enforceEntityScope(prev));
+    }, [singleEntityParam, multiEntityParam, selectedEntityIds, normalizedLockedEntityIds, useEntityFilters, enforceEntityScope]);
 
     // Set sidebar content
     useEffect(() => {

@@ -219,13 +219,13 @@ function buildAssociationsFilterString(filters: MeilisearchFilters): string {
 
   // Parent entity IDs filter
   if (filters.parent_entity_ids?.length) {
-    const parentFilters = filters.parent_entity_ids.map(id => `parent_entity_id = ${id}`).join(' OR ');
+    const parentFilters = filters.parent_entity_ids.map(id => `parent_entity_id = "${id}"`).join(' OR ');
     filterParts.push(`(${parentFilters})`);
   }
 
   // Member entity IDs filter
   if (filters.member_entity_ids?.length) {
-    const memberFilters = filters.member_entity_ids.map(id => `member_entity_id = ${id}`).join(' OR ');
+    const memberFilters = filters.member_entity_ids.map(id => `member_entity_id = "${id}"`).join(' OR ');
     filterParts.push(`(${memberFilters})`);
   }
 

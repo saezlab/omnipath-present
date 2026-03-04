@@ -2,7 +2,7 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
-import { useCallback, useEffect, useRef, useState, useTransition, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type UIEvent } from "react";
 import { searchMeilisearch } from "./api/queries";
 import { EntityFilterSidebar } from "./components/entity-filter-sidebar";
 import type { SearchResult } from "./components/result-card";
@@ -28,7 +28,7 @@ interface SearchPageProps {
   initialQuery?: string;
   initialSearchType?: "search_entities" | "cv_terms";
   initialFilters?: {
-    entity_ids?: number[];
+    entity_ids?: Array<string | number>;
     entity_types?: string[];
     sources?: string[];
     ncbi_tax_id?: string[];
@@ -40,10 +40,14 @@ interface SearchPageProps {
   };
   // Whether to show filter sidebar even when embedded
   showFilters?: boolean;
+  // Entity IDs that must always remain in the filter set (e.g. selection view)
+  lockedEntityIds?: Array<string | number>;
 }
 
 type SearchMode = "full-text" | "identifier" | "batch";
 type LayoutMode = "search" | "split" | "ontology";
+
+const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
 
 export default function SearchPage({
   embedded = false,
@@ -52,15 +56,24 @@ export default function SearchPage({
   initialQuery = "",
   initialSearchType = "search_entities",
   initialFilters,
-  showFilters = false
+  showFilters = false,
+  lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS
 }: SearchPageProps = {}) {
   const [query, setQuery] = useState(initialQuery);
   const [, startTransition] = useTransition();
   const [searchMode, setSearchMode] = useState<SearchMode>("full-text");
   const [selectedSpecies, setSelectedSpecies] = useState<string>("9606"); // Default to Human
-  const [filters, setFilters] = useState<MeilisearchFilters>(
-    initialFilters || { ncbi_tax_id: ["9606"] }
+  const normalizedLockedEntityIds = useMemo(
+    () => lockedEntityIds.map((id) => String(id).trim()).filter((id) => id.length > 0),
+    [lockedEntityIds]
   );
+  const [filters, setFilters] = useState<MeilisearchFilters>(() => {
+    const base = initialFilters || { ncbi_tax_id: ["9606"] };
+    if (normalizedLockedEntityIds.length > 0) {
+      return { ...base, entity_ids: normalizedLockedEntityIds };
+    }
+    return base;
+  });
   const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; cv_terms?: Record<string, number> }>({});
   const [ontologyFacetCountsByPrefix, setOntologyFacetCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
@@ -135,24 +148,50 @@ export default function SearchPage({
     dependencies: [query, searchMode, initialSearchType, filters]
   });
 
+  // Keep locked entity IDs enforced
+  useEffect(() => {
+    if (normalizedLockedEntityIds.length === 0) return;
+    setFilters((prev) => {
+      const prevIds = (prev.entity_ids || []).map((id) => String(id));
+      const sameLength = prevIds.length === normalizedLockedEntityIds.length;
+      const sameValues = sameLength && prevIds.every((id, idx) => id === normalizedLockedEntityIds[idx]);
+      if (sameValues) return prev;
+      return { ...prev, entity_ids: normalizedLockedEntityIds };
+    });
+  }, [normalizedLockedEntityIds]);
+
   // Handlers for filters
   const handleFilterChange = useCallback((newFilters: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) => {
-    setFilters(newFilters);
-  }, []);
+    setFilters({
+      ...newFilters,
+      ...(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {}),
+    });
+  }, [normalizedLockedEntityIds]);
 
   const handleClearFilters = useCallback(() => {
+    if (normalizedLockedEntityIds.length > 0) {
+      setFilters({ entity_ids: normalizedLockedEntityIds });
+      return;
+    }
     setFilters({ ncbi_tax_id: [selectedSpecies] });
-  }, [selectedSpecies]);
+  }, [normalizedLockedEntityIds, selectedSpecies]);
 
   // Handler for species change
   const handleSpeciesChange = useCallback((species: string) => {
     setSelectedSpecies(species);
-    setFilters(prev => ({ ...prev, ncbi_tax_id: [species] }));
-  }, []);
+    setFilters(prev => ({
+      ...prev,
+      ncbi_tax_id: [species],
+      ...(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {}),
+    }));
+  }, [normalizedLockedEntityIds]);
 
   const handleAnnotationFilterChange = useCallback((newFilters: MeilisearchFilters) => {
-    setFilters(newFilters);
-  }, []);
+    setFilters({
+      ...newFilters,
+      ...(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {}),
+    });
+  }, [normalizedLockedEntityIds]);
 
   const hasOntologyTerms = Object.values(ontologyFacetCountsByPrefix).some(
     (counts) => Object.keys(counts).length > 0

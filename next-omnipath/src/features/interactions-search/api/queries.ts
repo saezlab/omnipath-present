@@ -82,20 +82,19 @@ function getShortestName(names: string[] | undefined): string | undefined {
 /**
  * Fetch entities by their IDs
  */
-export async function fetchEntitiesByIds(entityIds: number[]): Promise<Map<number, EntityInfo>> {
+export async function fetchEntitiesByIds(entityIds: string[]): Promise<Map<string, EntityInfo>> {
   if (entityIds.length === 0) {
     return new Map();
   }
 
   try {
     const uniqueIds = [...new Set(entityIds)];
-    const stringIds = uniqueIds.map(id => id.toString());
 
-    const data = await fetchMeilisearchDocuments(INDEXES.ENTITIES, stringIds, 'entity_id');
-    const entityMap = new Map<number, EntityInfo>();
+    const data = await fetchMeilisearchDocuments(INDEXES.ENTITIES, uniqueIds, 'entity_id');
+    const entityMap = new Map<string, EntityInfo>();
 
     for (const doc of data.documents) {
-      const id = Number(doc.entity_id);
+      const id = String(doc.entity_id);
       const names = doc.names as string[] | undefined;
       const geneSymbols = doc.gene_symbols as string[] | undefined;
       const entityType = doc.entity_type as string | undefined;

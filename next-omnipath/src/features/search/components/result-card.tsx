@@ -274,7 +274,7 @@ export type Identifier = { key: string; value: string };
 
 export interface SearchResult {
   id: string;
-  entity_id?: number;  // The actual entity ID from the database
+  entity_id?: string | number;  // Canonical entity ID
   type?: string;
   _formatted?: {
     entity_type?: string;        // "Label:entity_id" like "Protein:385235"

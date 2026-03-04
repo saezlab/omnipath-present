@@ -148,11 +148,16 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
     const [activeTab, setActiveTab] = useState("interactions");
     const [interactionsCount, setInteractionsCount] = useState<number | null>(null);
     const [associationsCount, setAssociationsCount] = useState<number>(0);
-    const [associatedEntityIds, setAssociatedEntityIds] = useState<number[]>([]);
+    const [associatedEntityIds, setAssociatedEntityIds] = useState<string[]>([]);
     const [loadingCounts, setLoadingCounts] = useState(true);
 
     // Get entity ID
-    const entityId = entity?.entity_id ?? (entity?.id ? parseInt(entity.id, 10) : null);
+    const entityId = useMemo(() => {
+        if (!entity) return null;
+        const raw = entity.entity_id ?? entity.id;
+        if (raw === undefined || raw === null) return null;
+        return String(raw);
+    }, [entity]);
     const entityIds = useMemo(() => (entityId ? [entityId] : []), [entityId]);
 
     // Filters for interactions tab
@@ -208,7 +213,7 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
                 ]);
 
                 // Extract unique entity IDs
-                const entityIdSet = new Set<number>();
+                const entityIdSet = new Set<string>();
                 const parentHits = parentsResponse.hits as MeilisearchAssociation[];
                 const memberHits = membersResponse.hits as MeilisearchAssociation[];
 
