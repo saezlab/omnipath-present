@@ -13,7 +13,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import React, { useMemo, useState } from "react";
-import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ArrowRight, ListOrdered, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
+import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { MoleculeStructure } from "./molecule_structure";
 import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search";
@@ -320,12 +320,6 @@ export interface SearchResult {
   canonical_smiles?: string;
   formula?: string;
   molecular_weight?: number;
-  // Reaction fields
-  reactants?: number[];
-  products?: number[];
-  stoichiometry?: string[]; // "ID:Stoich"
-  // Pathway fields
-  pathway_steps?: string[]; // "Order:ID"
   // Source-browser fields
   source_name?: string;
   source_ref?: string;
@@ -431,103 +425,6 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
   );
 }
 
-
-// Component to display a reaction equation
-function ReactionDisplay({ result, names = {} }: { result: SearchResult, names?: Record<string, string> }) {
-  const reactants = result.reactants || [];
-  const products = result.products || [];
-  const stoichiometry = result.stoichiometry || [];
-
-  console.log("ReactionDisplay", { id: result.id, reactants, products, stoichiometry });
-
-  if (reactants.length === 0 && products.length === 0) {
-    console.log("ReactionDisplay: No reactants or products, returning null");
-    return null;
-  }
-
-  if (reactants.length === 0 && products.length === 0) {
-    console.log("ReactionDisplay: No reactants or products, returning null");
-    return null;
-  }
-
-  // Parse stoichiometry map: ID -> Coefficient
-  const stoichMap: Record<string, string> = {};
-  stoichiometry.forEach(s => {
-    if (!s) return;
-    const [id, val] = s.split(':');
-    if (id && val) stoichMap[id] = val;
-  });
-
-  const formatPart = (id: number) => {
-    const sid = String(id);
-    const name = names[sid] || `Entity ${id}`;
-    const coeff = stoichMap[sid];
-    return (
-      <span key={id} className="inline-flex items-center">
-        {coeff && coeff !== "1" && <span className="font-bold mr-1 text-muted-foreground">{coeff}</span>}
-        <span className="hover:underline cursor-help" title={`ID: ${id}`}>{name}</span>
-      </span>
-    );
-  };
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-sm p-3 bg-muted/30 rounded-md my-2">
-      <div className="flex flex-wrap gap-1 items-center">
-        {reactants.map((id, i) => (
-          <React.Fragment key={id}>
-            {i > 0 && <span className="text-muted-foreground">+</span>}
-            {formatPart(id)}
-          </React.Fragment>
-        ))}
-      </div>
-      <ArrowRight className="h-4 w-4 text-muted-foreground mx-1" />
-      <div className="flex flex-wrap gap-1 items-center">
-        {products.map((id, i) => (
-          <React.Fragment key={id}>
-            {i > 0 && <span className="text-muted-foreground">+</span>}
-            {formatPart(id)}
-          </React.Fragment>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Component to display pathway steps
-function PathwayDisplay({ result, names = {} }: { result: SearchResult, names?: Record<string, string> }) {
-  const steps = result.pathway_steps || [];
-
-  if (steps.length === 0) return null;
-
-  if (steps.length === 0) return null;
-
-  // Parse and sort steps
-  const parsedSteps = steps
-    .filter(Boolean) // Filter out null/undefined strings
-    .map(s => {
-      const [order, id] = s.split(':');
-      return { order: parseInt(order), id };
-    })
-    .sort((a, b) => a.order - b.order);
-
-  return (
-    <div className="mt-2">
-      <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-1 flex items-center gap-1">
-        <ListOrdered className="h-3 w-3" /> Pathway Steps
-      </h4>
-      <ScrollArea className="h-32 w-full rounded-md border bg-muted/30 p-2">
-        <ul className="space-y-1 text-sm">
-          {parsedSteps.map((step, i) => (
-            <li key={`${step.id}-${i}`} className="flex gap-2">
-              <span className="text-muted-foreground w-6 text-right shrink-0">{step.order}.</span>
-              <span>{names[step.id] || `Entity ${step.id}`}</span>
-            </li>
-          ))}
-        </ul>
-      </ScrollArea>
-    </div>
-  );
-}
 
 // Molecule-specific result card
 function MoleculeResultCard({ result }: { result: SearchResult }) {
@@ -712,7 +609,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
   );
 }
 
-export function ResultCard({ result, entityNamesMap }: { result: SearchResult, entityNamesMap?: Record<string, string> }) {
+export function ResultCard({ result, entityNamesMap: _entityNamesMap }: { result: SearchResult, entityNamesMap?: Record<string, string> }) {
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const type = result.type || "entity";
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -821,8 +718,7 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
 
   // Extract entity type label (e.g., "Protein" from "Protein:385235")
   const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
-
-  console.log("ResultCard", { id: result.id, entityTypeLabel, reactants: result.reactants });
+  const hasMiddleContent = descriptionSections.length > 0;
 
   // Helper function to truncate text to max characters
   const truncateText = (text: string, maxChars: number = 100): string => {
@@ -968,47 +864,36 @@ export function ResultCard({ result, entityNamesMap }: { result: SearchResult, e
         </CardTitle>
       </CardHeader>
 
-      {/* Show content section if there's a description, definition, reaction, or pathway */}
-      {(descriptionSections.length > 0 ||
-        entityTypeLabel.toLowerCase() === 'reaction' ||
-        entityTypeLabel.toLowerCase() === 'pathway') && (
-          <div className="flex flex-col min-h-0 flex-grow">
-            <CardContent className="px-4 overflow-hidden flex flex-col flex-grow min-h-0">
-              {/* Description */}
-              {descriptionSections.length > 0 && (
-                <ScrollArea
-                  className="flex-1 min-h-0 max-h-56 w-full mb-2 cursor-zoom-in"
-                  onClick={() => setDescriptionsOpen(true)}
-                >
-                  <div className="space-y-3 text-sm text-muted-foreground pr-1">
-                    {descriptionSections.map((section) => (
-                      <div key={`${result.id}-description-preview-${section.label}`} className="space-y-1">
-                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
-                          {section.label}
-                        </h4>
-                        {section.items.map((item, index) => (
-                          <p key={`${result.id}-description-preview-item-${section.label}-${index}`}>
-                            <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
-                          </p>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
+      {/* Show content section only when there is actual content */}
+      {hasMiddleContent && (
+        <div className="flex flex-col min-h-0 flex-grow">
+          <CardContent className="px-4 overflow-hidden flex flex-col flex-grow min-h-0">
+            {/* Description */}
+            {descriptionSections.length > 0 && (
+              <ScrollArea
+                className="flex-1 min-h-0 max-h-56 w-full mb-2 cursor-zoom-in"
+                onClick={() => setDescriptionsOpen(true)}
+              >
+                <div className="space-y-3 text-sm text-muted-foreground pr-1">
+                  {descriptionSections.map((section) => (
+                    <div key={`${result.id}-description-preview-${section.label}`} className="space-y-1">
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+                        {section.label}
+                      </h4>
+                      {section.items.map((item, index) => (
+                        <p key={`${result.id}-description-preview-item-${section.label}-${index}`}>
+                          <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
+                        </p>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
 
-              {/* Reaction Equation */}
-              {entityTypeLabel.toLowerCase() === 'reaction' && (
-                <ReactionDisplay result={result} names={entityNamesMap} />
-              )}
-
-              {/* Pathway Steps */}
-              {entityTypeLabel.toLowerCase() === 'pathway' && (
-                <PathwayDisplay result={result} names={entityNamesMap} />
-              )}
-            </CardContent>
-          </div>
-        )}
+          </CardContent>
+        </div>
+      )}
 
       {/* Identifiers section */}
       {type === 'entity' && <IdentifiersDisplay identifiers={identifiers} />}
