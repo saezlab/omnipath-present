@@ -71,7 +71,7 @@ services:
             - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
             - ./api-service/cache:/app/cache
             # Mount source for hot reload during development
-            - ./api-service/ontology_service:/app/ontology_service
+            - ./api-service/api_service:/app/api_service
 
 volumes:
     meilisearch_data:

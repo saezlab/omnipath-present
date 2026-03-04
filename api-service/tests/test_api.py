@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 @pytest.fixture
 def mock_registry():
     """Create a mock registry that doesn't load real ontologies."""
-    with patch("ontology_service.main.registry") as mock:
+    with patch("api_service.main.registry") as mock:
         # Setup mock client
         mock_client = MagicMock()
         mock_term = MagicMock()
@@ -41,7 +41,7 @@ def mock_registry():
 def client(mock_registry):
     """Create test client with mocked registry."""
     # Import after patching
-    from ontology_service.main import app
+    from api_service.main import app
     return TestClient(app)
 
 

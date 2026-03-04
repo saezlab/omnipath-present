@@ -20,7 +20,7 @@ Additional ontologies from OBO Foundry are loaded on-demand.
 uv sync
 
 # Run locally
-uv run uvicorn ontology_service.main:app --reload --port 8081
+uv run uvicorn api_service.main:app --reload --port 8081
 ```
 
 ## API Endpoints

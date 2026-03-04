@@ -11,7 +11,7 @@ COPY api-service/pyproject.toml .
 COPY api-service/README.md .
 
 # Copy application code
-COPY api-service/ontology_service/ ontology_service/
+COPY api-service/api_service/ api_service/
 
 # Install dependencies
 # ARG busts cache when ontograph version changes - update this arg value to force reinstall
@@ -27,4 +27,4 @@ ENV ONTOLOGY_CACHE_DIR=/app/cache
 
 EXPOSE 8081
 
-CMD ["uvicorn", "ontology_service.main:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "api_service.main:app", "--host", "0.0.0.0", "--port", "8081"]

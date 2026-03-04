@@ -11,7 +11,7 @@ COPY omnipath-present/api-service/pyproject.toml .
 COPY omnipath-present/api-service/README.md .
 
 # Copy application code
-COPY omnipath-present/api-service/ontology_service/ ontology_service/
+COPY omnipath-present/api-service/api_service/ api_service/
 
 # Install dependencies (ontograph is pulled from git via tool.uv.sources)
 RUN uv pip install --system -e .
@@ -24,4 +24,4 @@ ENV ONTOLOGY_CACHE_DIR=/app/cache
 
 EXPOSE 8081
 
-CMD ["uvicorn", "ontology_service.main:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "api_service.main:app", "--host", "0.0.0.0", "--port", "8081"]
