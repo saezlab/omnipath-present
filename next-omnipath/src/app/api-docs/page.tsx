@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { INDEXES, meilisearchClient } from "@/lib/meilisearch/client"
+import { ExportTryNow, JsonTryNow } from "./try-now"
 
 export const dynamic = "force-dynamic"
 
@@ -299,16 +300,18 @@ function FiltersTable({ rows, examples }: { rows: FilterRow[]; examples?: Record
           <tr>
             <th className="px-4 py-2">Filter</th>
             <th className="px-4 py-2">Type</th>
+            <th className="px-4 py-2">Meaning</th>
             <th className="px-4 py-2">Example values</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(([f, t]) => {
+          {rows.map(([f, t, d]) => {
             const ex = examples?.[f]
             return (
               <tr key={f} className="border-t align-top">
                 <td className="px-4 py-2 font-mono text-xs">{f}</td>
                 <td className="px-4 py-2 text-xs">{t}</td>
+                <td className="px-4 py-2 text-xs text-muted-foreground">{d}</td>
                 <td className="px-4 py-2 text-xs">
                   {ex && ex.length > 0 ? (
                     <select className="h-8 w-full max-w-md rounded-md border bg-background px-2 text-[11px] font-mono" defaultValue="">
@@ -355,26 +358,181 @@ export default async function ApiDocsPage() {
     "parent_type_associations_example"
   )
 
+  const tutorialEntitiesUrl = buildDownloadUrl(
+    "/api/exports/entities/parquet",
+    {
+      taxonomy_ids: ["9606"],
+      entity_types: ["protein:MI:0326"],
+      ontology_terms: ["GO:0005634", "HP:0001250"],
+    },
+    "tutorial_human_nucleus_seizure_entities"
+  )
+  const tutorialInteractionsUrl = buildDownloadUrl(
+    "/api/exports/interactions/parquet",
+    {
+      entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
+      direction: "directed",
+      sign: "positive",
+      ontology_terms: ["MI:0217"],
+    },
+    "tutorial_tp53_akt1_phospho_interactions"
+  )
+  const tutorialAssociationsUrl = buildDownloadUrl(
+    "/api/exports/associations/parquet",
+    {
+      member_entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
+      parent_entity_types: ["reaction:OM:0015"],
+      ontology_terms: ["OM:0310"],
+    },
+    "tutorial_tp53_akt1_reaction_associations"
+  )
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-10 space-y-6">
-      <h1 className="text-3xl font-bold">API reference</h1>
-      <p className="text-sm text-muted-foreground">
-        Export endpoints stream Parquet files. Filters support ontology-aware keys and aliases.
-      </p>
-
-      <Tabs defaultValue="entities-export" className="space-y-4">
+      <Tabs defaultValue="quickstart-tutorial" className="space-y-4">
         <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="quickstart-tutorial">Quickstart tutorial</TabsTrigger>
+          <TabsTrigger value="entity-lookup">Entity resolving</TabsTrigger>
+          <TabsTrigger value="ontology-api">Ontology API</TabsTrigger>
           <TabsTrigger value="entities-export">Entities export</TabsTrigger>
           <TabsTrigger value="interactions-export">Interactions export</TabsTrigger>
           <TabsTrigger value="associations-export">Associations export</TabsTrigger>
-          <TabsTrigger value="entity-lookup">Entity resolving</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="ontology-api" className="space-y-4">
+          <h2 className="text-xl font-semibold">Ontology API</h2>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div>
+              <div className="font-medium">POST /api/ontology/terms</div>
+              <p className="text-xs text-muted-foreground">Resolve ontology term IDs to metadata (name/definition/namespace).</p>
+            </div>
+            <div className="text-xs font-medium">Try this</div>
+            <Code>{`curl -X POST http://localhost:8082/api/ontology/terms \\
+  -H "Content-Type: application/json" \\
+  -d '{ "termIds": ["GO:0006915", "MI:0624", "OM:0001"] }'`}</Code>
+            <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0006915", "MI:0624", "OM:0001"] }} />
+            <Code>{`{
+  "terms": {
+    "GO:0006915": { "id": "GO:0006915", "name": "apoptotic process" },
+    "MI:0624": { "id": "MI:0624", "name": "stimulation" },
+    "OM:0001": { "id": "OM:0001", "name": "interaction" }
+  }
+}`}</Code>
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div>
+              <div className="font-medium">POST /api/ontology/tree</div>
+              <p className="text-xs text-muted-foreground">Build a merged hierarchy tree for selected terms to decide whether to broaden (ancestors) or narrow (descendants) filter choices.</p>
+            </div>
+            <div className="text-xs font-medium">Try this</div>
+            <Code>{`curl -X POST http://localhost:8082/api/ontology/tree \\
+  -H "Content-Type: application/json" \\
+  -d '{ "termIds": ["GO:0006915", "GO:0008219"] }'`}</Code>
+            <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0006915", "GO:0008219"] }} />
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-2 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">How to use this before export</div>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Start with candidate terms from domain knowledge.</li>
+              <li>Resolve labels via <span className="font-mono">/api/ontology/terms</span>.</li>
+              <li>Inspect hierarchy via <span className="font-mono">/api/ontology/tree</span> and pick broader or narrower terms.</li>
+              <li>Use those IDs in export filters (<span className="font-mono">ontology_terms</span> / annotation-term fields).</li>
+            </ul>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="quickstart-tutorial" className="space-y-4">
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="font-medium">Step 1 — Resolve identifiers to canonical entity IDs</div>
+            <p className="text-xs text-muted-foreground">Requires the entity-service backend to be reachable from the frontend API.</p>
+            <Code>{`curl -X POST http://localhost:8082/api/entity-lookup \\
+  -H "Content-Type: application/json" \\
+  -d '{ "identifiers": ["TP53", "AKT1", "P31749"] }'`}</Code>
+            <JsonTryNow endpoint="/api/entity-lookup" initialBody={{ identifiers: ["TP53", "AKT1", "P31749"] }} />
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="font-medium">Step 2 — Resolve ontology terms and inspect hierarchy</div>
+            <Code>{`curl -X POST http://localhost:8082/api/ontology/terms \\
+  -H "Content-Type: application/json" \\
+  -d '{ "termIds": ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }'`}</Code>
+            <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }} />
+            <Code>{`curl -X POST http://localhost:8082/api/ontology/tree \\
+  -H "Content-Type: application/json" \\
+  -d '{ "termIds": ["GO:0005634", "HP:0001250"] }'`}</Code>
+            <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0005634", "HP:0001250"] }} />
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="font-medium">Step 3 — Export entity cohort (human proteins annotated with nucleus + seizure)</div>
+            <Code>{`curl -X POST http://localhost:8082/api/exports/entities/parquet \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "filename": "tutorial_human_nucleus_seizure_entities",
+    "filters": {
+      "taxonomy_ids": ["9606"],
+      "entity_types": ["protein:MI:0326"],
+      "ontology_terms": ["GO:0005634", "HP:0001250"]
+    }
+  }'`}</Code>
+            <ExportTryNow url={tutorialEntitiesUrl} />
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="font-medium">Step 4 — Export directed positive phosphorylation interactions for TP53/AKT1</div>
+            <Code>{`curl -X POST http://localhost:8082/api/exports/interactions/parquet \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "filename": "tutorial_tp53_akt1_phospho_interactions",
+    "filters": {
+      "entity_ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
+      "direction": "directed",
+      "sign": "positive",
+      "ontology_terms": ["MI:0217"]
+    }
+  }'`}</Code>
+            <ExportTryNow url={tutorialInteractionsUrl} />
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="font-medium">Step 5 — Export reaction associations where TP53/AKT1 act as reactants</div>
+            <Code>{`curl -X POST http://localhost:8082/api/exports/associations/parquet \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "filename": "tutorial_tp53_akt1_reaction_associations",
+    "filters": {
+      "member_entity_ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
+      "parent_entity_types": ["reaction:OM:0015"],
+      "ontology_terms": ["OM:0310"]
+    }
+  }'`}</Code>
+            <ExportTryNow url={tutorialAssociationsUrl} />
+          </div>
+
+          <div className="rounded-lg border p-4 text-xs text-muted-foreground">
+            Discuss results by comparing <span className="font-mono">X-Export-Row-Count</span> across runs. Broaden by switching to ancestor terms in the ontology tree; narrow by choosing descendants or adding source/type/sign filters.
+          </div>
+        </TabsContent>
 
         <TabsContent value="entities-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/entities/parquet</h2>
-          <SchemaTable rows={schemas.entities} />
-          <FiltersTable rows={filters.entities} examples={facetExamples.entities} />
+          <Tabs defaultValue="filters" className="space-y-3">
+            <TabsList>
+              <TabsTrigger value="filters">Filters</TabsTrigger>
+              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
+            </TabsList>
+            <TabsContent value="filters" className="space-y-2">
+              <FiltersTable rows={filters.entities} examples={facetExamples.entities} />
+            </TabsContent>
+            <TabsContent value="response-schema" className="space-y-2">
+              <SchemaTable rows={schemas.entities} />
+            </TabsContent>
+          </Tabs>
 
+          <div className="text-xs font-medium">Try this (POST)</div>
           <Code>{`curl -X POST http://localhost:8082/api/exports/entities/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -387,19 +545,31 @@ export default async function ApiDocsPage() {
     }
   }'`}</Code>
 
-          <div className="rounded-lg border p-4 text-sm">
-            <div className="font-medium">Clickable download example (GET alias for docs/testing)</div>
-            <a href={entityExampleUrl} className="mt-2 block font-mono text-xs underline underline-offset-2 break-all">
+          <div className="rounded-lg border p-4 text-sm space-y-3">
+            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+            <a href={entityExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
               {entityExampleUrl}
             </a>
+            <ExportTryNow url={entityExampleUrl} />
           </div>
         </TabsContent>
 
         <TabsContent value="interactions-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/interactions/parquet</h2>
-          <SchemaTable rows={schemas.interactions} />
-          <FiltersTable rows={filters.interactions} examples={facetExamples.interactions} />
+          <Tabs defaultValue="filters" className="space-y-3">
+            <TabsList>
+              <TabsTrigger value="filters">Filters</TabsTrigger>
+              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
+            </TabsList>
+            <TabsContent value="filters" className="space-y-2">
+              <FiltersTable rows={filters.interactions} examples={facetExamples.interactions} />
+            </TabsContent>
+            <TabsContent value="response-schema" className="space-y-2">
+              <SchemaTable rows={schemas.interactions} />
+            </TabsContent>
+          </Tabs>
 
+          <div className="text-xs font-medium">Try this (POST)</div>
           <Code>{`curl -X POST http://localhost:8082/api/exports/interactions/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -411,19 +581,31 @@ export default async function ApiDocsPage() {
     }
   }'`}</Code>
 
-          <div className="rounded-lg border p-4 text-sm">
-            <div className="font-medium">Clickable download example (GET alias for docs/testing)</div>
-            <a href={interactionExampleUrl} className="mt-2 block font-mono text-xs underline underline-offset-2 break-all">
+          <div className="rounded-lg border p-4 text-sm space-y-3">
+            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+            <a href={interactionExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
               {interactionExampleUrl}
             </a>
+            <ExportTryNow url={interactionExampleUrl} />
           </div>
         </TabsContent>
 
         <TabsContent value="associations-export" className="space-y-4">
           <h2 className="text-xl font-semibold">POST /api/exports/associations/parquet</h2>
-          <SchemaTable rows={schemas.associations} />
-          <FiltersTable rows={filters.associations} examples={facetExamples.associations} />
+          <Tabs defaultValue="filters" className="space-y-3">
+            <TabsList>
+              <TabsTrigger value="filters">Filters</TabsTrigger>
+              <TabsTrigger value="response-schema">Response schema</TabsTrigger>
+            </TabsList>
+            <TabsContent value="filters" className="space-y-2">
+              <FiltersTable rows={filters.associations} examples={facetExamples.associations} />
+            </TabsContent>
+            <TabsContent value="response-schema" className="space-y-2">
+              <SchemaTable rows={schemas.associations} />
+            </TabsContent>
+          </Tabs>
 
+          <div className="text-xs font-medium">Try this (POST)</div>
           <Code>{`curl -X POST http://localhost:8082/api/exports/associations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -435,34 +617,38 @@ export default async function ApiDocsPage() {
     }
   }'`}</Code>
 
-          <div className="rounded-lg border p-4 text-sm">
-            <div className="font-medium">Clickable download example (GET alias for docs/testing)</div>
-            <a href={associationExampleUrl} className="mt-2 block font-mono text-xs underline underline-offset-2 break-all">
+          <div className="rounded-lg border p-4 text-sm space-y-3">
+            <div className="font-medium">Try this in browser (GET alias for docs/testing)</div>
+            <a href={associationExampleUrl} className="block font-mono text-xs underline underline-offset-2 break-all">
               {associationExampleUrl}
             </a>
+            <ExportTryNow url={associationExampleUrl} />
           </div>
         </TabsContent>
 
         <TabsContent value="entity-lookup" className="space-y-4">
           <h2 className="text-xl font-semibold">Entity resolving service</h2>
+          <p className="text-xs text-muted-foreground">This endpoint proxies to entity-service; if that service is down/unreachable you will see a fetch error.</p>
 
           <div className="rounded-lg border p-4 space-y-3">
             <div>
               <div className="font-medium">POST /api/entity-lookup</div>
               <p className="text-xs text-muted-foreground">Resolves raw identifiers to candidate entity IDs and returns matching entity documents.</p>
             </div>
+            <div className="text-xs font-medium">Try this</div>
             <Code>{`curl -X POST http://localhost:8082/api/entity-lookup \\
   -H "Content-Type: application/json" \\
   -d '{
     "identifiers": ["P04637", "TP53", "Q9Y6K9"]
   }'`}</Code>
+            <JsonTryNow endpoint="/api/entity-lookup" initialBody={{ identifiers: ["P04637", "TP53", "Q9Y6K9"] }} />
             <Code>{`{
   "matches": [
-    { "identifier": "P04637", "entityIds": ["P:UNIPROT:P04637"] }
+    { "identifier": "P04637", "entityIds": ["P:UP:P04637:UNK"] }
   ],
   "entities": [
     {
-      "entity_id": "P:UNIPROT:P04637",
+      "entity_id": "P:UP:P04637:UNK",
       "entity_type": "protein:MI:0326",
       "names": ["Cellular tumor antigen p53"],
       "gene_symbols": ["TP53"]
@@ -476,12 +662,14 @@ export default async function ApiDocsPage() {
               <div className="font-medium">POST /api/entity-names</div>
               <p className="text-xs text-muted-foreground">Helper endpoint: resolve entity IDs to display names.</p>
             </div>
+            <div className="text-xs font-medium">Try this</div>
             <Code>{`curl -X POST http://localhost:8082/api/entity-names \\
   -H "Content-Type: application/json" \\
-  -d '{ "ids": ["P:UNIPROT:P04637", "P:UNIPROT:P31749"] }'`}</Code>
+  -d '{ "ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }'`}</Code>
+            <JsonTryNow endpoint="/api/entity-names" initialBody={{ ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"] }} />
             <Code>{`{
-  "P:UNIPROT:P04637": "TP53",
-  "P:UNIPROT:P31749": "AKT1"
+  "P:UP:P04637:UNK": "Cellular tumor antigen p53",
+  "P:UP:AKT1_HUMAN:UNK": "3-phosphoinositide-dependent protein kinase 1"
 }`}</Code>
           </div>
         </TabsContent>

@@ -1,7 +1,7 @@
 use std::{env, net::SocketAddr, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use arrow::array::{Array, Int64Array, LargeStringArray};
+use arrow::array::{Array, LargeStringArray};
 use axum::{
     Json, Router,
     extract::State,
@@ -16,7 +16,7 @@ use tracing::{error, info};
 
 #[derive(Clone)]
 struct AppState {
-    index: Arc<FxHashMap<Arc<str>, Vec<i64>>>,
+    index: Arc<FxHashMap<Arc<str>, Vec<String>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,7 +26,7 @@ struct LookupRequest {
 
 #[derive(Debug, Serialize)]
 struct LookupResponse {
-    results: FxHashMap<String, Vec<i64>>,
+    results: FxHashMap<String, Vec<String>>,
 }
 
 #[tokio::main]
@@ -62,7 +62,7 @@ async fn lookup(
     State(state): State<AppState>,
     Json(payload): Json<LookupRequest>,
 ) -> Json<LookupResponse> {
-    let mut results: FxHashMap<String, Vec<i64>> = Default::default();
+    let mut results: FxHashMap<String, Vec<String>> = Default::default();
     results.reserve(payload.identifiers.len());
 
     for ident in payload.identifiers {
@@ -73,7 +73,7 @@ async fn lookup(
     Json(LookupResponse { results })
 }
 
-fn load_index<P: AsRef<Path>>(parquet_path: P) -> Result<FxHashMap<Arc<str>, Vec<i64>>> {
+fn load_index<P: AsRef<Path>>(parquet_path: P) -> Result<FxHashMap<Arc<str>, Vec<String>>> {
     let parquet_path = parquet_path.as_ref();
 
     let metadata_reader = SerializedFileReader::new(
@@ -87,24 +87,24 @@ fn load_index<P: AsRef<Path>>(parquet_path: P) -> Result<FxHashMap<Arc<str>, Vec
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let schema = builder.schema();
 
-    let entity_idx = schema
-        .index_of("entity_id")
-        .context("missing entity_id column")?;
+    let entity_key_idx = schema
+        .index_of("entity_key")
+        .context("missing entity_key column")?;
     let identifier_idx = schema
         .index_of("identifier")
         .context("missing identifier column")?;
 
     let mut reader = builder.with_batch_size(8192).build()?;
-    let mut index: FxHashMap<Arc<str>, Vec<i64>> = Default::default();
+    let mut index: FxHashMap<Arc<str>, Vec<String>> = Default::default();
     index.reserve(estimated_rows);
 
     while let Some(batch) = reader.next() {
         let batch = batch?;
-        let entity_ids = batch
-            .column(entity_idx)
+        let entity_keys = batch
+            .column(entity_key_idx)
             .as_any()
-            .downcast_ref::<Int64Array>()
-            .context("entity_id column must be int64")?;
+            .downcast_ref::<LargeStringArray>()
+            .context("entity_key column must be LargeString")?;
         let identifiers = batch
             .column(identifier_idx)
             .as_any()
@@ -112,16 +112,16 @@ fn load_index<P: AsRef<Path>>(parquet_path: P) -> Result<FxHashMap<Arc<str>, Vec
             .context("identifier column must be LargeString")?;
 
         for row in 0..batch.num_rows() {
-            if identifiers.is_null(row) {
+            if identifiers.is_null(row) || entity_keys.is_null(row) {
                 continue;
             }
-            let entity_id = entity_ids.value(row);
+
+            let entity_key = entity_keys.value(row).to_string();
             let ident: Arc<str> = identifiers.value(row).into();
-            index.entry(ident).or_default().push(entity_id);
+            index.entry(ident).or_default().push(entity_key);
         }
     }
 
-    // Deduplicate entity IDs per identifier (identifiers can appear across namespaces)
     for ids in index.values_mut() {
         ids.sort_unstable();
         ids.dedup();
@@ -144,7 +144,7 @@ fn init_tracing() {
 mod tests {
     use super::*;
     use arrow::{
-        array::{Int64Array, LargeStringArray},
+        array::LargeStringArray,
         datatypes::{DataType, Field, Schema},
         record_batch::RecordBatch,
     };
@@ -155,14 +155,14 @@ mod tests {
     #[test]
     fn builds_index_from_parquet() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("entity_id", DataType::Int64, false),
+            Field::new("entity_key", DataType::LargeUtf8, false),
             Field::new("identifier", DataType::LargeUtf8, false),
         ]);
 
         let batch = RecordBatch::try_new(
             Arc::new(schema.clone()),
             vec![
-                Arc::new(Int64Array::from(vec![1, 2, 2])),
+                Arc::new(LargeStringArray::from(vec!["E:1", "E:2", "E:2"])),
                 Arc::new(LargeStringArray::from(vec!["a", "b", "b"])),
             ],
         )?;
@@ -175,8 +175,8 @@ mod tests {
         }
 
         let index = load_index(temp.path())?;
-        assert_eq!(index.get("a"), Some(&vec![1]));
-        assert_eq!(index.get("b"), Some(&vec![2, 2]));
+        assert_eq!(index.get("a"), Some(&vec!["E:1".to_string()]));
+        assert_eq!(index.get("b"), Some(&vec!["E:2".to_string()]));
         assert!(index.get("c").is_none());
         Ok(())
     }
