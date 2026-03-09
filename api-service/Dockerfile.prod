@@ -8,20 +8,20 @@ RUN pip install uv
 
 # Copy dependency files
 COPY api-service/pyproject.toml .
+COPY api-service/uv.lock .
 COPY api-service/README.md .
 
 # Copy application code
 COPY api-service/api_service/ api_service/
 
-# Install dependencies
-# ARG busts cache when ontograph version changes - update this arg value to force reinstall
-ARG ONTOGRAPH_VERSION=2026-02-27
-RUN uv pip install --system "ontograph@git+https://github.com/saezlab/ontograph.git@main"
-RUN uv pip install --system -e .
+# Install dependencies from the checked-in lockfile.
+# This avoids re-resolving ontograph's transitive git dependencies during the image build.
+RUN uv sync --frozen --no-dev
 
 # Create data and cache directories
 RUN mkdir -p /app/data /app/cache
 
+ENV PATH="/app/.venv/bin:$PATH"
 ENV ONTOLOGY_DATA_DIR=/app/data
 ENV ONTOLOGY_CACHE_DIR=/app/cache
 
