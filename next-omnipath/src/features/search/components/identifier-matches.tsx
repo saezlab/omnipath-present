@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 export interface IdentifierMatch {
   identifier: string;
-  entityIds: number[];
+  entityIds: string[];
 }
 
 interface IdentifierMatchesProps {

@@ -27,6 +27,8 @@ interface SearchPageProps {
   showLayoutSwitcherInEmbedded?: boolean;
   initialQuery?: string;
   initialSearchType?: "search_entities" | "cv_terms";
+  initialSearchMode?: SearchMode;
+  initialIdentifiers?: string[];
   initialFilters?: {
     entity_ids?: Array<string | number>;
     entity_types?: string[];
@@ -55,13 +57,15 @@ export default function SearchPage({
   showLayoutSwitcherInEmbedded = false,
   initialQuery = "",
   initialSearchType = "search_entities",
+  initialSearchMode = "full-text",
+  initialIdentifiers,
   initialFilters,
   showFilters = false,
   lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS
 }: SearchPageProps = {}) {
   const [query, setQuery] = useState(initialQuery);
   const [, startTransition] = useTransition();
-  const [searchMode, setSearchMode] = useState<SearchMode>("full-text");
+  const [searchMode, setSearchMode] = useState<SearchMode>(initialSearchMode);
   const [selectedSpecies, setSelectedSpecies] = useState<string>("9606"); // Default to Human
   const normalizedLockedEntityIds = useMemo(
     () => lockedEntityIds.map((id) => String(id).trim()).filter((id) => id.length > 0),
@@ -80,8 +84,12 @@ export default function SearchPage({
   const [lookupEntities, setLookupEntities] = useState<SearchResult[]>([]);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
-  const [identifierInput, setIdentifierInput] = useState("");
-  const [batchInput, setBatchInput] = useState("");
+  const [identifierInput, setIdentifierInput] = useState(
+    initialSearchMode === "identifier" ? initialIdentifiers?.[0] || initialQuery : ""
+  );
+  const [batchInput, setBatchInput] = useState(
+    initialSearchMode === "batch" ? (initialIdentifiers || []).join("\n") : ""
+  );
   const { setSidebarContent } = useSidebarContent();
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("split");
   const [layoutTouched, setLayoutTouched] = useState(false);
@@ -89,6 +97,10 @@ export default function SearchPage({
   const lastSearchScrollTopRef = useRef(0);
   const upScrollAccumulatorRef = useRef(0);
   const downScrollAccumulatorRef = useRef(0);
+  const initialIdentifiersKey = useMemo(
+    () => (initialIdentifiers || []).map((identifier) => identifier.trim()).filter((identifier) => identifier.length > 0).join("\n"),
+    [initialIdentifiers]
+  );
 
   // Fetch function for infinite scroll
   const fetchSearchData = useCallback(
@@ -400,6 +412,24 @@ export default function SearchPage({
     }
     startTransition(() => runLookup(ids));
   }, [batchInput, runLookup]);
+
+  useEffect(() => {
+    if (!initialIdentifiersKey || initialSearchMode === "full-text") {
+      return;
+    }
+
+    const normalized = initialIdentifiersKey.split("\n");
+
+    if (initialSearchMode === "identifier") {
+      setIdentifierInput(normalized[0] || "");
+    } else {
+      setBatchInput(normalized.join("\n"));
+    }
+
+    startTransition(() => {
+      void runLookup(normalized);
+    });
+  }, [initialIdentifiersKey, initialSearchMode, runLookup, startTransition]);
 
   const isSplitLayout = effectiveLayoutMode === "split" && ontologyEnabled;
   const searchContainerClass = embedded

@@ -8,7 +8,7 @@ import { ChatMessage } from "../types"
 
 export interface ToolResult {
   id: string
-  toolName: "searchEntities" | "searchInteractions"
+  toolName: "searchEntities" | "resolveEntityIdentifiers" | "resolveOntologyTerms" | "exploreOntologyTree" | "searchInteractions"
   query: Record<string, unknown>
   results: Array<Record<string, unknown>>
   timestamp: Date

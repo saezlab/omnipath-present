@@ -1,20 +1,22 @@
 import { cerebras } from "@/ai";
-import { convertToModelMessages, smoothStream, stepCountIs, streamText, validateUIMessages } from "ai";
+import { convertToModelMessages, stepCountIs, streamText, validateUIMessages } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
 import {
   searchMeilisearch,
+  fetchMeilisearchDocuments,
   searchInteractionsMeilisearch,
   searchAssociationsMeilisearch
 } from "@/lib/meilisearch/search";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { INDEXES } from "@/lib/meilisearch/client";
+import { getApiServiceUrl, getEntityServiceUrl } from "@/lib/api/config";
 
 
 // Define types for Meilisearch hits
 interface EntityHit {
-  id: string | number;
-  entity_id?: string | number;
+  id: string;
+  entity_id?: string;
   canonical_identifier?: string;
   display_name?: string;
   names?: string[];
@@ -29,13 +31,30 @@ interface EntityHit {
   [key: string]: unknown;
 }
 
-interface CVTermHit {
-  id: string | number;
+interface LookupServiceResponse {
+  results: Record<string, string[]>;
+}
+
+interface TermInfo {
+  id: string;
   name?: string;
-  definition?: string;
-  namespace?: { name?: string } | string;
-  associated_entity_ids?: unknown[];
-  [key: string]: unknown;
+  definition?: string | null;
+  namespace?: string | null;
+}
+
+interface TermsResponse {
+  terms?: Record<string, TermInfo | null>;
+}
+
+interface OntologyTreeNode {
+  id: string;
+  name?: string;
+  distance?: number;
+  children?: OntologyTreeNode[];
+}
+
+interface OntologyTreeResponse {
+  root?: OntologyTreeNode | null;
 }
 
 interface AssociationHit {
@@ -65,43 +84,73 @@ const requestSchema = z.object({
   messages: z.array(z.unknown()),
 });
 
+const toolLimitSchema = z.coerce
+  .number()
+  .int()
+  .min(0)
+  .max(100)
+  .catch(20)
+  .transform((value) => (value < 1 ? 20 : value));
+
+const getEntityDbId = (hit: EntityHit): string | undefined => {
+  const entityId = hit.entity_id ?? hit.id;
+  return typeof entityId === "string" ? entityId : undefined;
+};
+
+const getCanonicalIdentifier = (hit: EntityHit): string | undefined => {
+  if (hit.canonical_identifier) return hit.canonical_identifier;
+  const identifiers = hit.identifiers || [];
+  for (const identifier of identifiers) {
+    const key = identifier?.key?.toLowerCase() || "";
+    if (key.startsWith("uniprot:") && typeof identifier.value === "string") {
+      return identifier.value;
+    }
+  }
+  return undefined;
+};
+
+const getEntityName = (hit: EntityHit): string => {
+  const display = hit.display_name;
+  const gene = hit.gene_symbol || hit.gene_symbols?.[0];
+  const name = hit.names?.[0];
+  const canonical = getCanonicalIdentifier(hit);
+  const dbId = getEntityDbId(hit);
+  return display || gene || name || canonical || `Entity ${dbId ?? "unknown"}`;
+};
+
+const getEntityType = (hit: EntityHit): string => {
+  if (typeof hit.entity_type === "object") {
+    return hit.entity_type?.name || "entity";
+  }
+  if (typeof hit.entity_type === "string") {
+    return hit.entity_type.split(":")[0] || "entity";
+  }
+  return "entity";
+};
+
 // Define the tools
 const tools = {
   searchEntities: {
-    description: `Search for biological entities (proteins, genes, complexes) or controlled vocabulary terms using Meilisearch.
-This is a fast full-text search that can find entities by name, identifier, or description.
-
-INDEX SELECTION GUIDE:
-- Use 'entities' for: protein names, gene symbols, complexes, UniProt IDs, or when user asks about proteins/genes
-- Use 'cv_terms' for: ontology terms (GO, DO, HP, etc.), biological processes, molecular functions, cellular components, diseases, phenotypes
-
-Examples:
-- "insulin" → entities (protein/gene)
-- "P53" or "TP53" → entities (protein/gene symbol)
-- "kinase" → entities (protein family)
-- "apoptosis" → cv_terms (biological process)
-- "GO:0006915" → cv_terms (GO term ID)
-- "cancer" → cv_terms (disease term)
-- "mitochondria" → cv_terms (cellular component)`,
+    description: `Search the entity index with broad full-text matching.
+Use this for exploratory searches by protein name, gene symbol, family, description, or general entity concepts.
+Do NOT use this tool to resolve exact entity identifiers for anchored searches; use resolveEntityIdentifiers instead.`,
     inputSchema: z.object({
-      query: z.string().describe("The search query (protein name, gene symbol, identifier, or description)"),
-      searchType: z.enum(["entities", "cv_terms"]).default("entities").describe("What to search for: 'entities' (proteins/genes/complexes) or 'cv_terms' (controlled vocabulary terms like GO, DO, etc.)"),
-      limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+      query: z.string().describe("The free-text entity query"),
+      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
       entityTypes: z.array(z.string()).optional().describe("Optional filter by entity type ontology terms (e.g. protein:MI:0326)"),
       taxonomyIds: z.array(z.string()).optional().describe("Optional filter by NCBI taxonomy IDs (e.g. 9606 for human)"),
-      ontologyTerms: z.array(z.string()).optional().describe("Optional filter by broad ontology terms (GO, MI, OM, HP, KW)"),
+      ontologyTerms: z.array(z.string()).optional().describe("Optional canonical ontology term IDs (GO, MI, OM, HP, KW) to filter entity annotations"),
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ query, searchType, limit, entityTypes, taxonomyIds, ontologyTerms, sources }: {
+    execute: async ({ query, limit, entityTypes, taxonomyIds, ontologyTerms, sources }: {
       query: string;
-      searchType: "entities" | "cv_terms";
       limit: number;
       entityTypes?: string[];
       taxonomyIds?: string[];
       ontologyTerms?: string[];
       sources?: string[];
     }) => {
-      console.log(`Searching ${searchType} for: ${query}`);
+      console.log(`Searching entities for: ${query}`);
       try {
         const filters: MeilisearchFilters = {};
         if (entityTypes?.length) filters.entity_types = entityTypes;
@@ -116,9 +165,6 @@ Examples:
           filters.cv_terms_kw = ontologyTerms;
         }
 
-        // Use the common ENTITIES index for both types
-        // We could add filters here if needed to distinguish between entities and cv_terms
-        // but for now we'll rely on the query matching relevant documents
         const data = await searchMeilisearch({
           query,
           index: INDEXES.ENTITIES,
@@ -127,45 +173,12 @@ Examples:
           filters
         });
 
-        const hits = (data.hits || []) as (EntityHit | CVTermHit)[];
+        const hits = (data.hits || []) as EntityHit[];
         console.log(`Search returned ${hits.length} results.`);
         console.log('Sample hit for preview:', JSON.stringify(hits[0], null, 2));
 
-        const getEntityDbId = (hit: EntityHit): string | number | undefined => hit.entity_id ?? hit.id;
-
-        const getCanonicalIdentifier = (hit: EntityHit): string | undefined => {
-          if (hit.canonical_identifier) return hit.canonical_identifier;
-          const identifiers = hit.identifiers || [];
-          for (const identifier of identifiers) {
-            const key = identifier?.key?.toLowerCase() || "";
-            if (key.startsWith("uniprot:") && typeof identifier.value === "string") {
-              return identifier.value;
-            }
-          }
-          return undefined;
-        };
-
-        const getEntityName = (hit: EntityHit): string => {
-          const display = hit.display_name;
-          const gene = hit.gene_symbol || hit.gene_symbols?.[0];
-          const name = hit.names?.[0];
-          const canonical = getCanonicalIdentifier(hit);
-          const dbId = getEntityDbId(hit);
-          return display || gene || name || canonical || `Entity ${dbId ?? "unknown"}`;
-        };
-
-        const getEntityType = (hit: EntityHit): string => {
-          if (typeof hit.entity_type === "object") {
-            return hit.entity_type?.name || "entity";
-          }
-          if (typeof hit.entity_type === "string") {
-            return hit.entity_type.split(":")[0] || "entity";
-          }
-          return "entity";
-        };
-
         // AI intelligently selects the best match
-        let bestMatchId: string | number | undefined = undefined;
+        let bestMatchId: string | undefined = undefined;
 
         if (hits.length > 0) {
           const queryLower = query.toLowerCase();
@@ -175,45 +188,30 @@ Examples:
             .filter((token) => token.length > 1 && !["protein", "gene", "interactions", "interaction", "involving", "find", "all"].includes(token));
 
           let bestScore = -1;
-          let bestHit: EntityHit | CVTermHit | null = null;
+          let bestHit: EntityHit | null = null;
 
           for (let i = 0; i < Math.min(hits.length, 50); i++) {
             const hit = hits[i];
             let score = Math.max(1, 50 - i);
+            const candidates = [
+              hit.display_name,
+              hit.gene_symbol,
+              hit.gene_symbols?.[0],
+              hit.names?.[0],
+              getCanonicalIdentifier(hit),
+            ]
+              .filter((v): v is string => typeof v === "string" && v.length > 0)
+              .map((v) => v.toLowerCase());
 
-            if (searchType === "entities") {
-              const entityHit = hit as EntityHit;
-              const candidates = [
-                entityHit.display_name,
-                entityHit.gene_symbol,
-                entityHit.gene_symbols?.[0],
-                entityHit.names?.[0],
-                getCanonicalIdentifier(entityHit),
-              ]
-                .filter((v): v is string => typeof v === "string" && v.length > 0)
-                .map((v) => v.toLowerCase());
+            const description = (hit.description || hit.descriptions?.[0] || "").toLowerCase();
 
-              const description = (entityHit.description || entityHit.descriptions?.[0] || "").toLowerCase();
+            if (candidates.some((v) => v === queryLower)) score += 100;
+            else if (queryTokens.some((token) => candidates.includes(token))) score += 90;
+            else if (candidates.some((v) => v.startsWith(queryLower))) score += 50;
+            else if (candidates.some((v) => v.includes(queryLower))) score += 25;
 
-              if (candidates.some((v) => v === queryLower)) score += 100;
-              else if (queryTokens.some((token) => candidates.includes(token))) score += 90;
-              else if (candidates.some((v) => v.startsWith(queryLower))) score += 50;
-              else if (candidates.some((v) => v.includes(queryLower))) score += 25;
-
-              if ((entityHit.interaction_ids?.length || entityHit.num_interactions || 0) > 100) score += 10;
-              if (description.length > 100) score += 5;
-            } else {
-              const cvHit = hit as CVTermHit;
-              const name = (cvHit.name || "").toLowerCase();
-              const definition = (cvHit.definition || "").toLowerCase();
-
-              if (name === queryLower) score += 100;
-              else if (name.startsWith(queryLower)) score += 50;
-              else if (name.includes(queryLower)) score += 25;
-
-              if (cvHit.associated_entity_ids && cvHit.associated_entity_ids.length > 10) score += 10;
-              if (definition.length > 50) score += 5;
-            }
+            if ((hit.interaction_ids?.length || hit.num_interactions || 0) > 100) score += 10;
+            if (description.length > 100) score += 5;
 
             if (score > bestScore) {
               bestScore = score;
@@ -222,36 +220,22 @@ Examples:
           }
 
           if (bestHit) {
-            bestMatchId = searchType === "entities"
-              ? getEntityDbId(bestHit as EntityHit)
-              : bestHit.id;
+            bestMatchId = getEntityDbId(bestHit);
           }
         }
 
-        const preview = hits.slice(0, 3).map((hit: EntityHit | CVTermHit, index) => {
-          if (searchType === "entities") {
-            const entity = hit as EntityHit;
-            return {
-              id: getEntityDbId(entity) ?? `entity-${index}`,
-              name: getEntityName(entity),
-              type: getEntityType(entity),
-              canonical_identifier: getCanonicalIdentifier(entity),
-              interaction_count: entity.interaction_ids?.length || entity.num_interactions || 0,
-            };
-          }
-
-          const cv = hit as CVTermHit;
+        const preview = hits.slice(0, 3).map((entity, index) => {
           return {
-            id: cv.id,
-            name: cv.name || `Term ${cv.id}`,
-            type: (typeof cv.namespace === 'object' ? cv.namespace?.name : cv.namespace) || 'term',
-            associated_entities: cv.associated_entity_ids?.length || 0,
+            id: getEntityDbId(entity) ?? `entity-${index}`,
+            name: getEntityName(entity),
+            type: getEntityType(entity),
+            canonical_identifier: getCanonicalIdentifier(entity),
+            interaction_count: entity.interaction_ids?.length || entity.num_interactions || 0,
           };
         });
 
         return {
           componentParams: {
-            searchType,
             query,
             limit,
             bestMatchId,
@@ -263,7 +247,7 @@ Examples:
           },
           results: preview,
           totalCount: data.estimatedTotalHits || hits.length,
-          searchType,
+          searchType: "entities",
           query,
           bestMatchId,
         };
@@ -274,15 +258,173 @@ Examples:
     },
   },
 
+  resolveEntityIdentifiers: {
+    description: `Resolve raw identifiers, gene symbols, or accessions to canonical OmniPath entity IDs.
+Use this for exact entity lookup and before anchored interaction or association searches.
+Prefer this over broad entity search whenever the user names a concrete gene, protein, accession, or identifier.
+Returned entity IDs are canonical strings, not numeric IDs.`,
+    inputSchema: z.object({
+      identifiers: z.array(z.string()).min(1).max(100).describe("Identifiers to resolve, such as TP53, EGFR, P04637, or other known accessions"),
+    }),
+    execute: async ({ identifiers }: { identifiers: string[] }) => {
+      console.log(`Resolving ${identifiers.length} identifiers.`);
+      try {
+        const normalizedIdentifiers = identifiers.map((identifier) => identifier.trim()).filter((identifier) => identifier.length > 0);
+        const response = await fetch(`${getEntityServiceUrl()}/lookup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifiers: normalizedIdentifiers }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Entity service error: ${response.status} ${text}`);
+        }
+
+        const data = (await response.json()) as LookupServiceResponse;
+        const matches = Object.entries(data.results || {}).map(([identifier, entityIds]) => ({
+          identifier,
+          entityIds: entityIds || [],
+        }));
+
+        const allEntityIds = Array.from(new Set(matches.flatMap((match) => match.entityIds)));
+        const documents = allEntityIds.length
+          ? await fetchMeilisearchDocuments(INDEXES.ENTITIES, allEntityIds, "entity_id")
+          : { documents: [] };
+        const entities = (documents.documents || []) as EntityHit[];
+        const entityMap = new Map<string, EntityHit>();
+        for (const entity of entities) {
+          const entityId = getEntityDbId(entity);
+          if (entityId !== undefined) {
+            entityMap.set(String(entityId), entity);
+          }
+        }
+
+        const preview = matches.slice(0, 5).map((match) => {
+          const topEntity = match.entityIds
+            .map((entityId) => entityMap.get(entityId))
+            .find((entity): entity is EntityHit => Boolean(entity));
+
+          return {
+            identifier: match.identifier,
+            entityIds: match.entityIds,
+            candidateCount: match.entityIds.length,
+            topMatch: topEntity ? getEntityName(topEntity) : undefined,
+            topEntityId: topEntity ? String(getEntityDbId(topEntity)) : (match.entityIds[0] || undefined),
+          };
+        });
+
+        return {
+          componentParams: {
+            identifiers: normalizedIdentifiers,
+          },
+          matches,
+          entities: documents.documents,
+          preview,
+          results: preview,
+          totalCount: matches.length,
+        };
+      } catch (error: unknown) {
+        console.error("Error resolving entity identifiers:", error);
+        return { error: error instanceof Error ? error.message : "Unknown identifier resolution error" };
+      }
+    },
+  },
+
+  resolveOntologyTerms: {
+    description: `Resolve canonical ontology term IDs to labels, definitions, and namespaces.
+Use this only with concrete IDs like GO:0005634, HP:0001250, MI:0217, or OM:0310.`,
+    inputSchema: z.object({
+      termIds: z.array(z.string()).min(1).max(100).describe("Canonical ontology term IDs to validate"),
+    }),
+    execute: async ({ termIds }: { termIds: string[] }) => {
+      console.log(`Resolving ${termIds.length} ontology terms.`);
+      try {
+        const normalizedTermIds = termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0);
+        const response = await fetch(`${getApiServiceUrl()}/terms`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ term_ids: normalizedTermIds }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`API service error: ${response.status} ${text}`);
+        }
+
+        const data = (await response.json()) as TermsResponse;
+        const results = normalizedTermIds.map((termId) => {
+          const term = data.terms?.[termId] || null;
+          return {
+            termId,
+            found: Boolean(term),
+            name: term?.name || null,
+            definition: term?.definition || null,
+            namespace: term?.namespace || null,
+          };
+        });
+
+        return {
+          componentParams: {
+            termIds: normalizedTermIds,
+          },
+          results,
+          totalCount: results.length,
+        };
+      } catch (error: unknown) {
+        console.error("Error resolving ontology terms:", error);
+        return { error: error instanceof Error ? error.message : "Unknown ontology term resolution error" };
+      }
+    },
+  },
+
+  exploreOntologyTree: {
+    description: `Build a merged ontology tree for canonical ontology term IDs.
+Use this after resolveOntologyTerms when you want to inspect broader or narrower branches for known IDs.`,
+    inputSchema: z.object({
+      termIds: z.array(z.string()).min(1).max(100).describe("Canonical ontology term IDs to merge into a tree"),
+    }),
+    execute: async ({ termIds }: { termIds: string[] }) => {
+      console.log(`Building ontology tree for ${termIds.length} terms.`);
+      try {
+        const normalizedTermIds = termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0);
+        const response = await fetch(`${getApiServiceUrl()}/tree`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ term_ids: normalizedTermIds }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`API service error: ${response.status} ${text}`);
+        }
+
+        const data = (await response.json()) as OntologyTreeResponse;
+        const root = data.root || null;
+
+        return {
+          componentParams: {
+            termIds: normalizedTermIds,
+          },
+          root,
+          results: root ? [root] : [],
+          totalCount: root ? 1 : 0,
+        };
+      } catch (error: unknown) {
+        console.error("Error building ontology tree:", error);
+        return { error: error instanceof Error ? error.message : "Unknown ontology tree error" };
+      }
+    },
+  },
+
   searchInteractions: {
     description: `Search for molecular interactions.
-IMPORTANT: The interactions index CANNOT search by entity names directly - it only supports filtering by entity IDs.
-To find interactions for a specific protein/gene:
-1. First use searchEntities to find the entity and get its ID
-2. Then use this tool with the entity ID`,
+IMPORTANT: The interactions index cannot anchor on entity names directly; anchored searches must filter by canonical entity ID strings.
+If the user mentions a concrete gene, protein, accession, or identifier, first call resolveEntityIdentifiers and then pass the returned string IDs here.
+Do not use broad entity search as a substitute for identifier resolution when anchoring an interaction query.`,
     inputSchema: z.object({
-      entityIds: z.array(z.union([z.string(), z.number()])).optional().describe("Entity IDs to filter interactions by. Use searchEntities first to get these IDs if you want to anchor to a specific protein."),
-      limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+      entityIds: z.array(z.string()).optional().describe("Canonical string entity IDs to filter interactions by. Use resolveEntityIdentifiers first for anchored searches."),
+      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
       interactionTypes: z.array(z.string()).optional().describe("Optional filter by interaction types (e.g. 'protein:MI:0326|protein:MI:0326' or just a specific term if known)"),
       ontologyTerms: z.array(z.string()).optional().describe("Optional filter by annotation terms (GO, MI, HP, OM, KW) found on the interaction or participants. E.g. 'MI:0217' for phosphorylation."),
       hasDirection: z.boolean().optional().describe("Optional filter for directed (true) or undirected (false) interactions."),
@@ -291,7 +433,7 @@ To find interactions for a specific protein/gene:
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
     execute: async ({ entityIds, limit, interactionTypes, ontologyTerms, hasDirection, isPositive, isNegative, sources }: {
-      entityIds?: Array<string | number>;
+      entityIds?: string[];
       limit: number;
       interactionTypes?: string[];
       ontologyTerms?: string[];
@@ -409,7 +551,7 @@ To find interactions for a specific protein/gene:
 
   searchAssociations: {
     description: `Search for associations (complex memberships, pathways, and reactions).
-IMPORTANT: The associations index does NOT search by abstract entity names. Use searchEntities first.`,
+IMPORTANT: The associations index does NOT search by abstract entity names. Use resolveEntityIdentifiers first.`,
     inputSchema: z.object({
       parentEntityIds: z.array(z.string()).optional().describe("IDs of the parent entity (e.g. the Complex ID)."),
       memberEntityIds: z.array(z.string()).optional().describe("IDs of the member entities (e.g. a specific protein in the complex)."),
@@ -417,7 +559,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
       memberEntityTypes: z.array(z.string()).optional().describe("Ontology terms for the members."),
       ontologyTerms: z.array(z.string()).optional().describe("Association annotation terms."),
       sources: z.array(z.string()).optional().describe("Source prefixes."),
-      limit: z.number().min(1).max(100).default(20).describe("Maximum number of results to return (1-100)"),
+      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
     }),
     execute: async ({ parentEntityIds, memberEntityIds, parentEntityTypes, memberEntityTypes, ontologyTerms, sources, limit }: {
       parentEntityIds?: string[];
@@ -499,23 +641,29 @@ export async function POST(req: Request) {
           type: "text", text: `You are OmniPath AI, a powerful assistant for OmniPath, a database of molecular interactions, pathways, and biological annotations.
 
 Your capabilities:
-1. Search Entities: Find proteins, genes, complexes, or resolve ontology terms (searchType="cv_terms").
-2. Search Interactions: Find directed/undirected, positive/negative edges, filtered by entity, ontology term, or source.
-3. Search Associations: Find complex memberships, pathways, and reactions.
+1. Search Entities: Broad exploratory full-text search over entity records.
+2. Resolve Entity Identifiers: Map raw identifiers or gene symbols to canonical OmniPath entity IDs.
+3. Resolve Ontology Terms: Validate canonical ontology IDs and inspect their labels/definitions.
+4. Explore Ontology Tree: Inspect broader or narrower ontology branches for known term IDs.
+5. Search Interactions: Find directed/undirected, positive/negative edges, filtered by entity, ontology term, or source.
+6. Search Associations: Find complex memberships, pathways, and reactions.
 
 Today's date is ${new Date().toLocaleDateString()}.
 
-CRITICAL: EXPLORATION WORKFLOW
-Users often ask vague queries (e.g., "phosphorylation interactions"). You don't always need a specific anchor protein!
-To handle abstract concepts:
-1. Resolve the abstract term FIRST. Call searchEntities with \`searchType: "cv_terms"\` and \`query: "phosphorylation"\`.
-2. Inspect the result to find its ontology ID (e.g., \`MI:0217\`).
-3. Use that exact ID in the \`ontologyTerms\` filter when calling \`searchInteractions\` or \`searchAssociations\`.
-
 CRITICAL: ANCHORED SEARCHES
-If someone asks "What does EGFR interact with?" or "Interactions for TP53":
-1. First use \`searchEntities\` to find the specific database ID (the numeric 'id' field, NOT a canonical identifier).
-2. Call \`searchInteractions\` (or \`searchAssociations\`) using that numeric ID in \`entityIds\` (or \`parent/memberEntityIds\`).
+If the user mentions a concrete gene, protein, accession, or identifier and wants interactions, associations, or an exact entity lookup:
+1. First use \`resolveEntityIdentifiers\`.
+2. Use the returned canonical entity ID string (for example \`P:UP:P04637:UNK\`) in \`searchInteractions\` or \`searchAssociations\`.
+3. Do not use \`searchEntities\` as the first step for anchored queries unless the user explicitly asks for broad exploratory browsing.
+4. Never ask for or use numeric IDs. Entity IDs are strings.
+
+CRITICAL: CV TERM / ONTOLOGY WORKFLOW
+1. CV term exploration does NOT come from general entity search.
+2. Do not pretend free-text search resolves ontology terms.
+3. If the user gives explicit ontology IDs, validate them with \`resolveOntologyTerms\`.
+4. If you need broader or narrower branches for known IDs, use \`exploreOntologyTree\`.
+5. Only use canonical ontology IDs in the \`ontologyTerms\` filters for \`searchInteractions\` or \`searchAssociations\`.
+6. If the user only gives a vague ontology concept and no canonical term ID is available from the conversation or tools, say that exact ontology filtering requires a concrete term ID rather than inventing one.
 
 CRITICAL: PRESENTING RESULTS
 - You MUST focus on summarizing facet statistics.
@@ -539,17 +687,12 @@ For example, EGFR phosphorylates STAT3."
       messages: modelMessages,
       tools,
       toolChoice: "auto",
-      experimental_transform: [
-        smoothStream({
-          chunking: "word",
-        }),
-      ],
       onFinish: async (result) => {
         // Here you could save the chat history if needed
         console.log("Chat completed with result:", result);
       },
       stopWhen: stepCountIs(5),
-      temperature: 0.7,
+      temperature: 0.3,
     });
 
     return stream.toUIMessageStreamResponse({
@@ -557,7 +700,7 @@ For example, EGFR phosphorylates STAT3."
         'Transfer-Encoding': 'chunked',
         Connection: 'keep-alive',
       },
-      sendReasoning: true,
+      sendReasoning: false,
       onError: (error) => {
         console.error("Chat stream error:", error);
         return `An error occurred, please try again!`;

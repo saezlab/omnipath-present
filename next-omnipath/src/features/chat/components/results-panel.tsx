@@ -22,13 +22,13 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
   useEffect(() => {
     if (toolResult?.toolName === "searchInteractions") {
       const query = toolResult.query
-      let ids: number[] = []
+      let ids: string[] = []
 
       if (Array.isArray(query.entityIds)) {
-        ids = query.entityIds.map(id => Number(id)).filter(id => !isNaN(id))
+        ids = query.entityIds.map(id => String(id).trim()).filter(id => id.length > 0)
       } else if (query.entity_id) {
-        const id = Number(query.entity_id)
-        if (!isNaN(id)) ids.push(id)
+        const id = String(query.entity_id).trim()
+        if (id.length > 0) ids.push(id)
       }
 
       if (ids.length > 0) {
@@ -62,15 +62,30 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
     switch (toolResult.toolName) {
       case "searchEntities": {
         const query = String(toolResult.query.query || "")
-        // Map "entities" to "search_entities" to match SearchPage props
-        const rawSearchType = toolResult.query.searchType as string
-        const searchType = rawSearchType === "cv_terms" ? "cv_terms" : "search_entities"
 
         return (
           <SearchPage
+            key={toolResult.id}
             embedded={true}
             initialQuery={query}
-            initialSearchType={searchType}
+            initialSearchType="search_entities"
+          />
+        )
+      }
+
+      case "resolveEntityIdentifiers": {
+        const identifiers = Array.isArray(toolResult.query.identifiers)
+          ? toolResult.query.identifiers.map((identifier) => String(identifier).trim()).filter((identifier) => identifier.length > 0)
+          : []
+        const initialSearchMode = identifiers.length > 1 ? "batch" : "identifier"
+
+        return (
+          <SearchPage
+            key={toolResult.id}
+            embedded={true}
+            initialSearchType="search_entities"
+            initialSearchMode={initialSearchMode}
+            initialIdentifiers={identifiers}
           />
         )
       }

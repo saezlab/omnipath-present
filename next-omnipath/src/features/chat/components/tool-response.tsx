@@ -5,17 +5,16 @@ import { ToolResult } from "./dual-mode-interface"
 interface SearchEntitiesResult {
   results: Array<Record<string, unknown>>
   totalCount: number
-  searchType: "entities" | "cv_terms"
+  searchType: "entities"
   query: string
-  bestMatchId?: string | number
+  bestMatchId?: string
   componentParams?: {
-    searchType: "entities" | "cv_terms"
     query: string
     limit: number
-    bestMatchId?: string | number
+    bestMatchId?: string
   }
   preview?: Array<{
-    id: string | number
+    id: string
     name: string
     type: string
     [key: string]: unknown
@@ -23,6 +22,34 @@ interface SearchEntitiesResult {
   stats?: {
     totalCount: number
     hasMore: boolean
+  }
+}
+
+interface ResolveEntityIdentifiersResult {
+  matches: Array<{
+    identifier: string
+    entityIds: string[]
+  }>
+  entities: Array<Record<string, unknown>>
+  totalCount: number
+  componentParams?: {
+    identifiers: string[]
+  }
+}
+
+interface ResolveOntologyTermsResult {
+  results: Array<Record<string, unknown>>
+  totalCount: number
+  componentParams?: {
+    termIds: string[]
+  }
+}
+
+interface ExploreOntologyTreeResult {
+  root?: Record<string, unknown> | null
+  totalCount?: number
+  componentParams?: {
+    termIds: string[]
   }
 }
 
@@ -36,7 +63,7 @@ interface SearchInteractionsResult {
     limit: number
   }
   preview?: Array<{
-    id: string | number
+    id: string
     entity_a: string
     entity_b: string
     type: string
@@ -52,7 +79,13 @@ interface ToolError {
   error: string
 }
 
-type ToolResultType = SearchEntitiesResult | SearchInteractionsResult | ToolError
+type ToolResultType =
+  | SearchEntitiesResult
+  | ResolveEntityIdentifiersResult
+  | ResolveOntologyTermsResult
+  | ExploreOntologyTreeResult
+  | SearchInteractionsResult
+  | ToolError
 
 // Update CustomToolInvocation args
 interface CustomToolInvocation {
@@ -104,7 +137,42 @@ export const ToolResponse = ({
       totalCount = searchResult.totalCount || searchResult.stats?.totalCount
       query = {
         query: searchResult.query,
-        searchType: searchResult.searchType,
+        ...args
+      }
+      break
+    }
+
+    case "resolveEntityIdentifiers": {
+      const lookupResult = result as ResolveEntityIdentifiersResult
+      transformedResults = lookupResult.matches.map((match) => ({
+        identifier: match.identifier,
+        entityIds: match.entityIds,
+      }))
+      totalCount = lookupResult.totalCount || lookupResult.matches.length
+      query = {
+        identifiers: lookupResult.componentParams?.identifiers || lookupResult.matches.map((match) => match.identifier),
+        ...args
+      }
+      break
+    }
+
+    case "resolveOntologyTerms": {
+      const ontologyResult = result as ResolveOntologyTermsResult
+      transformedResults = ontologyResult.results || []
+      totalCount = ontologyResult.totalCount || ontologyResult.results.length
+      query = {
+        termIds: ontologyResult.componentParams?.termIds || [],
+        ...args
+      }
+      break
+    }
+
+    case "exploreOntologyTree": {
+      const treeResult = result as ExploreOntologyTreeResult
+      transformedResults = treeResult.root ? [treeResult.root] : []
+      totalCount = treeResult.totalCount || transformedResults.length
+      query = {
+        termIds: treeResult.componentParams?.termIds || [],
         ...args
       }
       break

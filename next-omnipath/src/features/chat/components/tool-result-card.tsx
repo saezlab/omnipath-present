@@ -1,7 +1,7 @@
 "use client"
 
 import { Badge } from "@/components/ui/badge"
-import { ChevronRight, Database, Network } from "lucide-react"
+import { ChevronRight, Database, GitBranch, Network, ScanSearch } from "lucide-react"
 import { ToolResult } from "./dual-mode-interface"
 
 interface ToolResultCardProps {
@@ -17,6 +17,11 @@ const getIcon = (toolName: string) => {
   switch (toolName) {
     case "searchEntities":
       return Database
+    case "resolveEntityIdentifiers":
+      return ScanSearch
+    case "resolveOntologyTerms":
+    case "exploreOntologyTree":
+      return GitBranch
     case "searchInteractions":
       return Network
     default:
@@ -28,6 +33,12 @@ const getToolDisplayName = (toolName: string) => {
   switch (toolName) {
     case "searchEntities":
       return "Entity Search"
+    case "resolveEntityIdentifiers":
+      return "Identifier Lookup"
+    case "resolveOntologyTerms":
+      return "Ontology Terms"
+    case "exploreOntologyTree":
+      return "Ontology Tree"
     case "searchInteractions":
       return "Interaction Search"
 
