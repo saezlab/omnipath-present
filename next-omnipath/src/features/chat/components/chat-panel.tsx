@@ -26,7 +26,7 @@ const suggestedActions = [
   {
     title: "Phosphorylation interactions",
     label: "Search by interaction type",
-    action: "Show me phosphorylation interactions with strong evidence",
+    action: "Show me phosphorylation interactions",
   },
 ]
 
@@ -157,7 +157,9 @@ export function ChatPanel({
                   id={message.id}
                   role={message.role}
                   content={message.content}
+                  reasoning={message.reasoning}
                   toolInvocations={message.toolInvocations}
+                  parts={message.parts}
                   isInitialMessage={true}
                   startEdit={startEdit}
                   onToolResultClick={onToolResultClick}
@@ -254,7 +256,9 @@ export function ChatPanel({
                     id={message.id}
                     role={message.role}
                     content={message.content}
+                    reasoning={message.reasoning}
                     toolInvocations={message.toolInvocations}
+                    parts={message.parts}
                     isInitialMessage={false}
                     startEdit={startEdit}
                     onToolResultClick={onToolResultClick}

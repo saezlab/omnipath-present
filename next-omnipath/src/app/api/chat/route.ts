@@ -1,4 +1,4 @@
-import { cerebras } from "@/ai";
+import { getChatModel } from "@/ai";
 import { convertToModelMessages, stepCountIs, streamText, validateUIMessages } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
@@ -57,6 +57,48 @@ interface OntologyTreeResponse {
   root?: OntologyTreeNode | null;
 }
 
+const ONTOLOGY_ID_PATTERN = /^(GO|MI|OM|HP|KW):\d+$/;
+
+const normalizeOntologyFilterValues = async (terms: string[] | undefined): Promise<string[] | undefined> => {
+  if (!terms?.length) return undefined;
+
+  const normalizedTerms = terms
+    .map((term) => String(term).trim())
+    .filter((term) => term.length > 0);
+
+  if (normalizedTerms.length === 0) return undefined;
+
+  const idsToResolve = normalizedTerms.filter((term) => ONTOLOGY_ID_PATTERN.test(term));
+  if (idsToResolve.length === 0) return [...new Set(normalizedTerms)];
+
+  try {
+    const response = await fetch(`${getApiServiceUrl()}/terms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ term_ids: [...new Set(idsToResolve)] }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`API service error: ${response.status} ${text}`);
+    }
+
+    const data = (await response.json()) as TermsResponse;
+    const expandedTerms = new Set<string>(normalizedTerms);
+
+    for (const term of idsToResolve) {
+      const resolved = data.terms?.[term];
+      const name = resolved?.name?.trim();
+      if (name) expandedTerms.add(`${name}:${term}`);
+    }
+
+    return [...expandedTerms];
+  } catch (error) {
+    console.error("Error normalizing ontology filter values:", error);
+    return [...new Set(normalizedTerms)];
+  }
+};
+
 interface AssociationHit {
   id?: string | number;
   association_key?: string;
@@ -83,14 +125,6 @@ interface InteractionHit {
 const requestSchema = z.object({
   messages: z.array(z.unknown()),
 });
-
-const toolLimitSchema = z.coerce
-  .number()
-  .int()
-  .min(0)
-  .max(100)
-  .catch(20)
-  .transform((value) => (value < 1 ? 20 : value));
 
 const getEntityDbId = (hit: EntityHit): string | undefined => {
   const entityId = hit.entity_id ?? hit.id;
@@ -136,15 +170,13 @@ Use this for exploratory searches by protein name, gene symbol, family, descript
 Do NOT use this tool to resolve exact entity identifiers for anchored searches; use resolveEntityIdentifiers instead.`,
     inputSchema: z.object({
       query: z.string().describe("The free-text entity query"),
-      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
       entityTypes: z.array(z.string()).optional().describe("Optional filter by entity type ontology terms (e.g. protein:MI:0326)"),
       taxonomyIds: z.array(z.string()).optional().describe("Optional filter by NCBI taxonomy IDs (e.g. 9606 for human)"),
       ontologyTerms: z.array(z.string()).optional().describe("Optional canonical ontology term IDs (GO, MI, OM, HP, KW) to filter entity annotations"),
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ query, limit, entityTypes, taxonomyIds, ontologyTerms, sources }: {
+    execute: async ({ query, entityTypes, taxonomyIds, ontologyTerms, sources }: {
       query: string;
-      limit: number;
       entityTypes?: string[];
       taxonomyIds?: string[];
       ontologyTerms?: string[];
@@ -156,19 +188,19 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
         if (entityTypes?.length) filters.entity_types = entityTypes;
         if (taxonomyIds?.length) filters.ncbi_tax_id = taxonomyIds;
         if (sources?.length) filters.sources = sources;
-        if (ontologyTerms?.length) {
+        const normalizedOntologyTerms = await normalizeOntologyFilterValues(ontologyTerms);
+        if (normalizedOntologyTerms?.length) {
           // Broadly search across all cv_terms
-          filters.cv_terms_go = ontologyTerms;
-          filters.cv_terms_mi = ontologyTerms;
-          filters.cv_terms_om = ontologyTerms;
-          filters.cv_terms_hp = ontologyTerms;
-          filters.cv_terms_kw = ontologyTerms;
+          filters.cv_terms_go = normalizedOntologyTerms;
+          filters.cv_terms_mi = normalizedOntologyTerms;
+          filters.cv_terms_om = normalizedOntologyTerms;
+          filters.cv_terms_hp = normalizedOntologyTerms;
+          filters.cv_terms_kw = normalizedOntologyTerms;
         }
 
         const data = await searchMeilisearch({
           query,
           index: INDEXES.ENTITIES,
-          limit,
           offset: 0,
           filters
         });
@@ -237,7 +269,6 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
         return {
           componentParams: {
             query,
-            limit,
             bestMatchId,
           },
           preview,
@@ -333,7 +364,8 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
 
   resolveOntologyTerms: {
     description: `Resolve canonical ontology term IDs to labels, definitions, and namespaces.
-Use this only with concrete IDs like GO:0005634, HP:0001250, MI:0217, or OM:0310.`,
+Use this only with explicit concrete IDs like GO:0005634, HP:0001250, MI:0217, or OM:0310.
+Do not use this tool to guess ontology IDs from free-text concepts; it validates known IDs only.`,
     inputSchema: z.object({
       termIds: z.array(z.string()).min(1).max(100).describe("Canonical ontology term IDs to validate"),
     }),
@@ -424,19 +456,27 @@ If the user mentions a concrete gene, protein, accession, or identifier, first c
 Do not use broad entity search as a substitute for identifier resolution when anchoring an interaction query.`,
     inputSchema: z.object({
       entityIds: z.array(z.string()).optional().describe("Canonical string entity IDs to filter interactions by. Use resolveEntityIdentifiers first for anchored searches."),
-      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
-      interactionTypes: z.array(z.string()).optional().describe("Optional filter by interaction types (e.g. 'protein:MI:0326|protein:MI:0326' or just a specific term if known)"),
-      ontologyTerms: z.array(z.string()).optional().describe("Optional filter by annotation terms (GO, MI, HP, OM, KW) found on the interaction or participants. E.g. 'MI:0217' for phosphorylation."),
+      interactionTypes: z.array(z.string()).optional().describe("Optional filter by canonical interaction type values (for example 'protein:MI:0326|protein:MI:0326'). These are pair/type values, not annotation terms."),
+      interactionAnnotationTerms: z.array(z.string()).optional().describe("Optional interaction-level annotation terms. Use MI terms only."),
+      participantAnnotationTermsGo: z.array(z.string()).optional().describe("Optional participant-level GO annotation terms."),
+      participantAnnotationTermsMi: z.array(z.string()).optional().describe("Optional participant-level MI annotation terms."),
+      participantAnnotationTermsOm: z.array(z.string()).optional().describe("Optional participant-level OM annotation terms."),
+      participantAnnotationTermsHp: z.array(z.string()).optional().describe("Optional participant-level HP annotation terms."),
+      participantAnnotationTermsKw: z.array(z.string()).optional().describe("Optional participant-level KW annotation terms."),
       hasDirection: z.boolean().optional().describe("Optional filter for directed (true) or undirected (false) interactions."),
       isPositive: z.boolean().optional().describe("Optional filter for positive (activation/upregulation) interactions."),
       isNegative: z.boolean().optional().describe("Optional filter for negative (inhibition/downregulation) interactions."),
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ entityIds, limit, interactionTypes, ontologyTerms, hasDirection, isPositive, isNegative, sources }: {
+    execute: async ({ entityIds, interactionTypes, interactionAnnotationTerms, participantAnnotationTermsGo, participantAnnotationTermsMi, participantAnnotationTermsOm, participantAnnotationTermsHp, participantAnnotationTermsKw, hasDirection, isPositive, isNegative, sources }: {
       entityIds?: string[];
-      limit: number;
       interactionTypes?: string[];
-      ontologyTerms?: string[];
+      interactionAnnotationTerms?: string[];
+      participantAnnotationTermsGo?: string[];
+      participantAnnotationTermsMi?: string[];
+      participantAnnotationTermsOm?: string[];
+      participantAnnotationTermsHp?: string[];
+      participantAnnotationTermsKw?: string[];
       hasDirection?: boolean;
       isPositive?: boolean;
       isNegative?: boolean;
@@ -452,23 +492,36 @@ Do not use broad entity search as a substitute for identifier resolution when an
           apiFilters.entity_ids = entityIds.map((id) => String(id));
         }
 
+        const [
+          normalizedInteractionAnnotationTerms,
+          normalizedParticipantAnnotationTermsGo,
+          normalizedParticipantAnnotationTermsMi,
+          normalizedParticipantAnnotationTermsOm,
+          normalizedParticipantAnnotationTermsHp,
+          normalizedParticipantAnnotationTermsKw,
+        ] = await Promise.all([
+          normalizeOntologyFilterValues(interactionAnnotationTerms),
+          normalizeOntologyFilterValues(participantAnnotationTermsGo),
+          normalizeOntologyFilterValues(participantAnnotationTermsMi),
+          normalizeOntologyFilterValues(participantAnnotationTermsOm),
+          normalizeOntologyFilterValues(participantAnnotationTermsHp),
+          normalizeOntologyFilterValues(participantAnnotationTermsKw),
+        ]);
+
         if (interactionTypes?.length) apiFilters.interaction_types = interactionTypes;
+        if (normalizedInteractionAnnotationTerms?.length) apiFilters.interaction_annotation_terms = normalizedInteractionAnnotationTerms;
+        if (normalizedParticipantAnnotationTermsGo?.length) apiFilters.participant_annotation_terms_go = normalizedParticipantAnnotationTermsGo;
+        if (normalizedParticipantAnnotationTermsMi?.length) apiFilters.participant_annotation_terms_mi = normalizedParticipantAnnotationTermsMi;
+        if (normalizedParticipantAnnotationTermsOm?.length) apiFilters.participant_annotation_terms_om = normalizedParticipantAnnotationTermsOm;
+        if (normalizedParticipantAnnotationTermsHp?.length) apiFilters.participant_annotation_terms_hp = normalizedParticipantAnnotationTermsHp;
+        if (normalizedParticipantAnnotationTermsKw?.length) apiFilters.participant_annotation_terms_kw = normalizedParticipantAnnotationTermsKw;
         if (hasDirection !== undefined) apiFilters.has_direction = hasDirection;
         if (isPositive !== undefined) apiFilters.has_positive_sign = isPositive;
         if (isNegative !== undefined) apiFilters.has_negative_sign = isNegative;
         if (sources?.length) apiFilters.sources = sources;
-        if (ontologyTerms?.length) {
-          apiFilters.interaction_annotation_terms = ontologyTerms;
-          apiFilters.participant_annotation_terms_go = ontologyTerms;
-          apiFilters.participant_annotation_terms_hp = ontologyTerms;
-          apiFilters.participant_annotation_terms_mi = ontologyTerms;
-          apiFilters.participant_annotation_terms_om = ontologyTerms;
-          apiFilters.participant_annotation_terms_kw = ontologyTerms;
-        }
 
         const requestParams = {
           query: "", // Interactions index doesn't support text search
-          limit,
           offset: 0,
           index: INDEXES.INTERACTIONS,
           filters: apiFilters,
@@ -532,7 +585,23 @@ Do not use broad entity search as a substitute for identifier resolution when an
         return {
           componentParams: {
             entityIds,
-            limit
+            interactionTypes,
+            interactionAnnotationTerms,
+            participantAnnotationTermsGo,
+            participantAnnotationTermsMi,
+            participantAnnotationTermsOm,
+            participantAnnotationTermsHp,
+            participantAnnotationTermsKw,
+            normalizedInteractionAnnotationTerms,
+            normalizedParticipantAnnotationTermsGo,
+            normalizedParticipantAnnotationTermsMi,
+            normalizedParticipantAnnotationTermsOm,
+            normalizedParticipantAnnotationTermsHp,
+            normalizedParticipantAnnotationTermsKw,
+            hasDirection,
+            isPositive,
+            isNegative,
+            sources,
           },
           facetStatistics: formattedFacets,
           summary: summaryStats,
@@ -559,31 +628,29 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
       memberEntityTypes: z.array(z.string()).optional().describe("Ontology terms for the members."),
       ontologyTerms: z.array(z.string()).optional().describe("Association annotation terms."),
       sources: z.array(z.string()).optional().describe("Source prefixes."),
-      limit: toolLimitSchema.describe("Maximum number of results to return (values below 1 are normalized to 20; max 100)"),
     }),
-    execute: async ({ parentEntityIds, memberEntityIds, parentEntityTypes, memberEntityTypes, ontologyTerms, sources, limit }: {
+    execute: async ({ parentEntityIds, memberEntityIds, parentEntityTypes, memberEntityTypes, ontologyTerms, sources }: {
       parentEntityIds?: string[];
       memberEntityIds?: string[];
       parentEntityTypes?: string[];
       memberEntityTypes?: string[];
       ontologyTerms?: string[];
       sources?: string[];
-      limit: number;
     }) => {
       console.log(`Searching associations.`);
       try {
         const apiFilters: MeilisearchFilters = {};
+        const normalizedOntologyTerms = await normalizeOntologyFilterValues(ontologyTerms);
 
         if (parentEntityIds?.length) apiFilters.parent_entity_ids = parentEntityIds;
         if (memberEntityIds?.length) apiFilters.member_entity_ids = memberEntityIds;
         if (parentEntityTypes?.length) apiFilters.parent_entity_types = parentEntityTypes;
         if (memberEntityTypes?.length) apiFilters.member_entity_types = memberEntityTypes;
-        if (ontologyTerms?.length) apiFilters.association_annotation_terms = ontologyTerms;
+        if (normalizedOntologyTerms?.length) apiFilters.association_annotation_terms = normalizedOntologyTerms;
         if (sources?.length) apiFilters.sources = sources;
 
         const requestParams = {
           query: "",
-          limit,
           offset: 0,
           index: INDEXES.ASSOCIATIONS,
           filters: apiFilters,
@@ -619,7 +686,13 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
   },
 };
 
-
+const safeSerialize = (value: unknown): string => {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "[unserializable]";
+  }
+};
 
 export async function POST(req: Request) {
   try {
@@ -638,60 +711,69 @@ export async function POST(req: Request) {
         id: crypto.randomUUID(),
         role: "system",
         parts: [{
-          type: "text", text: `You are OmniPath AI, a powerful assistant for OmniPath, a database of molecular interactions, pathways, and biological annotations.
+          type: "text", text: `You are OmniPath AI, an assistant for exploring molecular interactions, pathways, complexes, and ontology annotations in OmniPath.
 
-Your capabilities:
-1. Search Entities: Broad exploratory full-text search over entity records.
-2. Resolve Entity Identifiers: Map raw identifiers or gene symbols to canonical OmniPath entity IDs.
-3. Resolve Ontology Terms: Validate canonical ontology IDs and inspect their labels/definitions.
-4. Explore Ontology Tree: Inspect broader or narrower ontology branches for known term IDs.
-5. Search Interactions: Find directed/undirected, positive/negative edges, filtered by entity, ontology term, or source.
-6. Search Associations: Find complex memberships, pathways, and reactions.
+Today is ${new Date().toLocaleDateString()}.
 
-Today's date is ${new Date().toLocaleDateString()}.
+Use tools as follows:
+- For exact genes, proteins, accessions, or identifiers, use \`resolveEntityIdentifiers\` first.
+- Use returned canonical string entity IDs in \`searchInteractions\` or \`searchAssociations\`.
+- Use \`searchEntities\` for broad exploratory lookup, not for anchored interaction searches.
 
-CRITICAL: ANCHORED SEARCHES
-If the user mentions a concrete gene, protein, accession, or identifier and wants interactions, associations, or an exact entity lookup:
-1. First use \`resolveEntityIdentifiers\`.
-2. Use the returned canonical entity ID string (for example \`P:UP:P04637:UNK\`) in \`searchInteractions\` or \`searchAssociations\`.
-3. Do not use \`searchEntities\` as the first step for anchored queries unless the user explicitly asks for broad exploratory browsing.
-4. Never ask for or use numeric IDs. Entity IDs are strings.
+For ontology terms:
+- Only work with explicit canonical ontology IDs.
+- Use \`resolveOntologyTerms\` to validate known IDs.
+- Use \`exploreOntologyTree\` to expand known IDs.
+- Do not invent ontology IDs from free text.
+- In \`searchInteractions\`, \`interactionAnnotationTerms\` accepts MI terms only; GO/MI/OM/HP/KW participant annotations belong in their matching participant fields.
 
-CRITICAL: CV TERM / ONTOLOGY WORKFLOW
-1. CV term exploration does NOT come from general entity search.
-2. Do not pretend free-text search resolves ontology terms.
-3. If the user gives explicit ontology IDs, validate them with \`resolveOntologyTerms\`.
-4. If you need broader or narrower branches for known IDs, use \`exploreOntologyTree\`.
-5. Only use canonical ontology IDs in the \`ontologyTerms\` filters for \`searchInteractions\` or \`searchAssociations\`.
-6. If the user only gives a vague ontology concept and no canonical term ID is available from the conversation or tools, say that exact ontology filtering requires a concrete term ID rather than inventing one.
-
-CRITICAL: PRESENTING RESULTS
-- You MUST focus on summarizing facet statistics.
-- DO NOT list more than 1 or 2 interactions directly unless asked.
-- Provide a summary of: total interactions/entities found, top sources, top interaction types, directionality splits, and causal info.
-
-Example response format for a facet summary:
-"I found 847 interactions. Here's an overview:
-**Interaction Types:** Physical association (234), Direct interaction (189), Phosphorylation (98).
-**Data Sources:** BioGRID (312), IntAct (245).
-...
-For example, EGFR phosphorylates STAT3."
-` }],
+When presenting results:
+- Prefer concise summaries over long lists.
+- For interaction searches, focus on totals, top interaction types, top sources, and direction/sign splits.
+- Only show 1–2 example records unless the user asks for more.` }],
       });
     }
 
     const modelMessages = await convertToModelMessages(normalizedMessages);
+    const chatModel = getChatModel();
+
+    console.log("Chat request debug:", {
+      provider: chatModel.provider,
+      rawMessages: safeSerialize(messages),
+      uiMessages: safeSerialize(uiMessages),
+      normalizedMessages: safeSerialize(normalizedMessages),
+      modelMessages: safeSerialize(modelMessages),
+    });
 
     const stream = streamText({
-      model: cerebras("gpt-oss-120b"),
+      model: chatModel.model,
       messages: modelMessages,
       tools,
       toolChoice: "auto",
+      maxRetries: 0,
       onFinish: async (result) => {
         // Here you could save the chat history if needed
-        console.log("Chat completed with result:", result);
+        console.log("Chat completed with result:", {
+          provider: chatModel.provider,
+          finishReason: result.finishReason,
+          steps: result.steps?.length,
+          usage: result.usage,
+        });
+        console.log("Chat completion debug:", safeSerialize({
+          provider: chatModel.provider,
+          finishReason: result.finishReason,
+          usage: result.usage,
+          text: result.text,
+          reasoningText: result.reasoningText,
+          content: result.content,
+          toolCalls: result.toolCalls,
+          toolResults: result.toolResults,
+          steps: result.steps,
+          response: result.response,
+        }));
       },
-      stopWhen: stepCountIs(5),
+      // Allow resolve -> search -> final answer, but avoid long tool-call loops.
+      stopWhen: stepCountIs(3),
       temperature: 0.3,
     });
 
@@ -700,10 +782,24 @@ For example, EGFR phosphorylates STAT3."
         'Transfer-Encoding': 'chunked',
         Connection: 'keep-alive',
       },
-      sendReasoning: false,
+      sendReasoning: true,
       onError: (error) => {
         console.error("Chat stream error:", error);
-        return `An error occurred, please try again!`;
+
+        const maybeStatusCode = typeof error === "object" && error !== null && "statusCode" in error
+          ? (error as { statusCode?: number }).statusCode
+          : undefined;
+        const maybeMessage = error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : "An error occurred, please try again!";
+
+        if (maybeStatusCode === 429 || maybeMessage.toLowerCase().includes("tokens per minute limit exceeded")) {
+          return "The model provider hit its token-per-minute rate limit. Please wait about a minute and try again.";
+        }
+
+        return "An error occurred, please try again!";
       },
     });
 

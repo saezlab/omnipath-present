@@ -2,7 +2,7 @@
 # Use this with `npm run dev` in next-omnipath for local frontend development
 #
 # Services read from DATA_DIR (defaults to omnipath_build latest output):
-#   DATA_DIR=../omnipath_build/data/latest/output
+#   DATA_DIR=../omnipath_build/data/output/latest
 #   - entity_identifier.parquet  (entity-service)
 #   - omnipath_mi.obo            (api-service)
 #   - search_*.parquet           (api-service export endpoints)
@@ -46,7 +46,7 @@ services:
         ports:
             - "8080:8080"
         volumes:
-            - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
+            - ${DATA_DIR:-../omnipath_build/data/output/latest}:/data:ro
         healthcheck:
             test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
             interval: 30s
@@ -68,7 +68,7 @@ services:
         ports:
             - "8081:8081"
         volumes:
-            - ${DATA_DIR:-../omnipath_build/data/latest/output}:/data:ro
+            - ${DATA_DIR:-../omnipath_build/data/output/latest}:/data:ro
             - ./api-service/cache:/app/cache
             # Mount source for hot reload during development
             - ./api-service/api_service:/app/api_service

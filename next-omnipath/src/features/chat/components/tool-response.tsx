@@ -10,7 +10,6 @@ interface SearchEntitiesResult {
   bestMatchId?: string
   componentParams?: {
     query: string
-    limit: number
     bestMatchId?: string
   }
   preview?: Array<{
@@ -60,7 +59,6 @@ interface SearchInteractionsResult {
   filters?: Record<string, unknown>
   componentParams?: {
     entityIds?: string[]
-    limit: number
   }
   preview?: Array<{
     id: string
