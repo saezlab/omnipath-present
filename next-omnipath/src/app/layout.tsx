@@ -2,10 +2,10 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
+import { NuqsAdapter } from "nuqs/adapters/next/app"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { SidebarContentProvider } from "@/contexts/sidebar-content-context"
-import { EntitySelectionProvider } from "@/contexts/entity-selection-context"
 import { Providers } from "@/components/providers"
 import "./globals.css"
 
@@ -26,7 +26,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Providers>
-            <EntitySelectionProvider>
+            <NuqsAdapter>
               <SidebarContentProvider>
                 <SidebarProvider>
                   <AppSidebar />
@@ -35,11 +35,10 @@ export default function RootLayout({
                   </main>
                 </SidebarProvider>
               </SidebarContentProvider>
-            </EntitySelectionProvider>
+            </NuqsAdapter>
           </Providers>
         </ThemeProvider>
       </body>
     </html>
   )
 }
-

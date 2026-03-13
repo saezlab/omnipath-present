@@ -1,6 +1,5 @@
 "use client";
 
-import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
@@ -8,68 +7,81 @@ import SearchPage from "@/features/search/page";
 import InteractionsPage from "@/features/explore/interactions-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMemo, useState, useEffect } from "react";
-import { searchInteractionsMeilisearch } from "@/lib/meilisearch/search";
+import { searchInteractionsMeilisearch, searchAssociationsMeilisearch } from "@/lib/meilisearch/search";
 import { INDEXES } from "@/lib/meilisearch/client";
+import { useSelectionUrlState } from "@/lib/navigation/url-state";
 
 export default function SelectionPage() {
-  const { selectionCount, selectedEntities } = useEntitySelection();
-  const [activeTab, setActiveTab] = useState("selection");
+  const { entityIds, tab, setTab, filters } = useSelectionUrlState();
   const [interactionsCount, setInteractionsCount] = useState<number | null>(null);
+  const [associatedEntityIds, setAssociatedEntityIds] = useState<string[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(true);
 
-  // Get selected entity IDs for filtering
   const selectedEntityIds = useMemo(
-    () =>
-      selectedEntities
-        .map((e) => e.entityId ?? e.id)
-        .map((id) => String(id).trim())
-        .filter((id) => id.length > 0),
-    [selectedEntities]
+    () => entityIds.map((id) => String(id).trim()).filter((id) => id.length > 0),
+    [entityIds],
   );
 
-  // Get associated entity IDs from context
-  const associatedEntityIds = useMemo(() => {
-    const entityIdSet = new Set<string>();
-    selectedEntities.forEach((entity) => {
-      entity.associated_entity_ids?.forEach((id) => {
-        const normalized = String(id).trim();
-        if (normalized) entityIdSet.add(normalized);
-      });
-    });
-    return Array.from(entityIdSet);
-  }, [selectedEntities]);
-
-  // Fetch interaction count
   useEffect(() => {
-    async function fetchInteractionsCount() {
+    async function fetchCounts() {
       if (selectedEntityIds.length === 0) {
         setInteractionsCount(0);
+        setAssociatedEntityIds([]);
         setLoadingCounts(false);
         return;
       }
 
       setLoadingCounts(true);
       try {
-        const response = await searchInteractionsMeilisearch({
-          query: "",
-          index: INDEXES.INTERACTIONS,
-          limit: 1,
-          offset: 0,
-          filters: { entity_ids: selectedEntityIds }
-        });
-        setInteractionsCount(response.estimatedTotalHits || 0);
+        const [interactionsResponse, parentsResponse, membersResponse] = await Promise.all([
+          searchInteractionsMeilisearch({
+            query: "",
+            index: INDEXES.INTERACTIONS,
+            limit: 1,
+            offset: 0,
+            filters: { entity_ids: selectedEntityIds },
+          }),
+          searchAssociationsMeilisearch({
+            query: "",
+            index: INDEXES.ASSOCIATIONS,
+            limit: 10000,
+            offset: 0,
+            filters: { member_entity_ids: selectedEntityIds },
+          }),
+          searchAssociationsMeilisearch({
+            query: "",
+            index: INDEXES.ASSOCIATIONS,
+            limit: 10000,
+            offset: 0,
+            filters: { parent_entity_ids: selectedEntityIds },
+          }),
+        ]);
+
+        setInteractionsCount(interactionsResponse.estimatedTotalHits || 0);
+
+        const entityIdSet = new Set<string>();
+        for (const hit of parentsResponse.hits) {
+          const id = String(hit.parent_entity_id ?? "").trim();
+          if (id) entityIdSet.add(id);
+        }
+        for (const hit of membersResponse.hits) {
+          const id = String(hit.member_entity_id ?? "").trim();
+          if (id) entityIdSet.add(id);
+        }
+        setAssociatedEntityIds(Array.from(entityIdSet));
       } catch (error) {
-        console.error("Error fetching interactions count:", error);
+        console.error("Error fetching selection counts:", error);
         setInteractionsCount(0);
+        setAssociatedEntityIds([]);
       } finally {
         setLoadingCounts(false);
       }
     }
 
-    fetchInteractionsCount();
+    void fetchCounts();
   }, [selectedEntityIds]);
 
-  if (selectionCount === 0) {
+  if (selectedEntityIds.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8">
         <div className="text-center space-y-4">
@@ -87,14 +99,14 @@ export default function SelectionPage() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as "selection" | "interactions" | "associations")} className="flex-1 flex flex-col">
         <div className="sticky top-0 z-10 bg-background border-b">
           <div className="w-full max-w-screen-xl mx-auto px-4 py-4">
             <TabsList>
               <TabsTrigger value="selection" className="flex items-center gap-2">
                 Selection
                 <Badge variant="secondary" className="ml-1">
-                  {selectionCount}
+                  {selectedEntityIds.length}
                 </Badge>
               </TabsTrigger>
               <TabsTrigger
@@ -126,21 +138,15 @@ export default function SelectionPage() {
         </div>
 
         <TabsContent value="selection" className="flex-1 overflow-hidden mt-0">
-          {selectedEntityIds.length > 0 ? (
-            <SearchPage
-              key={`selection:${selectedEntityIds.join(",")}`}
-              embedded={true}
-              allowOntologyInEmbedded={true}
-              showLayoutSwitcherInEmbedded={true}
-              showFilters={true}
-              initialFilters={{ entity_ids: selectedEntityIds }}
-              lockedEntityIds={selectedEntityIds}
-            />
-          ) : (
-            <div className="flex items-center justify-center py-12">
-              <p className="text-muted-foreground">No valid selected entity IDs found</p>
-            </div>
-          )}
+          <SearchPage
+            key={`selection:${selectedEntityIds.join(",")}`}
+            embedded={true}
+            allowOntologyInEmbedded={true}
+            showLayoutSwitcherInEmbedded={true}
+            showFilters={true}
+            initialFilters={{ ...filters, entity_ids: selectedEntityIds }}
+            lockedEntityIds={selectedEntityIds}
+          />
         </TabsContent>
 
         <TabsContent value="interactions" className="flex-1 overflow-hidden mt-0">
@@ -155,18 +161,15 @@ export default function SelectionPage() {
               allowOntologyInEmbedded={true}
               showLayoutSwitcherInEmbedded={true}
               showFilters={true}
-              initialFilters={{ entity_ids: associatedEntityIds }}
+              initialFilters={{ ...filters, entity_ids: associatedEntityIds }}
               lockedEntityIds={associatedEntityIds}
             />
           ) : (
             <div className="flex items-center justify-center py-12">
-              <p className="text-muted-foreground">
-                No associated entities found
-              </p>
+              <p className="text-muted-foreground">No associated entities found</p>
             </div>
           )}
         </TabsContent>
-
       </Tabs>
     </div>
   );

@@ -35,6 +35,7 @@ import Image from "next/image"
 import { useSidebarContent } from "@/contexts/sidebar-content-context"
 import { useEntitySelection } from "@/contexts/entity-selection-context"
 import { Badge } from "@/components/ui/badge"
+import { appendSelectionToUrl, buildSelectionUrl } from "@/lib/navigation/url-codecs"
 
 const navigationItems = [
   {
@@ -68,19 +69,18 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { setTheme, resolvedTheme } = useTheme()
   const { sidebarContent } = useSidebarContent()
-  const { selectionCount } = useEntitySelection()
+  const { selectionCount, entityIds } = useEntitySelection()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Check if a path is active (exact match or parent match for explore routes)
   const isPathActive = (url: string) => {
     if (url.startsWith("/explore/")) {
-      return pathname === url;
+      return pathname === url
     }
-    return pathname === url;
+    return pathname === url
   }
 
   return (
@@ -111,39 +111,41 @@ export function AppSidebar() {
         <SidebarGroup className="px-2">
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isPathActive(item.url) || (item.url === "/search" && pathname === "/selection")}>
-                    <Link href={item.url}>
-                      <item.icon className="h-5 w-5" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                  {/* Selection submenu under Search */}
-                  {item.url === "/search" && selectionCount > 0 && (
-                    <SidebarMenuSub>
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton asChild isActive={pathname === "/selection"}>
-                          <Link href="/selection" className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <ListChecks className="h-4 w-4" />
-                              <span>Selection</span>
-                            </div>
-                            <Badge variant="secondary" className="ml-auto text-xs">
-                              {selectionCount}
-                            </Badge>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  )}
-                </SidebarMenuItem>
-              ))}
+              {navigationItems.map((item) => {
+                const href = appendSelectionToUrl(item.url, entityIds)
+
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isPathActive(item.url) || (item.url === "/search" && pathname === "/selection")}>
+                      <Link href={href}>
+                        <item.icon className="h-5 w-5" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                    {item.url === "/search" && selectionCount > 0 && (
+                      <SidebarMenuSub>
+                        <SidebarMenuSubItem>
+                          <SidebarMenuSubButton asChild isActive={pathname === "/selection"}>
+                            <Link href={buildSelectionUrl({ entityIds })} className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <ListChecks className="h-4 w-4" />
+                                <span>Selection</span>
+                              </div>
+                              <Badge variant="secondary" className="ml-auto text-xs">
+                                {selectionCount}
+                              </Badge>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Render filter sidebar on search, selection, explore, and sources pages */}
         {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore/') || pathname === '/sources') && sidebarContent && (
           <>
             <div className="px-3">
@@ -157,7 +159,6 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t">
-        {/* Theme Toggle */}
         <div className="flex items-center justify-center px-4 py-2">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
