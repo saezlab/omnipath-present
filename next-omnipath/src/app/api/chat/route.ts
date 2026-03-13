@@ -782,10 +782,14 @@ Today is ${new Date().toLocaleDateString()}.
 Use the available tools and follow their schemas carefully.
 
 High-level rules:
+- Treat the app as a workspace with Results, Refine, and Chat panes.
+- Treat entities, interactions, and selection as Results modes inside the workspace.
+- Prefer workspace-style navigation and URL-backed result state over referring to separate pages.
 - For exact genes, proteins, accessions, or identifiers, resolve canonical entity IDs before doing anchored interaction or association searches.
 - For free-text ontology concepts, search ontology terms first instead of inventing IDs.
 - Treat interaction-level MI mechanisms separately from participant-level annotations.
 - If the user asks for both an interaction mechanism and participant annotation constraints, apply both.
+- Prefer opening or using Refine when the task is mainly about filters or ontology refinement.
 - Prefer the most direct tool path that answers the question.
 
 When presenting results:

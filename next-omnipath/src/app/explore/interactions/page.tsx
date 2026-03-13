@@ -1,18 +1,21 @@
-import { Suspense } from "react";
-import InteractionsPage from "@/features/explore/interactions-page";
+import { redirect } from "next/navigation";
 
-function InteractionsPageFallback() {
-    return (
-        <div className="flex-1 flex items-center justify-center">
-            <div className="animate-pulse text-muted-foreground">Loading...</div>
-        </div>
-    );
-}
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = new URLSearchParams();
+  const resolved = await searchParams;
 
-export default function Page() {
-    return (
-        <Suspense fallback={<InteractionsPageFallback />}>
-            <InteractionsPage useEntityFilters={false} />
-        </Suspense>
-    );
+  for (const [key, value] of Object.entries(resolved)) {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => params.append(key, entry));
+    } else if (value !== undefined) {
+      params.set(key, value);
+    }
+  }
+
+  params.set("view", "interactions");
+  redirect(`/workspace?${params.toString()}`);
 }

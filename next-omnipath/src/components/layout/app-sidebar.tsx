@@ -29,7 +29,7 @@ import {
   BookOpen,
 } from "lucide-react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { useTheme } from "next-themes"
 import Image from "next/image"
 import { useSidebarContent } from "@/contexts/sidebar-content-context"
@@ -40,12 +40,12 @@ import { appendSelectionToUrl, buildSelectionUrl } from "@/lib/navigation/url-co
 const navigationItems = [
   {
     title: "Search",
-    url: "/search",
+    url: "/workspace?view=entities",
     icon: Search,
   },
   {
     title: "Interactions",
-    url: "/explore/interactions",
+    url: "/workspace?view=interactions",
     icon: GitBranch,
   },
   {
@@ -67,6 +67,8 @@ const navigationItems = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const workspaceView = searchParams.get("view")
   const { setTheme, resolvedTheme } = useTheme()
   const { sidebarContent } = useSidebarContent()
   const { selectionCount, entityIds } = useEntitySelection()
@@ -77,8 +79,11 @@ export function AppSidebar() {
   }, [])
 
   const isPathActive = (url: string) => {
-    if (url.startsWith("/explore/")) {
-      return pathname === url
+    if (url.startsWith("/workspace?view=entities")) {
+      return pathname === "/workspace" && workspaceView === "entities"
+    }
+    if (url.startsWith("/workspace?view=interactions")) {
+      return pathname === "/workspace" && workspaceView === "interactions"
     }
     return pathname === url
   }
@@ -116,16 +121,16 @@ export function AppSidebar() {
 
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isPathActive(item.url) || (item.url === "/search" && pathname === "/selection")}>
+                    <SidebarMenuButton asChild isActive={isPathActive(item.url) || (item.url.startsWith("/workspace?view=entities") && pathname === "/workspace" && workspaceView === "selection")}>
                       <Link href={href}>
                         <item.icon className="h-5 w-5" />
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
-                    {item.url === "/search" && selectionCount > 0 && (
+                    {item.url.startsWith("/workspace?view=entities") && selectionCount > 0 && (
                       <SidebarMenuSub>
                         <SidebarMenuSubItem>
-                          <SidebarMenuSubButton asChild isActive={pathname === "/selection"}>
+                          <SidebarMenuSubButton asChild isActive={pathname === "/workspace" && workspaceView === "selection"}>
                             <Link href={buildSelectionUrl({ entityIds })} className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <ListChecks className="h-4 w-4" />

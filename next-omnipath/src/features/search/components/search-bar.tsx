@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Search } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface SearchBarProps {
   placeholder?: string
@@ -84,20 +83,19 @@ export function SearchBar({
         autoFocus={autoFocus}
       />
       {showSpeciesSelector && (
-        <div className="absolute right-28 top-1/2 -translate-y-1/2 z-10">
-          <Select value={selectedSpecies} onValueChange={onSpeciesChange}>
-            <SelectTrigger className="h-8 w-auto text-xs border-0 bg-transparent dark:bg-transparent hover:bg-transparent dark:hover:bg-transparent data-[state=open]:bg-transparent shadow-none px-0 gap-1 focus:ring-0 focus:ring-offset-0 [&>span]:text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="9606">Human</SelectItem>
-              <SelectItem value="10090">Mouse</SelectItem>
-              <SelectItem value="10116">Rat</SelectItem>
-              <SelectItem value="7227">Fruit fly</SelectItem>
-              <SelectItem value="6239">C. elegans</SelectItem>
-              <SelectItem value="7955">Zebrafish</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="absolute right-28 top-1/2 z-10 -translate-y-1/2">
+          <select
+            value={selectedSpecies}
+            onChange={(event) => onSpeciesChange?.(event.target.value)}
+            className="h-8 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none outline-none"
+          >
+            <option value="9606">Human</option>
+            <option value="10090">Mouse</option>
+            <option value="10116">Rat</option>
+            <option value="7227">Fruit fly</option>
+            <option value="6239">C. elegans</option>
+            <option value="7955">Zebrafish</option>
+          </select>
         </div>
       )}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">

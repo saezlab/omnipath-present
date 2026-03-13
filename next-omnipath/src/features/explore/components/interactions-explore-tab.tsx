@@ -28,6 +28,7 @@ interface InteractionsExploreTabProps {
   filters: MeilisearchFilters;
   onFilterChange: (filters: MeilisearchFilters) => void;
   onFilterCountsUpdate: (counts: Record<string, Record<string, number>>) => void;
+  useInternalRefineLayout?: boolean;
 }
 
 // Helper function to extract type label from "TypeLabel:ID" format
@@ -58,7 +59,8 @@ function shouldSwapMembers(directions: MeilisearchInteraction['directions']): bo
 export function InteractionsExploreTab({
   filters,
   onFilterChange,
-  onFilterCountsUpdate
+  onFilterCountsUpdate,
+  useInternalRefineLayout = true,
 }: InteractionsExploreTabProps) {
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
@@ -544,7 +546,9 @@ export function InteractionsExploreTab({
   return (
     <div className="relative flex flex-col h-svh overflow-hidden">
       <div className="flex-1 min-h-0">
-        {layoutMode === "split" && hasOntologyTerms ? (
+        {!useInternalRefineLayout ? (
+          searchPanel
+        ) : layoutMode === "split" && hasOntologyTerms ? (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={68} minSize={50} className="min-h-0">
               {searchPanel}
@@ -568,8 +572,8 @@ export function InteractionsExploreTab({
         interaction={selectedInteraction}
       />
 
-      {/* Layout mode switcher - only show if ontology terms are available */}
-      {hasOntologyTerms && (
+      {/* Layout mode switcher - only show if refine content is available */}
+      {useInternalRefineLayout && hasOntologyTerms && (
         <div className="fixed bottom-4 right-4 z-40">
           <div className="inline-flex items-center rounded-full border bg-background/90 p-1 shadow-sm">
             <Button
@@ -578,7 +582,7 @@ export function InteractionsExploreTab({
               onClick={() => setLayoutMode("search")}
               className="rounded-full h-8"
             >
-              Search
+              Results
             </Button>
             <Button
               size="sm"
@@ -594,7 +598,7 @@ export function InteractionsExploreTab({
               onClick={() => setLayoutMode("ontology")}
               className="rounded-full h-8"
             >
-              Ontology
+              Refine
             </Button>
           </div>
         </div>
