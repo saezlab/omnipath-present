@@ -1,4 +1,5 @@
 import type React from "react"
+import { Suspense } from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
@@ -29,7 +30,9 @@ export default function RootLayout({
             <NuqsAdapter>
               <SidebarContentProvider>
                 <SidebarProvider>
-                  <AppSidebar />
+                  <Suspense fallback={null}>
+                    <AppSidebar />
+                  </Suspense>
                   <main className="flex-1 w-full">
                     {children}
                   </main>
