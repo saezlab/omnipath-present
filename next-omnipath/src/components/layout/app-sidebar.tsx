@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/sidebar"
 import {
   Search,
-  MessageSquare,
   Sun,
   Moon,
   ListChecks,
@@ -52,11 +51,6 @@ const navigationItems = [
     title: "Sources",
     url: "/sources",
     icon: Database,
-  },
-  {
-    title: "Chat",
-    url: "/chat",
-    icon: MessageSquare,
   },
   {
     title: "API Docs",
