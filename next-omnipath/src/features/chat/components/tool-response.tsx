@@ -36,6 +36,16 @@ interface ResolveEntityIdentifiersResult {
   }
 }
 
+interface SearchOntologyTermsResult {
+  results: Array<Record<string, unknown>>
+  totalCount: number
+  componentParams?: {
+    queries: string[]
+    prefixes?: string[]
+    limit?: number
+  }
+}
+
 interface ResolveOntologyTermsResult {
   results: Array<Record<string, unknown>>
   totalCount: number
@@ -59,6 +69,23 @@ interface SearchInteractionsResult {
   filters?: Record<string, unknown>
   componentParams?: {
     entityIds?: string[]
+    interactionTypes?: string[]
+    interactionAnnotationTerms?: string[]
+    participantAnnotationTermsGo?: string[]
+    participantAnnotationTermsMi?: string[]
+    participantAnnotationTermsOm?: string[]
+    participantAnnotationTermsHp?: string[]
+    participantAnnotationTermsKw?: string[]
+    normalizedInteractionAnnotationTerms?: string[]
+    normalizedParticipantAnnotationTermsGo?: string[]
+    normalizedParticipantAnnotationTermsMi?: string[]
+    normalizedParticipantAnnotationTermsOm?: string[]
+    normalizedParticipantAnnotationTermsHp?: string[]
+    normalizedParticipantAnnotationTermsKw?: string[]
+    hasDirection?: boolean
+    isPositive?: boolean
+    isNegative?: boolean
+    sources?: string[]
   }
   preview?: Array<{
     id: string
@@ -80,6 +107,7 @@ interface ToolError {
 type ToolResultType =
   | SearchEntitiesResult
   | ResolveEntityIdentifiersResult
+  | SearchOntologyTermsResult
   | ResolveOntologyTermsResult
   | ExploreOntologyTreeResult
   | SearchInteractionsResult
@@ -154,6 +182,18 @@ export const ToolResponse = ({
       break
     }
 
+    case "searchOntologyTerms": {
+      const ontologySearchResult = result as SearchOntologyTermsResult
+      transformedResults = ontologySearchResult.results || []
+      totalCount = ontologySearchResult.totalCount || ontologySearchResult.results.length
+      query = {
+        queries: ontologySearchResult.componentParams?.queries || [],
+        prefixes: ontologySearchResult.componentParams?.prefixes || [],
+        ...args
+      }
+      break
+    }
+
     case "resolveOntologyTerms": {
       const ontologyResult = result as ResolveOntologyTermsResult
       transformedResults = ontologyResult.results || []
@@ -184,8 +224,19 @@ export const ToolResponse = ({
         : (searchResult.preview || [])
       totalCount = searchResult.totalCount || searchResult.stats?.totalCount
       query = {
-        entity_id: searchResult.entityIds?.[0],
-        ...args
+        ...args,
+        entityIds: searchResult.componentParams?.entityIds || searchResult.entityIds || [],
+        interactionTypes: searchResult.componentParams?.interactionTypes || [],
+        interactionAnnotationTerms: searchResult.componentParams?.normalizedInteractionAnnotationTerms || searchResult.componentParams?.interactionAnnotationTerms || [],
+        participantAnnotationTermsGo: searchResult.componentParams?.normalizedParticipantAnnotationTermsGo || searchResult.componentParams?.participantAnnotationTermsGo || [],
+        participantAnnotationTermsMi: searchResult.componentParams?.normalizedParticipantAnnotationTermsMi || searchResult.componentParams?.participantAnnotationTermsMi || [],
+        participantAnnotationTermsOm: searchResult.componentParams?.normalizedParticipantAnnotationTermsOm || searchResult.componentParams?.participantAnnotationTermsOm || [],
+        participantAnnotationTermsHp: searchResult.componentParams?.normalizedParticipantAnnotationTermsHp || searchResult.componentParams?.participantAnnotationTermsHp || [],
+        participantAnnotationTermsKw: searchResult.componentParams?.normalizedParticipantAnnotationTermsKw || searchResult.componentParams?.participantAnnotationTermsKw || [],
+        hasDirection: searchResult.componentParams?.hasDirection,
+        isPositive: searchResult.componentParams?.isPositive,
+        isNegative: searchResult.componentParams?.isNegative,
+        sources: searchResult.componentParams?.sources || [],
       }
       break
     }

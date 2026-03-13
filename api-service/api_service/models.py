@@ -35,6 +35,29 @@ class TermsResponse(BaseModel):
     terms: dict[str, TermInfo | None]
 
 
+class TermSearchRequest(BaseModel):
+    """Request for searching ontology terms by name or synonym."""
+
+    queries: list[str] = Field(default_factory=list)
+    prefixes: list[str] = Field(default_factory=list)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class TermSearchMatch(TermInfo):
+    """A term search match including search metadata."""
+
+    ontology_id: str
+    matched_text: str
+    match_type: str
+    score: int
+
+
+class TermSearchResponse(BaseModel):
+    """Response for ontology term name search."""
+
+    results: dict[str, list[TermSearchMatch]]
+
+
 class TrajectoryNode(BaseModel):
     """Node in a trajectory path."""
 

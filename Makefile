@@ -3,7 +3,7 @@
 # By default, dev services read data directly from omnipath_build latest output.
 # Override with: make dev DATA_DIR=/path/to/versioned/output
 
-DATA_DIR ?= ../omnipath_build/data/latest/output
+DATA_DIR ?= ../omnipath_build/data/output/latest
 
 .PHONY: dev stop restart validate-data
 

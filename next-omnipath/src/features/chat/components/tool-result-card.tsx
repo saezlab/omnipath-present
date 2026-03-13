@@ -19,6 +19,7 @@ const getIcon = (toolName: string) => {
       return Database
     case "resolveEntityIdentifiers":
       return ScanSearch
+    case "searchOntologyTerms":
     case "resolveOntologyTerms":
     case "exploreOntologyTree":
       return GitBranch
@@ -35,6 +36,8 @@ const getToolDisplayName = (toolName: string) => {
       return "Entity Search"
     case "resolveEntityIdentifiers":
       return "Identifier Lookup"
+    case "searchOntologyTerms":
+      return "Ontology Search"
     case "resolveOntologyTerms":
       return "Ontology Terms"
     case "exploreOntologyTree":

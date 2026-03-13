@@ -26,16 +26,56 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
 
       if (Array.isArray(query.entityIds)) {
         ids = query.entityIds.map(id => String(id).trim()).filter(id => id.length > 0)
+      } else if (Array.isArray(query.entity_ids)) {
+        ids = query.entity_ids.map(id => String(id).trim()).filter(id => id.length > 0)
       } else if (query.entity_id) {
         const id = String(query.entity_id).trim()
         if (id.length > 0) ids.push(id)
       }
 
-      if (ids.length > 0) {
-        setInteractionsFilters({ entity_ids: ids })
-      } else {
-        setInteractionsFilters({})
-      }
+      const toStringArray = (value: unknown): string[] | undefined =>
+        Array.isArray(value)
+          ? value.map(item => String(item).trim()).filter(item => item.length > 0)
+          : undefined
+
+      const nextFilters: MeilisearchFilters = {}
+
+      if (ids.length > 0) nextFilters.entity_ids = ids
+
+      const interactionTypes = toStringArray(query.interactionTypes) || toStringArray(query.interaction_types)
+      if (interactionTypes?.length) nextFilters.interaction_types = interactionTypes
+
+      const interactionAnnotationTerms = toStringArray(query.interactionAnnotationTerms) || toStringArray(query.interaction_annotation_terms)
+      if (interactionAnnotationTerms?.length) nextFilters.interaction_annotation_terms = interactionAnnotationTerms
+
+      const participantGo = toStringArray(query.participantAnnotationTermsGo) || toStringArray(query.participant_annotation_terms_go)
+      if (participantGo?.length) nextFilters.participant_annotation_terms_go = participantGo
+
+      const participantMi = toStringArray(query.participantAnnotationTermsMi) || toStringArray(query.participant_annotation_terms_mi)
+      if (participantMi?.length) nextFilters.participant_annotation_terms_mi = participantMi
+
+      const participantOm = toStringArray(query.participantAnnotationTermsOm) || toStringArray(query.participant_annotation_terms_om)
+      if (participantOm?.length) nextFilters.participant_annotation_terms_om = participantOm
+
+      const participantHp = toStringArray(query.participantAnnotationTermsHp) || toStringArray(query.participant_annotation_terms_hp)
+      if (participantHp?.length) nextFilters.participant_annotation_terms_hp = participantHp
+
+      const participantKw = toStringArray(query.participantAnnotationTermsKw) || toStringArray(query.participant_annotation_terms_kw)
+      if (participantKw?.length) nextFilters.participant_annotation_terms_kw = participantKw
+
+      if (typeof query.hasDirection === "boolean") nextFilters.has_direction = query.hasDirection
+      if (typeof query.has_direction === "boolean") nextFilters.has_direction = query.has_direction
+
+      if (typeof query.isPositive === "boolean") nextFilters.has_positive_sign = query.isPositive
+      if (typeof query.has_positive_sign === "boolean") nextFilters.has_positive_sign = query.has_positive_sign
+
+      if (typeof query.isNegative === "boolean") nextFilters.has_negative_sign = query.isNegative
+      if (typeof query.has_negative_sign === "boolean") nextFilters.has_negative_sign = query.has_negative_sign
+
+      const sources = toStringArray(query.sources)
+      if (sources?.length) nextFilters.sources = sources
+
+      setInteractionsFilters(nextFilters)
     }
   }, [toolResult])
 

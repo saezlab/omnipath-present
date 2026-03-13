@@ -14,19 +14,19 @@ import { useWindowSize } from "@/hooks/use-window-size";
 
 const suggestedActions = [
   {
-    title: "Find interactions involving EGFR",
-    label: "Search molecular interactions",
-    action: "Find all interactions involving EGFR protein",
+    title: "Nuclear EGFR phosphorylation",
+    label: "Entity + MI + GO filters",
+    action: "Show phosphorylation interactions involving EGFR where participants are nuclear",
   },
   {
-    title: "What is TP53?",
-    label: "Search for entity information",
-    action: "Tell me about TP53 - what kind of protein is it?",
+    title: "TP53 seizure-associated interactions",
+    label: "Entity + HPO participant filter",
+    action: "Show interactions involving TP53 where participants are associated with seizure",
   },
   {
-    title: "Phosphorylation interactions",
-    label: "Search by interaction type",
-    action: "Show me phosphorylation interactions with",
+    title: "Dephosphorylation interactions",
+    label: "Ontology lookup by name",
+    action: "Show dephosphorylation interactions",
   },
 ];
 

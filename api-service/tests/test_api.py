@@ -111,6 +111,37 @@ def test_batch_terms(client):
     assert "terms" in data
 
 
+def test_search_terms_by_name(client):
+    """Test ontology term lookup by human-readable name."""
+    from api_service.main import TermSearchMatch
+
+    with patch("api_service.main.search_terms_by_name") as mock_search:
+        mock_search.return_value = [
+            TermSearchMatch(
+                id="MI:0203",
+                name="dephosphorylation reaction",
+                definition="Test definition",
+                namespace=None,
+                ontology_id="omnipath",
+                matched_text="dephosphorylation",
+                match_type="exact",
+                score=1000,
+            )
+        ]
+
+        response = client.post(
+            "/terms/search",
+            json={"queries": ["dephosphorylation"], "prefixes": ["MI"], "limit": 5}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "results" in data
+    assert "dephosphorylation" in data["results"]
+    assert data["results"]["dephosphorylation"][0]["id"] == "MI:0203"
+    assert data["results"]["dephosphorylation"][0]["matched_text"] == "dephosphorylation"
+
+
 def test_trajectories(client):
     """Test trajectories endpoint."""
     response = client.get("/psi_mi/term/MI:0018/trajectories")

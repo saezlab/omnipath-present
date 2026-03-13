@@ -4,7 +4,6 @@ import { ChatMessagePart, ChatToolInvocation } from "../types";
 import { motion } from "framer-motion";
 import { ReactNode } from "react";
 
-import { Markdown } from "./markdown";
 import { ToolResponse } from "./tool-response";
 import { Button } from "@/components/ui/button";
 import { Pencil } from "lucide-react";
@@ -12,6 +11,7 @@ import type { ToolResult } from "./dual-mode-interface";
 import {
   Message as AIMessage,
   MessageContent,
+  MessageResponse,
 } from "@/components/ai-elements/message";
 import {
   Reasoning,
@@ -120,7 +120,7 @@ export const Message = ({
         isInitialMessage && role !== "user" ? "text-lg font-medium" : ""
       }`}
     >
-      <Markdown>{text}</Markdown>
+      <MessageResponse>{text}</MessageResponse>
       {canEdit && (
         <Button
           variant="ghost"

@@ -46,6 +46,21 @@ interface TermsResponse {
   terms?: Record<string, TermInfo | null>;
 }
 
+interface OntologySearchMatch {
+  id: string;
+  name?: string | null;
+  definition?: string | null;
+  namespace?: string | null;
+  ontology_id: string;
+  matched_text: string;
+  match_type: string;
+  score: number;
+}
+
+interface OntologySearchResponse {
+  results?: Record<string, OntologySearchMatch[]>;
+}
+
 interface OntologyTreeNode {
   id: string;
   name?: string;
@@ -362,10 +377,59 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
     },
   },
 
+  searchOntologyTerms: {
+    description: `Search ontology terms by human-readable names or synonyms and return matching ontology accessions.
+Use this when the user gives free-text biological concepts like dephosphorylation, phosphorylation, nucleus, seizure, or apoptotic process.
+Prefer MI prefix for interaction-level mechanism terms, GO/HP/KW/OM prefixes for participant-level annotations.`,
+    inputSchema: z.object({
+      queries: z.array(z.string()).min(1).max(20).describe("Free-text ontology concepts to resolve, such as dephosphorylation, nucleus, seizure, or apoptotic process"),
+      prefixes: z.array(z.enum(["GO", "MI", "OM", "HP", "KW"])).optional().describe("Optional ontology prefixes to constrain matching. Use MI for interaction-level mechanism lookup, GO/HP/KW/OM for participant-level annotation lookup."),
+      limit: z.number().int().min(1).max(20).optional().describe("Maximum matches per query"),
+    }),
+    execute: async ({ queries, prefixes, limit }: { queries: string[]; prefixes?: Array<"GO" | "MI" | "OM" | "HP" | "KW">; limit?: number }) => {
+      console.log(`Searching ontology terms for ${queries.length} queries.`);
+      try {
+        const normalizedQueries = queries.map((query) => query.trim()).filter((query) => query.length > 0);
+        const response = await fetch(`${getApiServiceUrl()}/terms/search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ queries: normalizedQueries, prefixes, limit: limit ?? 5 }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`API service error: ${response.status} ${text}`);
+        }
+
+        const data = (await response.json()) as OntologySearchResponse;
+        const results = normalizedQueries.flatMap((query) =>
+          (data.results?.[query] || []).map((match) => ({
+            query,
+            ...match,
+          })),
+        );
+
+        return {
+          componentParams: {
+            queries: normalizedQueries,
+            prefixes,
+            limit: limit ?? 5,
+          },
+          matchesByQuery: data.results || {},
+          results,
+          totalCount: results.length,
+        };
+      } catch (error: unknown) {
+        console.error("Error searching ontology terms:", error);
+        return { error: error instanceof Error ? error.message : "Unknown ontology term search error" };
+      }
+    },
+  },
+
   resolveOntologyTerms: {
     description: `Resolve canonical ontology term IDs to labels, definitions, and namespaces.
-Use this only with explicit concrete IDs like GO:0005634, HP:0001250, MI:0217, or OM:0310.
-Do not use this tool to guess ontology IDs from free-text concepts; it validates known IDs only.`,
+Use this when you already know the concrete IDs like GO:0005634, HP:0001250, MI:0217, or OM:0310.
+Prefer searchOntologyTerms first when the user only provides free-text ontology names.`,
     inputSchema: z.object({
       termIds: z.array(z.string()).min(1).max(100).describe("Canonical ontology term IDs to validate"),
     }),
@@ -715,22 +779,20 @@ export async function POST(req: Request) {
 
 Today is ${new Date().toLocaleDateString()}.
 
-Use tools as follows:
-- For exact genes, proteins, accessions, or identifiers, use \`resolveEntityIdentifiers\` first.
-- Use returned canonical string entity IDs in \`searchInteractions\` or \`searchAssociations\`.
-- Use \`searchEntities\` for broad exploratory lookup, not for anchored interaction searches.
+Use the available tools and follow their schemas carefully.
 
-For ontology terms:
-- Only work with explicit canonical ontology IDs.
-- Use \`resolveOntologyTerms\` to validate known IDs.
-- Use \`exploreOntologyTree\` to expand known IDs.
-- Do not invent ontology IDs from free text.
-- In \`searchInteractions\`, \`interactionAnnotationTerms\` accepts MI terms only; GO/MI/OM/HP/KW participant annotations belong in their matching participant fields.
+High-level rules:
+- For exact genes, proteins, accessions, or identifiers, resolve canonical entity IDs before doing anchored interaction or association searches.
+- For free-text ontology concepts, search ontology terms first instead of inventing IDs.
+- Treat interaction-level MI mechanisms separately from participant-level annotations.
+- If the user asks for both an interaction mechanism and participant annotation constraints, apply both.
+- Prefer the most direct tool path that answers the question.
 
 When presenting results:
 - Prefer concise summaries over long lists.
 - For interaction searches, focus on totals, top interaction types, top sources, and direction/sign splits.
-- Only show 1–2 example records unless the user asks for more.` }],
+- Do not end responses with a call to action, follow-up invitation, or phrases like "let me know if you want more details".
+` }],
       });
     }
 
@@ -750,7 +812,7 @@ When presenting results:
       messages: modelMessages,
       tools,
       toolChoice: "auto",
-      maxRetries: 0,
+      stopWhen: stepCountIs(15),
       onFinish: async (result) => {
         // Here you could save the chat history if needed
         console.log("Chat completed with result:", {
@@ -772,8 +834,6 @@ When presenting results:
           response: result.response,
         }));
       },
-      // Allow resolve -> search -> final answer, but avoid long tool-call loops.
-      stopWhen: stepCountIs(3),
       temperature: 0.3,
     });
 

@@ -1,8 +1,10 @@
 """FastAPI application for API service."""
 
 import logging
+import re
 import tempfile
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
@@ -14,6 +16,9 @@ from .models import (
     TermInfo,
     TermsRequest,
     TermsResponse,
+    TermSearchMatch,
+    TermSearchRequest,
+    TermSearchResponse,
     TrajectoryNode,
     TrajectoryResponse,
     TreeNode,
@@ -85,6 +90,136 @@ def ontograph_node_to_tree_node(node) -> TreeNode:
     )
 
 
+def _normalize_search_text(value: str) -> str:
+    """Normalize text for ontology term name search."""
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+@lru_cache(maxsize=32)
+def _get_search_documents(ontology_id: str) -> list[dict[str, object]]:
+    """Build a lightweight in-memory search index for ontology names/synonyms."""
+    client = registry.get(ontology_id)
+    if client is None:
+        return []
+
+    pronto_ontology = client._ontology._ontology
+    documents: list[dict[str, object]] = []
+
+    for term in pronto_ontology.terms():
+        if getattr(term, "obsolete", False):
+            continue
+
+        candidate_texts: list[str] = []
+        if term.name:
+            candidate_texts.append(str(term.name))
+
+        for synonym in getattr(term, "synonyms", ()):
+            synonym_text = getattr(synonym, "description", None) or str(synonym)
+            if synonym_text:
+                candidate_texts.append(str(synonym_text))
+
+        normalized_texts = []
+        seen = set()
+        for text in candidate_texts:
+            normalized = _normalize_search_text(text)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_texts.append({"original": text, "normalized": normalized})
+
+        if not normalized_texts:
+            continue
+
+        documents.append(
+            {
+                "id": term.id,
+                "name": term.name,
+                "definition": str(term.definition) if term.definition else None,
+                "namespace": term.namespace,
+                "texts": normalized_texts,
+            }
+        )
+
+    return documents
+
+
+def _score_term_match(query: str, candidate: str) -> tuple[int, str] | None:
+    """Return a simple relevance score and match type for a query/candidate pair."""
+    if not query or not candidate:
+        return None
+
+    if candidate == query:
+        return 1000, "exact"
+
+    if candidate.startswith(query):
+        return 800, "prefix"
+
+    query_tokens = [token for token in query.split(" ") if token]
+    candidate_tokens = [token for token in candidate.split(" ") if token]
+
+    if query_tokens and candidate_tokens[: len(query_tokens)] == query_tokens:
+        return 700, "token-prefix"
+
+    if query_tokens and all(token in candidate_tokens for token in query_tokens):
+        return 600, "token-match"
+
+    if query in candidate:
+        return 500, "substring"
+
+    return None
+
+
+def search_terms_by_name(query: str, ontology_ids: list[str], limit: int = 10) -> list[TermSearchMatch]:
+    """Search ontology terms by name/synonym across one or more ontologies."""
+    normalized_query = _normalize_search_text(query)
+    if not normalized_query:
+        return []
+
+    matches: list[tuple[int, TermSearchMatch]] = []
+
+    for ontology_id in ontology_ids:
+        for doc in _get_search_documents(ontology_id):
+            best_score: int | None = None
+            best_match_type: str | None = None
+            best_matched_text: str | None = None
+
+            for text in doc["texts"]:
+                scored = _score_term_match(normalized_query, text["normalized"])
+                if scored is None:
+                    continue
+                score, match_type = scored
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_match_type = match_type
+                    best_matched_text = text["original"]
+
+            if best_score is None or best_match_type is None or best_matched_text is None:
+                continue
+
+            name = doc["name"] or ""
+            if _normalize_search_text(str(name)) == normalized_query:
+                best_score += 50
+
+            matches.append(
+                (
+                    best_score,
+                    TermSearchMatch(
+                        id=str(doc["id"]),
+                        name=str(doc["name"]) if doc["name"] is not None else None,
+                        definition=str(doc["definition"]) if doc["definition"] is not None else None,
+                        namespace=str(doc["namespace"]) if doc["namespace"] is not None else None,
+                        ontology_id=ontology_id,
+                        matched_text=best_matched_text,
+                        match_type=best_match_type,
+                        score=best_score,
+                    ),
+                )
+            )
+
+    matches.sort(key=lambda item: (-item[0], len(item[1].id), item[1].id))
+    return [match for _, match in matches[:limit]]
+
+
 # --- Health ---
 
 @app.get("/health")
@@ -152,6 +287,31 @@ async def get_terms_batch(request: TermsRequest):
             terms[term_id] = extract_term_info(client, term_id)
     
     return TermsResponse(terms=terms)
+
+
+@app.post("/terms/search", response_model=TermSearchResponse)
+async def search_terms(request: TermSearchRequest):
+    """Search ontology terms by name/synonym and return matching accessions."""
+    from .config import PREFIX_TO_ONTOLOGY
+
+    ontology_ids: list[str]
+    if request.prefixes:
+        ontology_ids = list(
+            dict.fromkeys(
+                PREFIX_TO_ONTOLOGY[prefix.upper()]
+                for prefix in request.prefixes
+                if prefix.upper() in PREFIX_TO_ONTOLOGY
+            )
+        )
+    else:
+        ontology_ids = list(dict.fromkeys(PREFIX_TO_ONTOLOGY.values()))
+
+    results = {
+        query: search_terms_by_name(query, ontology_ids=ontology_ids, limit=request.limit)
+        for query in request.queries
+    }
+
+    return TermSearchResponse(results=results)
 
 
 # --- Navigation ---
