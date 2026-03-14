@@ -96,7 +96,7 @@ export function SelectionResultsView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <Tabs value={tab} onValueChange={(value) => setTab(value as "selection" | "interactions" | "associations")} className="flex min-h-0 flex-1 flex-col">
         <div className="sticky top-0 z-10 border-b bg-background">
           <div className="w-full px-4 py-4">
@@ -118,7 +118,7 @@ export function SelectionResultsView() {
         </div>
 
         <TabsContent value="selection" className="mt-0 min-h-0 flex-1 overflow-hidden">
-          <EntitiesResultsView lockedEntityIds={selectedEntityIds} />
+          <EntitiesResultsView lockedEntityIds={selectedEntityIds} hideSearchArea />
         </TabsContent>
 
         <TabsContent value="interactions" className="mt-0 min-h-0 flex-1 overflow-hidden">
@@ -127,7 +127,7 @@ export function SelectionResultsView() {
 
         <TabsContent value="associations" className="mt-0 min-h-0 flex-1 overflow-hidden">
           {associatedEntityIds.length > 0 ? (
-            <EntitiesResultsView lockedEntityIds={associatedEntityIds} />
+            <EntitiesResultsView lockedEntityIds={associatedEntityIds} hideSearchArea />
           ) : (
             <div className="flex items-center justify-center py-12">
               <p className="text-muted-foreground">No associated entities found</p>

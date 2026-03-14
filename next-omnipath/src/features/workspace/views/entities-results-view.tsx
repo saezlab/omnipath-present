@@ -18,11 +18,12 @@ import { cn } from "@/lib/utils";
 
 interface EntitiesResultsViewProps {
   lockedEntityIds?: Array<string | number>;
+  hideSearchArea?: boolean;
 }
 
 type SearchMode = "full-text" | "identifier" | "batch";
 
-export function EntitiesResultsView({ lockedEntityIds = [] }: EntitiesResultsViewProps) {
+export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = false }: EntitiesResultsViewProps) {
   const {
     query,
     setQuery,
@@ -41,10 +42,16 @@ export function EntitiesResultsView({ lockedEntityIds = [] }: EntitiesResultsVie
     () => ({ ncbi_tax_id: [species || "9606"] }),
     [species],
   );
+  const effectiveMode: SearchMode = hideSearchArea ? "full-text" : mode;
+  const effectiveQuery = hideSearchArea ? "" : query;
   const filters = useMemo<MeilisearchFilters>(() => {
+    if (hideSearchArea) {
+      return normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {};
+    }
+
     const base = Object.keys(urlFilters).length > 0 ? urlFilters : defaultFilters;
     return normalizedLockedEntityIds.length > 0 ? { ...base, entity_ids: normalizedLockedEntityIds } : base;
-  }, [defaultFilters, normalizedLockedEntityIds, urlFilters]);
+  }, [defaultFilters, hideSearchArea, normalizedLockedEntityIds, urlFilters]);
 
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
   const [lookupEntities, setLookupEntities] = useState<SearchResult[]>([]);
@@ -54,12 +61,12 @@ export function EntitiesResultsView({ lockedEntityIds = [] }: EntitiesResultsVie
   const [batchInput, setBatchInput] = useState("");
 
   const fetchSearchData = useCallback(async (offset: number, limit: number) => {
-    if (mode !== "full-text") {
+    if (effectiveMode !== "full-text") {
       return { results: [], totalResults: 0 };
     }
 
     const response = await searchMeilisearch({
-      query: query || "",
+      query: effectiveQuery,
       index: "search_entities",
       limit,
       offset,
@@ -70,12 +77,12 @@ export function EntitiesResultsView({ lockedEntityIds = [] }: EntitiesResultsVie
       results: (response.hits as SearchResult[]) || [],
       totalResults: ("estimatedTotalHits" in response ? response.estimatedTotalHits as number : 0) || 0,
     };
-  }, [filters, mode, query]);
+  }, [effectiveMode, effectiveQuery, filters]);
 
   const { data: results, loading, loadingMore, hasMore, sentinelRef } = useInfiniteScroll<SearchResult>({
     fetchData: fetchSearchData,
     pageSize: 20,
-    dependencies: [query, mode, filters],
+    dependencies: [effectiveQuery, effectiveMode, filters],
   });
 
   const handleSpeciesChange = useCallback((nextSpecies: string) => {
@@ -171,77 +178,79 @@ export function EntitiesResultsView({ lockedEntityIds = [] }: EntitiesResultsVie
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="border-b bg-background/60 backdrop-blur-md">
-        <div className="w-full px-4 py-4 space-y-4">
-          <div className="w-full space-y-3 rounded-2xl border bg-background/60 p-3 shadow-sm">
-            {mode === "full-text" && (
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <SearchBar
-                    placeholder="Search proteins, molecules, ontology terms…"
-                    onSearch={setQuery}
-                    initialQuery={query}
-                    autoFocus={false}
-                    selectedSpecies={species}
-                    onSpeciesChange={handleSpeciesChange}
+      {!hideSearchArea && (
+        <div className="border-b bg-background/60 backdrop-blur-md">
+          <div className="w-full px-4 py-4 space-y-4">
+            <div className="w-full space-y-3 rounded-2xl border bg-background/60 p-3 shadow-sm">
+              {mode === "full-text" && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <SearchBar
+                      placeholder="Search proteins, molecules, ontology terms…"
+                      onSearch={setQuery}
+                      initialQuery={query}
+                      autoFocus={false}
+                      selectedSpecies={species}
+                      onSpeciesChange={handleSpeciesChange}
+                    />
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
+                    <Download className="mr-1.5 h-4 w-4" />
+                    Export
+                  </Button>
+                </div>
+              )}
+
+              {mode === "identifier" && (
+                <div className="relative rounded-full border bg-background">
+                  <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Enter one identifier"
+                    className="h-12 rounded-full border-0 pl-12 pr-[100px] text-lg focus-visible:ring-0"
+                    value={identifierInput}
+                    onChange={(e) => setIdentifierInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleIdentifierLookup()}
                   />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <Button onClick={handleIdentifierLookup} disabled={lookupLoading} className="h-8 rounded-full px-4">
+                      Look up
+                    </Button>
+                  </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
-                  <Download className="mr-1.5 h-4 w-4" />
-                  Export
-                </Button>
-              </div>
-            )}
+              )}
 
-            {mode === "identifier" && (
-              <div className="relative rounded-full border bg-background">
-                <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Enter one identifier"
-                  className="h-12 rounded-full border-0 pl-12 pr-[100px] text-lg focus-visible:ring-0"
-                  value={identifierInput}
-                  onChange={(e) => setIdentifierInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleIdentifierLookup()}
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                  <Button onClick={handleIdentifierLookup} disabled={lookupLoading} className="h-8 rounded-full px-4">
-                    Look up
-                  </Button>
+              {mode === "batch" && (
+                <div className="flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm">
+                  <Textarea
+                    placeholder="Paste comma or newline separated identifiers"
+                    value={batchInput}
+                    onChange={(e) => setBatchInput(e.target.value)}
+                    rows={4}
+                    className="min-h-[100px] resize-none border-0 bg-transparent focus-visible:ring-0"
+                  />
+                  <div className="flex items-center justify-between px-3 pb-2">
+                    <p className="text-xs text-muted-foreground">We will look up all identifiers and group candidate entities for each.</p>
+                    <Button onClick={handleBatchLookup} disabled={lookupLoading} size="sm" className="rounded-full">
+                      Run lookup
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {mode === "batch" && (
-              <div className="flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm">
-                <Textarea
-                  placeholder="Paste comma or newline separated identifiers"
-                  value={batchInput}
-                  onChange={(e) => setBatchInput(e.target.value)}
-                  rows={4}
-                  className="min-h-[100px] resize-none border-0 bg-transparent focus-visible:ring-0"
-                />
-                <div className="flex items-center justify-between px-3 pb-2">
-                  <p className="text-xs text-muted-foreground">We will look up all identifiers and group candidate entities for each.</p>
-                  <Button onClick={handleBatchLookup} disabled={lookupLoading} size="sm" className="rounded-full">
-                    Run lookup
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <Tabs value={mode} onValueChange={(value) => setMode(value as SearchMode)} className="w-full">
-              <TabsList className="h-auto w-full justify-start rounded-full bg-muted/60 p-1">
-                <TabsTrigger value="full-text" className="rounded-full">Full text</TabsTrigger>
-                <TabsTrigger value="identifier" className="rounded-full">Identifier lookup</TabsTrigger>
-                <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>
-              </TabsList>
-            </Tabs>
+              <Tabs value={mode} onValueChange={(value) => setMode(value as SearchMode)} className="w-full">
+                <TabsList className="h-auto w-full justify-start rounded-full bg-muted/60 p-1">
+                  <TabsTrigger value="full-text" className="rounded-full">Full text</TabsTrigger>
+                  <TabsTrigger value="identifier" className="rounded-full">Identifier lookup</TabsTrigger>
+                  <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className={cn("min-h-0 flex-1 overflow-y-auto p-4")}>
-        {mode === "full-text" ? (
+        {effectiveMode === "full-text" ? (
           <SearchResults
             results={results}
             loading={loading}
