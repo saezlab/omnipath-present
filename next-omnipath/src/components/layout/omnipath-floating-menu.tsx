@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ExternalLink, GripHorizontal, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -21,8 +22,9 @@ import {
 import { useFloatingNav } from "@/contexts/floating-nav-context";
 import type { WorkspacePane } from "@/features/workspace/use-workspace-ui-state";
 import { useWindowSize } from "@/hooks/use-window-size";
+import { buildInteractionsUrl, buildSearchUrl, buildSelectionUrl, type ResultsView } from "@/lib/navigation/url-codecs";
+import { useWorkspaceUrlState } from "@/lib/navigation/workspace-url-state";
 import { cn } from "@/lib/utils";
-import { buildInteractionsUrl, buildSearchUrl, buildSelectionUrl } from "@/lib/navigation/url-codecs";
 import { useEntitySelection } from "@/lib/navigation/url-state";
 
 const STORAGE_KEY = "omnipath-floating-nav-left";
@@ -35,15 +37,23 @@ const PANE_LABELS: Record<WorkspacePane, string> = {
   chat: "Chat",
 };
 
+const VIEW_LABELS: Record<ResultsView, string> = {
+  entities: "Entities",
+  interactions: "Interactions",
+  selection: "Selection",
+};
+
 interface DragState {
   offsetFromCenter: number;
 }
 
 export function OmniPathFloatingMenu() {
   const pathname = usePathname();
+  const router = useRouter();
   const { width } = useWindowSize();
   const { workspaceControls } = useFloatingNav();
   const { entityIds, selectionCount } = useEntitySelection();
+  const { view, entitiesView, interactionsView, selectionView } = useWorkspaceUrlState();
   const { resolvedTheme, setTheme } = useTheme();
   const pillRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -55,6 +65,34 @@ export function OmniPathFloatingMenu() {
 
   const onWorkspaceRoute = pathname === "/workspace";
   const isDesktop = width >= 1024;
+
+  const navigateToView = (nextView: ResultsView) => {
+    if (nextView === "entities") {
+      router.push(buildSearchUrl({
+        query: entitiesView.query,
+        mode: entitiesView.mode,
+        type: entitiesView.type,
+        species: entitiesView.species,
+        filters: entitiesView.filters,
+        entityIds,
+      }));
+      return;
+    }
+
+    if (nextView === "interactions") {
+      router.push(buildInteractionsUrl({
+        entityIds: interactionsView.entityIds.length > 0 ? interactionsView.entityIds : entityIds,
+        filters: interactionsView.filters,
+      }));
+      return;
+    }
+
+    router.push(buildSelectionUrl({
+      entityIds,
+      tab: selectionView.tab,
+      filters: selectionView.filters,
+    }));
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -216,18 +254,6 @@ export function OmniPathFloatingMenu() {
               <Link href="/">Home</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild className="rounded-xl">
-              <Link href={buildSearchUrl({ entityIds })}>Entities</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="rounded-xl">
-              <Link href={buildInteractionsUrl({ entityIds })}>Interactions</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="rounded-xl">
-              <Link href={buildSelectionUrl({ entityIds })} className="flex items-center justify-between gap-2">
-                <span>Selection</span>
-                {selectionCount > 0 ? <Badge variant="secondary">{selectionCount}</Badge> : null}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="rounded-xl">
               <Link href="/sources">Sources</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild className="rounded-xl">
@@ -237,12 +263,35 @@ export function OmniPathFloatingMenu() {
               </Link>
             </DropdownMenuItem>
 
-            {!onWorkspaceRoute ? (
+            {workspaceControls ? (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="rounded-xl">
-                  <Link href="/workspace?view=entities">Open workspace</Link>
-                </DropdownMenuItem>
+                <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Workspace panes
+                </DropdownMenuLabel>
+                {(["results", "refine", "chat"] as WorkspacePane[]).map((pane) => {
+                  const checked = workspaceControls.isMobile
+                    ? workspaceControls.mobileActivePane === pane
+                    : workspaceControls.desktopVisiblePanes.includes(pane);
+
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={pane}
+                      checked={checked}
+                      onSelect={(event) => event.preventDefault()}
+                      onCheckedChange={() => {
+                        if (workspaceControls.isMobile) {
+                          if (!checked) workspaceControls.onMobileSelect(pane);
+                          return;
+                        }
+                        workspaceControls.onDesktopToggle(pane);
+                      }}
+                      className="rounded-xl"
+                    >
+                      {PANE_LABELS[pane]}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
               </>
             ) : null}
 
@@ -263,34 +312,42 @@ export function OmniPathFloatingMenu() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {mounted && workspaceControls ? (
-          <div className="flex items-center gap-1 rounded-full bg-muted/60 p-1">
-            {(["results", "refine", "chat"] as WorkspacePane[]).map((pane) => {
-              const active = workspaceControls.isMobile
-                ? workspaceControls.mobileActivePane === pane
-                : workspaceControls.desktopVisiblePanes.includes(pane);
+        <div className="flex items-center gap-1 rounded-full bg-muted/60 p-1">
+          {(["entities", "interactions"] as ResultsView[]).map((item) => {
+            const active = onWorkspaceRoute && view === item;
 
-              return (
-                <Button
-                  key={pane}
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    workspaceControls.isMobile
-                      ? workspaceControls.onMobileSelect(pane)
-                      : workspaceControls.onDesktopToggle(pane)
-                  }
-                  className={cn(
-                    "h-9 rounded-full px-3 text-sm",
-                    active && "bg-background shadow-sm hover:bg-background",
-                  )}
-                >
-                  {PANE_LABELS[pane]}
-                </Button>
-              );
-            })}
-          </div>
-        ) : null}
+            return (
+              <Button
+                key={item}
+                size="sm"
+                variant="ghost"
+                onClick={() => navigateToView(item)}
+                className={cn(
+                  "h-9 rounded-full px-3 text-sm",
+                  active && "bg-background shadow-sm hover:bg-background",
+                )}
+              >
+                {VIEW_LABELS[item]}
+              </Button>
+            );
+          })}
+          {selectionCount > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => navigateToView("selection")}
+              className={cn(
+                "h-9 rounded-full px-3 text-sm",
+                onWorkspaceRoute && view === "selection" && "bg-background shadow-sm hover:bg-background",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span>{VIEW_LABELS.selection}</span>
+                <Badge variant="secondary">{selectionCount}</Badge>
+              </span>
+            </Button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
