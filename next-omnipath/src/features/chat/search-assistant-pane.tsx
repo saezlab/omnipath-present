@@ -17,7 +17,7 @@ const initialMessages: UIMessage[] = [
     parts: [
       {
         type: "text",
-        text: "Use me to control the workspace: I can switch results views and open matching result sets directly.",
+        text: "I’ll help you browse this resource and find exactly what you need.",
       },
     ],
   },
