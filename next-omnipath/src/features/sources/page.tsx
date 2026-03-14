@@ -4,10 +4,9 @@ import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { SearchBar } from "@/features/search/components/search-bar";
 import { ResultCard, type SearchResult } from "@/features/search/components/result-card";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
-import type { MeilisearchFilters, MeilisearchSource } from "@/types/meilisearch";
+import type { MeilisearchSource } from "@/types/meilisearch";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { searchSources } from "./api/queries";
-import { SourceFilterSidebar } from "./components/source-filter-sidebar";
 
 const PAGE_SIZE = 20;
 
@@ -36,66 +35,31 @@ function mapSourceToSearchResult(source: MeilisearchSource): SearchResult {
 export default function SourcesPage() {
   const { setSidebarContent } = useSidebarContent();
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<MeilisearchFilters>({});
-  const [filterCounts, setFilterCounts] = useState<{
-    license_cv?: Record<string, number>;
-    update_category_cv?: Record<string, number>;
-    content_category_cv_terms?: Record<string, number>;
-  }>({});
 
   const fetchData = useCallback(
     async (offset: number, limit: number) => {
-      const response = await searchSources(query, filters, limit, offset);
-
-      if (offset === 0 && response.facetDistribution) {
-        setFilterCounts({
-          license_cv: response.facetDistribution.license_cv || {},
-          update_category_cv: response.facetDistribution.update_category_cv || {},
-          content_category_cv_terms: response.facetDistribution.content_category_cv_terms || {},
-        });
-      }
+      const response = await searchSources(query, limit, offset);
 
       return {
         results: response.hits || [],
         totalResults: response.estimatedTotalHits || 0,
       };
     },
-    [query, filters],
+    [query],
   );
 
   const { data, loading, loadingMore, hasMore, sentinelRef } = useInfiniteScroll<MeilisearchSource>({
     fetchData,
     pageSize: PAGE_SIZE,
-    dependencies: [query, filters],
+    dependencies: [query],
   });
 
   const mappedResults = useMemo(() => data.map(mapSourceToSearchResult), [data]);
 
-  const handleFilterChange = useCallback((nextFilters: MeilisearchFilters) => {
-    setFilters(nextFilters);
-  }, []);
-
-  const handleClearFilters = useCallback(() => {
-    setFilters({});
-  }, []);
-
   useEffect(() => {
-    if (Object.keys(filterCounts).length > 0) {
-      setSidebarContent(
-        <SourceFilterSidebar
-          filters={filters}
-          filterCounts={filterCounts}
-          onFilterChange={handleFilterChange}
-          onClearFilters={handleClearFilters}
-          isMobile
-        />,
-      );
-    } else {
-      setSidebarContent(null);
-    }
-
+    setSidebarContent(null);
     return () => setSidebarContent(null);
-  }, [filterCounts, filters, handleFilterChange, handleClearFilters, setSidebarContent]);
+  }, [setSidebarContent]);
 
   return (
     <div className="flex-1 flex flex-col h-svh overflow-hidden">
