@@ -6,16 +6,18 @@ import { useWindowSize } from "@/hooks/use-window-size";
 export type WorkspacePane = "results" | "refine" | "chat";
 
 const STORAGE_KEY = "omnipath-workspace-ui";
-const DESKTOP_ORDER: WorkspacePane[] = ["results", "refine", "chat"];
-const DESKTOP_DEFAULT_PANES: WorkspacePane[] = ["results", "refine"];
+const STORAGE_VERSION = 2;
+const DESKTOP_ORDER: WorkspacePane[] = ["chat", "refine", "results"];
+const DESKTOP_DEFAULT_PANES: WorkspacePane[] = ["refine", "results"];
 const MOBILE_DEFAULT_PANE: WorkspacePane = "results";
 const DEFAULT_WIDTHS: Record<WorkspacePane, number> = {
-  results: 56,
-  refine: 22,
-  chat: 22,
+  chat: 40,
+  refine: 20,
+  results: 40,
 };
 
 interface PersistedWorkspaceState {
+  version?: number;
   desktopVisiblePanes?: WorkspacePane[];
   mobileActivePane?: WorkspacePane;
   paneWidths?: Partial<Record<WorkspacePane, number>>;
@@ -47,14 +49,16 @@ export function useWorkspaceUiState(): WorkspaceUiState {
       if (!raw) return;
 
       const parsed = JSON.parse(raw) as PersistedWorkspaceState;
-      if (Array.isArray(parsed.desktopVisiblePanes) && parsed.desktopVisiblePanes.length > 0) {
+      const isCurrentVersion = parsed.version === STORAGE_VERSION;
+
+      if (isCurrentVersion && Array.isArray(parsed.desktopVisiblePanes) && parsed.desktopVisiblePanes.length > 0) {
         const ordered = DESKTOP_ORDER.filter((pane) => parsed.desktopVisiblePanes?.includes(pane));
         if (ordered.length > 0) setDesktopVisiblePanesState(ordered);
       }
-      if (parsed.mobileActivePane && DESKTOP_ORDER.includes(parsed.mobileActivePane)) {
+      if (isCurrentVersion && parsed.mobileActivePane && DESKTOP_ORDER.includes(parsed.mobileActivePane)) {
         setMobileActivePaneState(parsed.mobileActivePane);
       }
-      if (parsed.paneWidths) {
+      if (isCurrentVersion && parsed.paneWidths) {
         setPaneWidthsState((prev) => ({ ...prev, ...parsed.paneWidths }));
       }
     } catch {
@@ -67,6 +71,7 @@ export function useWorkspaceUiState(): WorkspaceUiState {
   useEffect(() => {
     if (!hydrated) return;
     const payload: PersistedWorkspaceState = {
+      version: STORAGE_VERSION,
       desktopVisiblePanes,
       mobileActivePane,
       paneWidths,

@@ -1,12 +1,12 @@
 "use client";
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { useFloatingNav } from "@/contexts/floating-nav-context";
 import { ChatPane } from "./chat-pane";
 import { RefinePane } from "./refine-pane";
 import { ResultsPane } from "./results-pane";
 import { useWorkspaceUiState, type WorkspacePane } from "./use-workspace-ui-state";
-import { WorkspaceControls } from "./workspace-controls";
 
 export function WorkspaceShell() {
   const {
@@ -17,7 +17,9 @@ export function WorkspaceShell() {
     paneWidths,
     toggleDesktopPane,
     setMobileActivePane,
+    setPaneWidths,
   } = useWorkspaceUiState();
+  const { setWorkspaceControls } = useFloatingNav();
 
   const desktopPaneContent: Record<WorkspacePane, ReactNode> = {
     results: <ResultsPane />,
@@ -27,29 +29,58 @@ export function WorkspaceShell() {
 
   const mobileContent = desktopPaneContent[mobileActivePane];
 
+  useEffect(() => {
+    if (!hydrated) return;
+
+    setWorkspaceControls({
+      isMobile,
+      desktopVisiblePanes,
+      mobileActivePane,
+      onDesktopToggle: toggleDesktopPane,
+      onMobileSelect: setMobileActivePane,
+    });
+
+    return () => setWorkspaceControls(null);
+  }, [
+    desktopVisiblePanes,
+    hydrated,
+    isMobile,
+    mobileActivePane,
+    setMobileActivePane,
+    setWorkspaceControls,
+    toggleDesktopPane,
+  ]);
+
   if (!hydrated) {
     return <div className="flex h-svh flex-1" />;
   }
 
   return (
     <div className="relative flex h-svh flex-1 flex-col overflow-hidden">
-      <WorkspaceControls
-        isMobile={isMobile}
-        desktopVisiblePanes={desktopVisiblePanes}
-        mobileActivePane={mobileActivePane}
-        onDesktopToggle={toggleDesktopPane}
-        onMobileSelect={setMobileActivePane}
-      />
-
       <div className="min-h-0 flex-1">
         {isMobile ? (
           <div className="h-full">{mobileContent}</div>
         ) : (
-          <ResizablePanelGroup direction="horizontal" className="h-full">
+          <ResizablePanelGroup
+            direction="horizontal"
+            className="h-full"
+            onLayoutChanged={(layout) => {
+              const nextWidths = desktopVisiblePanes.reduce<Partial<Record<WorkspacePane, number>>>((acc, pane) => {
+                const size = layout[pane];
+                if (typeof size === "number") {
+                  acc[pane] = size;
+                }
+                return acc;
+              }, {});
+
+              setPaneWidths(nextWidths);
+            }}
+          >
             {desktopVisiblePanes.map((pane, index) => (
               <Fragment key={pane}>
                 {index > 0 ? <ResizableHandle withHandle /> : null}
                 <ResizablePanel
+                  id={pane}
                   defaultSize={paneWidths[pane]}
                   minSize={desktopVisiblePanes.length === 1 ? 100 : pane === "results" ? 35 : 20}
                   className="min-h-0"

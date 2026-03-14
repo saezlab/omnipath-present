@@ -4,10 +4,10 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
-import { SidebarProvider } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/layout/app-sidebar"
 import { SidebarContentProvider } from "@/contexts/sidebar-content-context"
+import { FloatingNavProvider } from "@/contexts/floating-nav-context"
 import { Providers } from "@/components/providers"
+import { OmniPathFloatingMenu } from "@/components/layout/omnipath-floating-menu"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -29,14 +29,14 @@ export default function RootLayout({
           <Providers>
             <NuqsAdapter>
               <SidebarContentProvider>
-                <SidebarProvider>
+                <FloatingNavProvider>
                   <Suspense fallback={null}>
-                    <AppSidebar />
+                    <OmniPathFloatingMenu />
                   </Suspense>
                   <main className="flex-1 w-full">
                     {children}
                   </main>
-                </SidebarProvider>
+                </FloatingNavProvider>
               </SidebarContentProvider>
             </NuqsAdapter>
           </Providers>
