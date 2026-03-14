@@ -1,11 +1,19 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import {
@@ -13,11 +21,11 @@ import {
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
+  FileJson2Icon,
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
 
 import { CodeBlock } from "./code-block";
 
@@ -142,32 +150,47 @@ export const ToolOutput = ({
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
-
-  if (typeof output === "object" && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
+  if (errorText) {
+    return (
+      <div className={cn("space-y-2", className)} {...props}>
+        <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          Error
+        </h4>
+        <div className="overflow-x-auto rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+          {errorText}
+        </div>
+      </div>
     );
-  } else if (typeof output === "string") {
-    Output = <CodeBlock code={output} language="json" />;
   }
+
+  const dialogTitle = "Tool result JSON";
+  const outputJson = typeof output === "string"
+    ? output
+    : JSON.stringify(output, null, 2);
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
+        Result
       </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText
-            ? "bg-destructive/10 text-destructive"
-            : "bg-muted/50 text-foreground"
-        )}
-      >
-        {errorText && <div>{errorText}</div>}
-        {Output}
-      </div>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-2">
+            <FileJson2Icon className="size-4" />
+            Open result JSON
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0 flex flex-col">
+          <DialogHeader className="px-6 py-4 border-b">
+            <DialogTitle>{dialogTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto p-6 pt-0">
+            <div className="rounded-md bg-muted/50 overflow-hidden mt-6">
+              <CodeBlock code={outputJson} language="json" />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -131,6 +131,7 @@ export const ToolResponse = ({
   messageId: string
 }) => {
   const { toolName, result, state, args } = toolInvocation
+  const shouldShowResultCard = !["resolveEntityIdentifiers", "searchOntologyTerms"].includes(toolName)
 
   // Early exit for pending or unknown states without results yet
   if (state === 'pending' || !result) {
@@ -246,6 +247,10 @@ export const ToolResponse = ({
     default:
       console.warn(`Received response for unknown tool: ${toolName}`)
       return <p className="text-sm text-muted-foreground">Unknown tool response format.</p>
+  }
+
+  if (!shouldShowResultCard) {
+    return null
   }
 
   return (
