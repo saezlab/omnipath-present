@@ -198,19 +198,21 @@ export function OmniPathFloatingMenu() {
   return (
     <div
       className={cn(
-        "pointer-events-none fixed z-50 transition-transform duration-200",
+        "pointer-events-none z-50 transition-transform duration-200",
+        isDesktop ? "fixed" : "sticky top-0 w-full px-3 pt-3",
         isDragging && "scale-[1.02]",
       )}
-      style={{
+      style={isDesktop ? {
         top: `${DEFAULT_TOP_OFFSET}px`,
         left: computedLeft === null ? "50%" : `${computedLeft}px`,
         transform: computedLeft === null ? "translateX(-50%)" : undefined,
-      }}
+      } : undefined}
     >
       <div
         ref={pillRef}
         className={cn(
-          "pointer-events-auto inline-flex items-center gap-1 rounded-full border border-white/40 bg-background/80 p-1.5 shadow-lg backdrop-blur-xl supports-[backdrop-filter]:bg-background/70",
+          "pointer-events-auto items-center gap-1 border border-white/40 bg-background/80 p-1.5 shadow-lg backdrop-blur-xl supports-[backdrop-filter]:bg-background/70",
+          isDesktop ? "inline-flex rounded-full" : "flex w-full rounded-2xl",
           isDragging && "shadow-2xl",
         )}
       >
@@ -320,7 +322,7 @@ export function OmniPathFloatingMenu() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex items-center gap-1 rounded-full bg-muted/60 p-1">
+        <div className={cn("flex items-center gap-1 bg-muted/60 p-1", isDesktop ? "rounded-full" : "min-w-0 flex-1 rounded-xl")}>
           {(["entities", "interactions"] as ResultsView[]).map((item) => {
             const active = onWorkspaceRoute && view === item;
 
@@ -331,7 +333,8 @@ export function OmniPathFloatingMenu() {
                 variant="ghost"
                 onClick={() => navigateToView(item)}
                 className={cn(
-                  "h-9 rounded-full px-3 text-sm",
+                  "h-9 px-3 text-sm",
+                  isDesktop ? "rounded-full" : "flex-1 rounded-lg",
                   active && "bg-background shadow-sm hover:bg-background",
                 )}
               >
@@ -345,7 +348,8 @@ export function OmniPathFloatingMenu() {
               variant="ghost"
               onClick={() => navigateToView("selection")}
               className={cn(
-                "h-9 rounded-full px-3 text-sm",
+                "h-9 px-3 text-sm",
+                isDesktop ? "rounded-full" : "flex-1 rounded-lg",
                 onWorkspaceRoute && view === "selection" && "bg-background shadow-sm hover:bg-background",
               )}
             >

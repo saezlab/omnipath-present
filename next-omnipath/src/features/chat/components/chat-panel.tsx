@@ -134,7 +134,7 @@ export function ChatPanel({
   const editingIndex = editingMessageId ? messages.findIndex(m => m.id === editingMessageId) : -1
 
   return (
-    <div className="h-full flex flex-col bg-background relative">
+    <div className="h-full flex flex-col bg-background relative pt-20">
       {/* Floating maximize button for dual mode */}
       {mode === "results" && onMaximize && (
         <Button 
