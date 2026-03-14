@@ -98,8 +98,8 @@ export function SelectionResultsView() {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <Tabs value={tab} onValueChange={(value) => setTab(value as "selection" | "interactions" | "associations")} className="flex min-h-0 flex-1 flex-col">
-        <div className="sticky top-0 z-10 border-b bg-background">
-          <div className="w-full px-4 py-4">
+        <div className="sticky top-0 z-10 bg-background">
+          <div className="w-full px-4 pt-4">
             <TabsList>
               <TabsTrigger value="selection" className="flex items-center gap-2">
                 Selection

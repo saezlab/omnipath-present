@@ -31,6 +31,20 @@ const STORAGE_KEY = "omnipath-floating-nav-left";
 const DEFAULT_TOP_OFFSET = 20;
 const EDGE_PADDING = 16;
 
+function readStoredLeft(): number | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+
+    const parsed = Number(stored);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 const PANE_LABELS: Record<WorkspacePane, string> = {
   results: "Results",
   refine: "Refine",
@@ -95,18 +109,8 @@ export function OmniPathFloatingMenu() {
   };
 
   useEffect(() => {
+    setStoredLeft(readStoredLeft());
     setMounted(true);
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (!stored) return;
-
-      const parsed = Number(stored);
-      if (Number.isFinite(parsed)) {
-        setStoredLeft(parsed);
-      }
-    } catch {
-      // Ignore localStorage errors.
-    }
   }, []);
 
   useEffect(() => {
@@ -186,6 +190,10 @@ export function OmniPathFloatingMenu() {
     const rect = pillRef.current.getBoundingClientRect();
     return Math.max(EDGE_PADDING, width / 2 - rect.width / 2);
   }, [dragLeft, storedLeft, width]);
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <div
