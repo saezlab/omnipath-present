@@ -232,15 +232,14 @@ function FilterOptionRow({
     <div className="flex items-center justify-between py-0.5 gap-2">
       <Label
         htmlFor={`${filterKey}-${value}`}
-        className={`flex items-center gap-1.5 text-xs font-normal cursor-pointer min-w-0 flex-1 ${isSelected ? "font-medium" : ""
-          }`}
+        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground ${isSelected ? "font-medium" : ""}`}
       >
         <Checkbox
           id={`${filterKey}-${value}`}
           checked={isSelected}
           onCheckedChange={() => onToggle(value)}
           className={cn(
-            "h-3.5 w-3.5 flex-shrink-0",
+            "h-4 w-4 flex-shrink-0",
             isSelected ? "border-primary" : ""
           )}
         />
@@ -261,7 +260,7 @@ function FilterOptionRow({
       <Badge
         variant={isSelected ? "default" : "outline"}
         className={cn(
-          "text-xs h-5 px-1.5 py-0 flex-shrink-0",
+          "h-5 flex-shrink-0 px-1.5 py-0 text-[11px]",
           isSelected ? "bg-primary text-primary-foreground" : ""
         )}
       >
@@ -333,64 +332,58 @@ export function FilterSidebar({
     <div className="space-y-4">
       {/* Quick Filters */}
       <div className="mb-4 space-y-3">
-        {/* Directionality */}
-        <div className="space-y-2">
-          <Label className="text-xs font-medium text-muted-foreground">DIRECTIONALITY</Label>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={filters.has_direction === true ? "default" : "outline"}
-              size="sm"
-              onClick={() => onFilterChange({
-                ...filters,
-                has_direction: filters.has_direction === true ? undefined : true
-              })}
-            >
-              <ArrowRight className="h-4 w-4 mr-1" />
-              Directed {filterCounts.has_direction?.true > 0 && `(${formatNumber(filterCounts.has_direction.true)})`}
-            </Button>
-            <Button
-              variant={filters.has_direction === false ? "default" : "outline"}
-              size="sm"
-              onClick={() => onFilterChange({
-                ...filters,
-                has_direction: filters.has_direction === false ? undefined : false
-              })}
-            >
-              <Minus className="h-4 w-4 mr-1" />
-              Undirected {filterCounts.has_direction?.false > 0 && `(${formatNumber(filterCounts.has_direction.false)})`}
-            </Button>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={filters.has_direction === true ? "default" : "outline"}
+            size="sm"
+            onClick={() => onFilterChange({
+              ...filters,
+              has_direction: filters.has_direction === true ? undefined : true
+            })}
+            className={filters.has_direction === true ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
+          >
+            <ArrowRight className="h-4 w-4 mr-1" />
+            Directed {filterCounts.has_direction?.true > 0 && `(${formatNumber(filterCounts.has_direction.true)})`}
+          </Button>
+          <Button
+            variant={filters.has_direction === false ? "default" : "outline"}
+            size="sm"
+            onClick={() => onFilterChange({
+              ...filters,
+              has_direction: filters.has_direction === false ? undefined : false
+            })}
+            className={filters.has_direction === false ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
+          >
+            <Minus className="h-4 w-4 mr-1" />
+            Undirected {filterCounts.has_direction?.false > 0 && `(${formatNumber(filterCounts.has_direction.false)})`}
+          </Button>
         </div>
 
-        {/* Sign Filters */}
-        <div className="space-y-2">
-          <Label className="text-xs font-medium text-muted-foreground">EFFECT</Label>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={filters.has_positive_sign === true ? "default" : "outline"}
-              size="sm"
-              onClick={() => onFilterChange({
-                ...filters,
-                has_positive_sign: filters.has_positive_sign === true ? undefined : true
-              })}
-              className={filters.has_positive_sign === true ? "bg-green-600 hover:bg-green-700" : ""}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Activation {filterCounts.has_positive_sign?.true > 0 && `(${formatNumber(filterCounts.has_positive_sign.true)})`}
-            </Button>
-            <Button
-              variant={filters.has_negative_sign === true ? "default" : "outline"}
-              size="sm"
-              onClick={() => onFilterChange({
-                ...filters,
-                has_negative_sign: filters.has_negative_sign === true ? undefined : true
-              })}
-              className={filters.has_negative_sign === true ? "bg-red-600 hover:bg-red-700" : ""}
-            >
-              <Minus className="h-4 w-4 mr-1" />
-              Inhibition {filterCounts.has_negative_sign?.true > 0 && `(${formatNumber(filterCounts.has_negative_sign.true)})`}
-            </Button>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={filters.has_positive_sign === true ? "default" : "outline"}
+            size="sm"
+            onClick={() => onFilterChange({
+              ...filters,
+              has_positive_sign: filters.has_positive_sign === true ? undefined : true
+            })}
+            className={filters.has_positive_sign === true ? "bg-green-600 transition-none hover:bg-green-600" : "transition-none hover:bg-background hover:text-foreground"}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Activation {filterCounts.has_positive_sign?.true > 0 && `(${formatNumber(filterCounts.has_positive_sign.true)})`}
+          </Button>
+          <Button
+            variant={filters.has_negative_sign === true ? "default" : "outline"}
+            size="sm"
+            onClick={() => onFilterChange({
+              ...filters,
+              has_negative_sign: filters.has_negative_sign === true ? undefined : true
+            })}
+            className={filters.has_negative_sign === true ? "bg-red-600 transition-none hover:bg-red-600" : "transition-none hover:bg-background hover:text-foreground"}
+          >
+            <Minus className="h-4 w-4 mr-1" />
+            Inhibition {filterCounts.has_negative_sign?.true > 0 && `(${formatNumber(filterCounts.has_negative_sign.true)})`}
+          </Button>
         </div>
       </div>
 
@@ -1011,7 +1004,6 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   const content = (
     <div className="space-y-6">
       <div className="space-y-2">
-        <Label className="text-xs font-medium text-muted-foreground">Ontology search</Label>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -1034,15 +1026,12 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
       </div>
 
       {mode === "interactions" ? (
-        <div className="space-y-2">
-          <Label className="text-xs font-medium text-muted-foreground">Annotation level</Label>
-          <Tabs value={interactionScope} onValueChange={(value) => setInteractionScope(value as InteractionAnnotationScope)}>
-            <TabsList className="grid w-full grid-cols-2 h-9">
-              <TabsTrigger value="interaction" disabled={!hasInteractionScopeTerms}>Interaction</TabsTrigger>
-              <TabsTrigger value="participant" disabled={!hasParticipantScopeTerms}>Participant</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
+        <Tabs value={interactionScope} onValueChange={(value) => setInteractionScope(value as InteractionAnnotationScope)}>
+          <TabsList className="grid h-9 w-full grid-cols-2">
+            <TabsTrigger value="interaction" disabled={!hasInteractionScopeTerms}>Interaction</TabsTrigger>
+            <TabsTrigger value="participant" disabled={!hasParticipantScopeTerms}>Participant</TabsTrigger>
+          </TabsList>
+        </Tabs>
       ) : null}
 
       {filteredTabs.length > 0 ? (
@@ -1053,7 +1042,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
                 key={tab.prefix}
                 value={tab.prefix}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 text-xs",
+                  "flex items-center gap-2 px-3 py-1.5 text-sm",
                   "data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 )}
               >

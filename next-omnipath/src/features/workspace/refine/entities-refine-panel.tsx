@@ -6,6 +6,7 @@ import { searchMeilisearch } from "@/features/search/api/queries";
 import { useSearchUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { OntologyRefineSection } from "./ontology-refine-section";
+import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
 
 interface EntitiesRefinePanelProps {
   lockedEntityIds?: Array<string | number>;
@@ -73,19 +74,23 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
   }, [normalizedLockedEntityIds, setFilters, species]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <EntityFilterSidebar
-        filters={filters}
-        filterCounts={filterCounts}
-        onFilterChange={handleFilterChange}
-        onClearFilters={handleClearFilters}
-        isMobile
-      />
-      <OntologyRefineSection
-        filters={filters}
-        onFilterChange={(next) => setFilters(normalizedLockedEntityIds.length > 0 ? { ...next, entity_ids: normalizedLockedEntityIds } : next)}
-        ontologyFacetCountsByPrefix={ontologyFacetCountsByPrefix}
-      />
-    </div>
+    <RefinePanelLayout title="Entity filters">
+      <RefineSection title="Core filters">
+        <EntityFilterSidebar
+          filters={filters}
+          filterCounts={filterCounts}
+          onFilterChange={handleFilterChange}
+          onClearFilters={handleClearFilters}
+          isMobile
+        />
+      </RefineSection>
+      <RefineSection title="Ontology terms">
+        <OntologyRefineSection
+          filters={filters}
+          onFilterChange={(next) => setFilters(normalizedLockedEntityIds.length > 0 ? { ...next, entity_ids: normalizedLockedEntityIds } : next)}
+          ontologyFacetCountsByPrefix={ontologyFacetCountsByPrefix}
+        />
+      </RefineSection>
+    </RefinePanelLayout>
   );
 }

@@ -54,7 +54,7 @@ function FilterSection({
 
   return (
     <div>
-      <h4 className="text-sm font-medium mb-3">{title}</h4>
+      <h4 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{title}</h4>
       <div className="space-y-1 max-h-64 overflow-y-auto pr-2">
         {options.map(({ value, count, displayName, icon, id }) => {
           const isSelected = selectedValues?.includes(value) || false;
@@ -70,15 +70,14 @@ function FilterSection({
             <div key={value} className="flex items-center justify-between py-0.5 gap-2">
               <Label
                 htmlFor={`${filterKey}-${value}`}
-                className={`flex items-center gap-1.5 text-xs font-normal cursor-pointer min-w-0 flex-1 ${isSelected ? "text-primary font-medium" : ""
-                  }`}
+                className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 ${isSelected ? "text-foreground font-medium" : "text-foreground"}`}
               >
                 <Checkbox
                   id={`${filterKey}-${value}`}
                   checked={isSelected}
                   onCheckedChange={() => onToggle(value)}
                   className={cn(
-                    "h-3.5 w-3.5 flex-shrink-0",
+                    "h-4 w-4 flex-shrink-0",
                     isSelected ? "border-primary" : ""
                   )}
                 />
@@ -100,7 +99,7 @@ function FilterSection({
               <Badge
                 variant={isSelected ? "default" : "outline"}
                 className={cn(
-                  "text-xs h-5 px-1.5 py-0 flex-shrink-0",
+                  "h-5 flex-shrink-0 px-1.5 py-0 text-[11px]",
                   isSelected ? "bg-primary text-primary-foreground" : ""
                 )}
               >

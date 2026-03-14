@@ -5,6 +5,7 @@ import { FilterSidebar, AnnotationFilterSidebar } from "@/features/interactions-
 import { searchInteractions } from "@/features/interactions-search/api/queries";
 import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
+import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
 
 interface InteractionsRefinePanelProps {
   useEntityFilters?: boolean;
@@ -67,22 +68,28 @@ export function InteractionsRefinePanel({
     void loadFacets();
   }, [filters]);
 
+  const handleClearFilters = useCallback(() => setUrlFilters(enforceEntityScope({})), [enforceEntityScope, setUrlFilters]);
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <FilterSidebar
-        filters={filters}
-        filterCounts={filterCounts}
-        onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
-        onClearFilters={() => setUrlFilters(enforceEntityScope({}))}
-        isMobile
-      />
-      <AnnotationFilterSidebar
-        mode="interactions"
-        filters={filters}
-        filterCounts={filterCounts}
-        onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
-        isMobile
-      />
-    </div>
+    <RefinePanelLayout title="Interaction filters">
+      <RefineSection title="Interaction properties">
+        <FilterSidebar
+          filters={filters}
+          filterCounts={filterCounts}
+          onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
+          onClearFilters={handleClearFilters}
+          isMobile
+        />
+      </RefineSection>
+      <RefineSection title="Annotations">
+        <AnnotationFilterSidebar
+          mode="interactions"
+          filters={filters}
+          filterCounts={filterCounts}
+          onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
+          isMobile
+        />
+      </RefineSection>
+    </RefinePanelLayout>
   );
 }
