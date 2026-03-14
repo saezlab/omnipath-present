@@ -6,9 +6,9 @@ import { useWindowSize } from "@/hooks/use-window-size";
 export type WorkspacePane = "results" | "refine" | "chat";
 
 const STORAGE_KEY = "omnipath-workspace-ui";
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 3;
 const DESKTOP_ORDER: WorkspacePane[] = ["chat", "refine", "results"];
-const DESKTOP_DEFAULT_PANES: WorkspacePane[] = ["refine", "results"];
+const DESKTOP_DEFAULT_PANES: WorkspacePane[] = ["chat", "refine", "results"];
 const MOBILE_DEFAULT_PANE: WorkspacePane = "results";
 const DEFAULT_WIDTHS: Record<WorkspacePane, number> = {
   chat: 40,

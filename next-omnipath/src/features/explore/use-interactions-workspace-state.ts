@@ -6,11 +6,13 @@ import { useWindowSize } from "@/hooks/use-window-size";
 export type InteractionsWorkspacePane = "interactions" | "chat";
 
 const STORAGE_KEY = "omnipath-interactions-workspace";
-const DESKTOP_DEFAULT_PANES: InteractionsWorkspacePane[] = ["interactions"];
+const STORAGE_VERSION = 2;
+const DESKTOP_DEFAULT_PANES: InteractionsWorkspacePane[] = ["interactions", "chat"];
 const MOBILE_DEFAULT_PANE: InteractionsWorkspacePane = "interactions";
 const DESKTOP_ORDER: InteractionsWorkspacePane[] = ["interactions", "chat"];
 
 interface PersistedWorkspaceState {
+  version?: number;
   desktopVisiblePanes?: InteractionsWorkspacePane[];
   mobileActivePane?: InteractionsWorkspacePane;
 }
@@ -31,11 +33,13 @@ export function useInteractionsWorkspaceState() {
       }
 
       const parsed = JSON.parse(raw) as PersistedWorkspaceState;
-      if (Array.isArray(parsed.desktopVisiblePanes) && parsed.desktopVisiblePanes.length > 0) {
+      const isCurrentVersion = parsed.version === STORAGE_VERSION;
+
+      if (isCurrentVersion && Array.isArray(parsed.desktopVisiblePanes) && parsed.desktopVisiblePanes.length > 0) {
         const normalized = DESKTOP_ORDER.filter((pane) => parsed.desktopVisiblePanes?.includes(pane));
         if (normalized.length > 0) setDesktopVisiblePanes(normalized);
       }
-      if (parsed.mobileActivePane && DESKTOP_ORDER.includes(parsed.mobileActivePane)) {
+      if (isCurrentVersion && parsed.mobileActivePane && DESKTOP_ORDER.includes(parsed.mobileActivePane)) {
         setMobileActivePane(parsed.mobileActivePane);
       }
     } catch {
@@ -48,6 +52,7 @@ export function useInteractionsWorkspaceState() {
   useEffect(() => {
     if (!hydrated) return;
     const payload: PersistedWorkspaceState = {
+      version: STORAGE_VERSION,
       desktopVisiblePanes,
       mobileActivePane,
     };
