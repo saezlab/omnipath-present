@@ -1,10 +1,9 @@
 import { Badge } from "@/components/ui/badge"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { FileText, Search, ArrowRight, Minus, Plus } from "lucide-react"
+import { FileText, Search, ArrowRight, Minus, Plus, Layers3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import { MeilisearchInteraction, InteractionEvidence, InteractionDirection } from "@/types/meilisearch"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface InteractionDetailsProps {
   selectedInteraction: MeilisearchInteraction | null
@@ -16,56 +15,72 @@ function extractLabel(value: string): string {
   return colonIndex > 0 ? value.substring(0, colonIndex) : value;
 }
 
+function splitLabelAndId(value: string): { label: string; id?: string } {
+  const colonIndex = value.indexOf(':');
+  if (colonIndex <= 0) return { label: value };
+  return {
+    label: value.substring(0, colonIndex),
+    id: value.substring(colonIndex + 1),
+  };
+}
+
 // Helper function to determine if members should be swapped based on direction
 function shouldSwapMembers(directions: InteractionDirection[]): boolean {
   if (!directions || directions.length === 0) return false;
   return directions[0]?.direction === 'b-a';
 }
 
+type FormattedAnnotation = {
+  term: string;
+  termId?: string;
+  value?: string;
+  unit?: string;
+  unitId?: string;
+};
+
 function formatAnnotations(
   annotations: { term: string; value?: string | null; unit?: string | null }[]
-): { term: string; value?: string; unit?: string }[] {
-  return annotations.map((a) => ({
-    term: extractLabel(a.term),
-    value: a.value ?? undefined,
-    unit: a.unit ? extractLabel(a.unit) : undefined,
-  }));
+): FormattedAnnotation[] {
+  return annotations.map((a) => {
+    const term = splitLabelAndId(a.term);
+    const unit = a.unit ? splitLabelAndId(a.unit) : undefined;
+
+    return {
+      term: term.label,
+      termId: term.id,
+      value: a.value ?? undefined,
+      unit: unit?.label,
+      unitId: unit?.id,
+    };
+  });
 }
 
-function AnnotationTable({
+function AnnotationChips({
   annotations,
-  tone = 'default',
+  emptyLabel,
 }: {
-  annotations: { term: string; value?: string; unit?: string }[];
-  tone?: 'default' | 'source' | 'target';
+  annotations: FormattedAnnotation[];
+  emptyLabel: string;
 }) {
-  const headerToneClass =
-    tone === 'source'
-      ? 'bg-blue-50/70'
-      : tone === 'target'
-        ? 'bg-purple-50/70'
-        : 'bg-muted/40';
+  if (annotations.length === 0) {
+    return <div className="text-xs text-muted-foreground">{emptyLabel}</div>;
+  }
 
   return (
-    <div className="rounded-md border overflow-hidden">
-      <Table className="text-xs">
-        <TableHeader className={headerToneClass}>
-          <TableRow>
-            <TableHead className="h-8">Term</TableHead>
-            <TableHead className="h-8">Value</TableHead>
-            <TableHead className="h-8">Unit</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {annotations.map((annotation, idx) => (
-            <TableRow key={idx}>
-              <TableCell className="whitespace-normal break-words">{annotation.term}</TableCell>
-              <TableCell className="whitespace-normal break-words">{annotation.value || '—'}</TableCell>
-              <TableCell className="whitespace-normal break-words">{annotation.unit || '—'}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="flex flex-wrap gap-2">
+      {annotations.map((annotation, idx) => {
+        const valueText = annotation.value
+          ? `${annotation.term}: ${annotation.value}${annotation.unit ? ` ${annotation.unit}` : ''}`
+          : annotation.term;
+        const meta = [annotation.termId, annotation.unitId].filter(Boolean).join(' · ');
+
+        return (
+          <div key={idx} className="rounded-md border bg-background px-2.5 py-1.5 text-xs">
+            <div className="font-medium leading-tight">{valueText}</div>
+            {meta && <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">{meta}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -134,6 +149,20 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
     };
   }, [selectedInteraction]);
 
+  const evidenceGroups = useMemo(() => {
+    if (!selectedInteraction?.evidence) return [] as Array<{ source: string; items: InteractionEvidence[] }>;
+
+    const groups = new Map<string, InteractionEvidence[]>();
+    selectedInteraction.evidence.forEach((item) => {
+      const source = item.source ? extractLabel(item.source) : 'Unknown source';
+      groups.set(source, [...(groups.get(source) || []), item]);
+    });
+
+    return Array.from(groups.entries())
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .map(([source, items]) => ({ source, items }));
+  }, [selectedInteraction]);
+
   if (!selectedInteraction) {
     return (
       <div className="p-4">
@@ -160,12 +189,10 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
 
   return (
     <div className="p-4 pb-8 space-y-6">
-      {/* ===== INTERACTION OVERVIEW ===== */}
       <div className="rounded-lg border bg-card p-6">
-        {/* Entity Visualization */}
         <div className="flex items-center justify-center gap-6 py-6">
           <div className="flex flex-col items-center">
-            <span className="font-bold text-lg">{sourceId}</span>
+            <span className="font-bold text-lg text-center break-all">{sourceId}</span>
             <Badge variant="secondary" className="text-xs mt-1">{sourceType}</Badge>
           </div>
 
@@ -187,12 +214,11 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
           </div>
 
           <div className="flex flex-col items-center">
-            <span className="font-bold text-lg">{targetId}</span>
+            <span className="font-bold text-lg text-center break-all">{targetId}</span>
             <Badge variant="secondary" className="text-xs mt-1">{targetType}</Badge>
           </div>
         </div>
 
-        {/* Evidence Summary Stats */}
         {evidenceStats && (
           <div className="grid grid-cols-3 gap-4 pt-4 border-t">
             <div className="text-center">
@@ -211,10 +237,7 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
         )}
       </div>
 
-      {/* ===== PROGRESSIVE DISCLOSURE ACCORDIONS ===== */}
       <Accordion type="multiple" defaultValue={["directions", "evidence"]} className="space-y-4">
-
-        {/* Directions Section */}
         {selectedInteraction.directions.length > 0 && (
           <AccordionItem value="directions" className="border rounded-lg">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">
@@ -229,7 +252,7 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
             <AccordionContent className="px-4 pb-4">
               <div className="space-y-2">
                 {selectedInteraction.directions.map((dir, index) => (
-                  <div key={index} className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30">
+                  <div key={index} className="flex flex-wrap items-center gap-3 p-3 border rounded-lg bg-muted/30">
                     <Badge variant="outline" className="text-xs">
                       {dir.direction === 'a-b' ? `${selectedInteraction.member_a_id} → ${selectedInteraction.member_b_id}` : `${selectedInteraction.member_b_id} → ${selectedInteraction.member_a_id}`}
                     </Badge>
@@ -252,12 +275,11 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
           </AccordionItem>
         )}
 
-        {/* Evidence Details */}
         <AccordionItem value="evidence" className="border rounded-lg">
           <AccordionTrigger className="px-4 py-3 hover:no-underline">
             <div className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              <span className="font-medium">Evidence Details</span>
+              <Layers3 className="h-5 w-5" />
+              <span className="font-medium">Evidence by source</span>
               <Badge variant="secondary" className="ml-2">
                 {selectedInteraction.evidence?.length || 0}
               </Badge>
@@ -265,60 +287,77 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
           </AccordionTrigger>
           <AccordionContent className="px-4 pb-4">
             <div className="space-y-6">
-              {selectedInteraction.evidence?.map((evidence, index) => (
-                <div key={index} className="border rounded-lg p-4 bg-muted/30">
-                  {/* Evidence Header */}
-                  <div className="flex items-start justify-between mb-3 gap-2">
-                    <Badge variant="outline" className="text-xs">
-                      Evidence {evidence.evidence_serial ?? index + 1}
-                    </Badge>
-                    {evidence.source && (
-                      <Badge variant="secondary" className="text-xs">
-                        {extractLabel(evidence.source)}
-                      </Badge>
-                    )}
+              {evidenceGroups.map((group) => (
+                <div key={group.source} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{group.source}</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {group.items.length} evidence{group.items.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
 
-                  {/* Interaction Annotations */}
-                  {evidence.interaction_annotations && evidence.interaction_annotations.length > 0 && (
-                    <div className="mb-4">
-                      <div className="text-xs font-medium text-muted-foreground mb-2">Interaction Annotations</div>
-                      <AnnotationTable annotations={formatAnnotations(evidence.interaction_annotations)} />
-                    </div>
-                  )}
+                  <div className="space-y-4">
+                    {group.items.map((evidence, index) => {
+                      const sourceAnnotations = formatAnnotations(swap ? evidence.member_b_annotations : evidence.member_a_annotations);
+                      const targetAnnotations = formatAnnotations(swap ? evidence.member_a_annotations : evidence.member_b_annotations);
+                      const interactionAnnotations = formatAnnotations(evidence.interaction_annotations || []);
+                      const sourceMeta = splitLabelAndId(evidence.source);
 
-                  {/* Source Member Annotations */}
-                  {(() => {
-                    const sourceAnnotations = swap ? evidence.member_b_annotations : evidence.member_a_annotations;
-                    return sourceAnnotations && sourceAnnotations.length > 0 ? (
-                      <div className="mb-4">
-                        <div className="text-xs font-medium text-muted-foreground mb-2">
-                          Source ({sourceId}) Annotations
-                        </div>
-                        <AnnotationTable annotations={formatAnnotations(sourceAnnotations)} tone="source" />
-                      </div>
-                    ) : null;
-                  })()}
+                      return (
+                        <div key={`${group.source}-${evidence.evidence_serial ?? index}`} className="rounded-lg border bg-muted/20 p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="text-xs">
+                                  Evidence {evidence.evidence_serial ?? index + 1}: {sourceMeta.label}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {interactionAnnotations.length + sourceAnnotations.length + targetAnnotations.length} annotations
+                            </div>
+                          </div>
 
-                  {/* Target Member Annotations */}
-                  {(() => {
-                    const targetAnnotations = swap ? evidence.member_a_annotations : evidence.member_b_annotations;
-                    return targetAnnotations && targetAnnotations.length > 0 ? (
-                      <div className="mb-4">
-                        <div className="text-xs font-medium text-muted-foreground mb-2">
-                          Target ({targetId}) Annotations
+                          <div className="grid gap-4 lg:grid-cols-3">
+                            <div className="space-y-2">
+                              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interaction</div>
+                              <AnnotationChips
+                                annotations={interactionAnnotations}
+                                emptyLabel="No interaction-level annotations"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-xs font-medium uppercase tracking-wide text-blue-700">
+                                Source ({sourceId})
+                              </div>
+                              <AnnotationChips
+                                annotations={sourceAnnotations}
+                                emptyLabel="No source annotations"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-xs font-medium uppercase tracking-wide text-purple-700">
+                                Target ({targetId})
+                              </div>
+                              <AnnotationChips
+                                annotations={targetAnnotations}
+                                emptyLabel="No target annotations"
+                              />
+                            </div>
+                          </div>
+
                         </div>
-                        <AnnotationTable annotations={formatAnnotations(targetAnnotations)} tone="target" />
-                      </div>
-                    ) : null;
-                  })()}
+                      );
+                    })}
+                  </div>
                 </div>
               ))}
             </div>
           </AccordionContent>
         </AccordionItem>
 
-        {/* Annotation Terms Summary */}
         {selectedInteraction.interaction_annotation_terms && selectedInteraction.interaction_annotation_terms.length > 0 && (
           <AccordionItem value="annotation_terms" className="border rounded-lg">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">
@@ -332,11 +371,15 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
             </AccordionTrigger>
             <AccordionContent className="px-4 pb-4">
               <div className="flex flex-wrap gap-2">
-                {selectedInteraction.interaction_annotation_terms.map((term, idx) => (
-                  <Badge key={idx} variant="secondary" className="text-xs">
-                    {extractLabel(term)}
-                  </Badge>
-                ))}
+                {selectedInteraction.interaction_annotation_terms.map((term, idx) => {
+                  const parsed = splitLabelAndId(term);
+                  return (
+                    <div key={idx} className="rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs">
+                      <div className="font-medium">{parsed.label}</div>
+                      {parsed.id && <div className="text-[11px] text-muted-foreground">{parsed.id}</div>}
+                    </div>
+                  );
+                })}
               </div>
             </AccordionContent>
           </AccordionItem>
