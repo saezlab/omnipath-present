@@ -171,7 +171,7 @@ export function OmniPathFloatingMenu() {
     };
   }, [dragLeft, isDragging]);
 
-  const handleDragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleDragStart = (event: ReactPointerEvent<HTMLElement>) => {
     if (!isDesktop || !pillRef.current) return;
 
     const rect = pillRef.current.getBoundingClientRect();
@@ -210,24 +210,16 @@ export function OmniPathFloatingMenu() {
     >
       <div
         ref={pillRef}
+        onPointerDown={handleDragStart}
         className={cn(
-          "pointer-events-auto items-center gap-1 border border-white/40 bg-background/80 p-1.5 shadow-lg backdrop-blur-xl supports-[backdrop-filter]:bg-background/70",
-          isDesktop ? "inline-flex rounded-full" : "flex w-full rounded-2xl",
-          isDragging && "shadow-2xl",
+          "group pointer-events-auto items-center gap-1 border border-white/40 bg-background/80 p-1.5 shadow-lg backdrop-blur-xl supports-[backdrop-filter]:bg-background/70",
+          isDesktop ? "inline-flex rounded-full cursor-grab" : "flex w-full rounded-2xl",
+          isDragging && "cursor-grabbing shadow-2xl",
         )}
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          onPointerDown={handleDragStart}
-          className={cn(
-            "hidden h-9 w-9 cursor-grab rounded-full text-muted-foreground lg:inline-flex",
-            isDragging && "cursor-grabbing",
-          )}
-          aria-label="Drag navigation pill"
-        >
-          <GripHorizontal className="h-4 w-4" />
-        </Button>
+        <div className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground lg:flex">
+          <GripHorizontal className="h-3.5 w-3.5" />
+        </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -259,10 +251,6 @@ export function OmniPathFloatingMenu() {
             <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Navigate
             </DropdownMenuLabel>
-
-            <DropdownMenuItem asChild className="rounded-xl">
-              <Link href="/">Home</Link>
-            </DropdownMenuItem>
             <DropdownMenuItem asChild className="rounded-xl">
               <Link href="/sources">Sources</Link>
             </DropdownMenuItem>
@@ -322,43 +310,54 @@ export function OmniPathFloatingMenu() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className={cn("flex items-center gap-1 bg-muted/60 p-1", isDesktop ? "rounded-full" : "min-w-0 flex-1 rounded-xl")}>
-          {(["entities", "interactions"] as ResultsView[]).map((item) => {
-            const active = onWorkspaceRoute && view === item;
+        <div
+          className={cn(
+            "overflow-hidden transition-all duration-200 ease-out",
+            isDesktop
+              ? isDragging
+                ? "ml-1 max-w-[28rem] opacity-100"
+                : "max-w-0 opacity-0 group-hover:ml-1 group-hover:max-w-[28rem] group-hover:opacity-100"
+              : "min-w-0 flex-1 opacity-100",
+          )}
+        >
+          <div className={cn("flex items-center gap-1 bg-muted/60 p-1", isDesktop ? "rounded-full" : "min-w-0 flex-1 rounded-xl")}>
+            {(["entities", "interactions"] as ResultsView[]).map((item) => {
+              const active = onWorkspaceRoute && view === item;
 
-            return (
+              return (
+                <Button
+                  key={item}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => navigateToView(item)}
+                  className={cn(
+                    "h-9 px-3 text-sm",
+                    isDesktop ? "rounded-full" : "flex-1 rounded-lg",
+                    active && "bg-background shadow-sm hover:bg-background",
+                  )}
+                >
+                  {VIEW_LABELS[item]}
+                </Button>
+              );
+            })}
+            {selectionCount > 0 ? (
               <Button
-                key={item}
                 size="sm"
                 variant="ghost"
-                onClick={() => navigateToView(item)}
+                onClick={() => navigateToView("selection")}
                 className={cn(
                   "h-9 px-3 text-sm",
                   isDesktop ? "rounded-full" : "flex-1 rounded-lg",
-                  active && "bg-background shadow-sm hover:bg-background",
+                  onWorkspaceRoute && view === "selection" && "bg-background shadow-sm hover:bg-background",
                 )}
               >
-                {VIEW_LABELS[item]}
+                <span className="flex items-center gap-2">
+                  <span>{VIEW_LABELS.selection}</span>
+                  <Badge variant="secondary">{selectionCount}</Badge>
+                </span>
               </Button>
-            );
-          })}
-          {selectionCount > 0 ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => navigateToView("selection")}
-              className={cn(
-                "h-9 px-3 text-sm",
-                isDesktop ? "rounded-full" : "flex-1 rounded-lg",
-                onWorkspaceRoute && view === "selection" && "bg-background shadow-sm hover:bg-background",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <span>{VIEW_LABELS.selection}</span>
-                <Badge variant="secondary">{selectionCount}</Badge>
-              </span>
-            </Button>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

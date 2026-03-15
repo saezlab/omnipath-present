@@ -177,14 +177,14 @@ export function useEntitySelection() {
   }, []);
 
   useEffect(() => {
-    if (urlEntityIds.length === 0) return;
+    if (rawEntities === null) return;
     setFallbackEntityIds(urlEntityIds);
     writeSelectionIds(urlEntityIds);
-  }, [urlEntityIds]);
+  }, [rawEntities, urlEntityIds]);
 
   const entityIds = useMemo(() => {
-    return urlEntityIds.length > 0 ? urlEntityIds : fallbackEntityIds;
-  }, [fallbackEntityIds, urlEntityIds]);
+    return rawEntities !== null ? urlEntityIds : fallbackEntityIds;
+  }, [fallbackEntityIds, rawEntities, urlEntityIds]);
 
   const selectedEntities = useMemo<SelectedEntity[]>(() => {
     return entityIds.map((id) => cache[id] || { id, entityId: id, name: id });

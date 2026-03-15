@@ -1,6 +1,6 @@
-import { HomePage } from "@/features/home/components/home-page"
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return <HomePage />
+  redirect("/workspace?view=entities");
 }
 
