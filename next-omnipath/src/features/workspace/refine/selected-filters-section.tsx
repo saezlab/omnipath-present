@@ -18,15 +18,20 @@ interface SelectedFiltersSectionProps {
 export function SelectedFiltersSection({ items, onClearAll }: SelectedFiltersSectionProps) {
   if (items.length === 0) return null;
 
+  const removableCount = items.filter((item) => !!item.onRemove).length;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           {items.length} selected {items.length === 1 ? "filter" : "filters"}
+          {removableCount !== items.length ? ` · ${removableCount} removable` : ""}
         </p>
-        <Button variant="ghost" size="sm" onClick={onClearAll} className="h-7 px-2 text-muted-foreground">
-          Clear all
-        </Button>
+        {removableCount > 0 ? (
+          <Button variant="ghost" size="sm" onClick={onClearAll} className="h-7 px-2 text-muted-foreground">
+            Clear all
+          </Button>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
         {items.map((item) => (

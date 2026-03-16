@@ -10,6 +10,7 @@ import { SearchBar } from "@/features/search/components/search-bar";
 import { SearchResults } from "@/features/search/components/search-results";
 import { IdentifierMatches, type IdentifierMatch } from "@/features/search/components/identifier-matches";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { searchMeilisearch } from "@/features/search/api/queries";
 import { useSearchUrlState } from "@/lib/navigation/url-state";
 import type { SearchResult } from "@/features/search/components/result-card";
@@ -34,6 +35,7 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
     filters: urlFilters,
   } = useSearchUrlState();
   const [, startTransition] = useTransition();
+  const isMobile = useIsMobile();
   const normalizedLockedEntityIds = useMemo(
     () => lockedEntityIds.map((id) => String(id).trim()).filter(Boolean),
     [lockedEntityIds],
@@ -45,11 +47,12 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
   const effectiveMode: SearchMode = hideSearchArea ? "full-text" : mode;
   const effectiveQuery = hideSearchArea ? "" : query;
   const filters = useMemo<MeilisearchFilters>(() => {
-    if (hideSearchArea) {
-      return normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {};
-    }
+    const base = Object.keys(urlFilters).length > 0
+      ? urlFilters
+      : hideSearchArea
+        ? {}
+        : defaultFilters;
 
-    const base = Object.keys(urlFilters).length > 0 ? urlFilters : defaultFilters;
     return normalizedLockedEntityIds.length > 0 ? { ...base, entity_ids: normalizedLockedEntityIds } : base;
   }, [defaultFilters, hideSearchArea, normalizedLockedEntityIds, urlFilters]);
 
@@ -176,17 +179,23 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
     }
   }, [mode]);
 
+  useEffect(() => {
+    if (isMobile && mode === "batch") {
+      setMode("full-text");
+    }
+  }, [isMobile, mode, setMode]);
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {!hideSearchArea && (
         <div className="border-b bg-background/60 backdrop-blur-md">
           <div className="w-full px-4 py-4 space-y-4">
-            <div className="w-full space-y-3 rounded-2xl border bg-background/60 p-3 shadow-sm">
+            <div className="w-full space-y-3 rounded-2xl bg-background/60 p-3">
               {mode === "full-text" && (
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <SearchBar
-                      placeholder="Search proteins, molecules, ontology terms…"
+                      placeholder="Search proteins, molecules..."
                       onSearch={setQuery}
                       initialQuery={query}
                       autoFocus={false}
@@ -194,10 +203,12 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
                       onSpeciesChange={handleSpeciesChange}
                     />
                   </div>
-                  <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
-                    <Download className="mr-1.5 h-4 w-4" />
-                    Export
-                  </Button>
+                  {!isMobile && (
+                    <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
+                      <Download className="mr-1.5 h-4 w-4" />
+                      Export
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -219,7 +230,7 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
                 </div>
               )}
 
-              {mode === "batch" && (
+              {!isMobile && mode === "batch" && (
                 <div className="flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm">
                   <Textarea
                     placeholder="Paste comma or newline separated identifiers"
@@ -241,7 +252,7 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
                 <TabsList className="h-auto w-full justify-start rounded-full bg-muted/60 p-1">
                   <TabsTrigger value="full-text" className="rounded-full">Full text</TabsTrigger>
                   <TabsTrigger value="identifier" className="rounded-full">Identifier lookup</TabsTrigger>
-                  <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>
+                  {!isMobile && <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>}
                 </TabsList>
               </Tabs>
             </div>

@@ -8,7 +8,7 @@ import { EntitiesRefinePanel } from "./entities-refine-panel";
 import { InteractionsRefinePanel } from "./interactions-refine-panel";
 
 export function SelectionRefinePanel() {
-  const { entityIds, tab } = useSelectionUrlState();
+  const { entityIds, setEntityIds, tab } = useSelectionUrlState();
   const [associatedEntityIds, setAssociatedEntityIds] = useState<string[]>([]);
 
   const selectedEntityIds = useMemo(
@@ -60,12 +60,12 @@ export function SelectionRefinePanel() {
   }, [selectedEntityIds, tab]);
 
   if (tab === "interactions") {
-    return <InteractionsRefinePanel lockedEntityIds={selectedEntityIds} />;
+    return <InteractionsRefinePanel lockedEntityIds={selectedEntityIds} onLockedEntityIdsChange={setEntityIds} />;
   }
 
   if (tab === "associations") {
     return <EntitiesRefinePanel lockedEntityIds={associatedEntityIds} />;
   }
 
-  return <EntitiesRefinePanel lockedEntityIds={selectedEntityIds} />;
+  return <EntitiesRefinePanel lockedEntityIds={selectedEntityIds} onLockedEntityIdsChange={setEntityIds} />;
 }

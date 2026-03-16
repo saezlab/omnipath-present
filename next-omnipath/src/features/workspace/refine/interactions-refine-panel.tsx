@@ -13,6 +13,7 @@ import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filt
 interface InteractionsRefinePanelProps {
   useEntityFilters?: boolean;
   lockedEntityIds?: Array<string | number>;
+  onLockedEntityIdsChange?: (entityIds: string[]) => void;
 }
 
 const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
@@ -53,6 +54,7 @@ function extractReadableLabel(value: string): string {
 export function InteractionsRefinePanel({
   useEntityFilters = true,
   lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS,
+  onLockedEntityIdsChange,
 }: InteractionsRefinePanelProps) {
   const { entityIds: urlEntityIds, filters: urlFilters, setFilters: setUrlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds, selectedEntities } = useEntitySelection();
@@ -109,7 +111,12 @@ export function InteractionsRefinePanel({
     void loadFacets();
   }, [filters]);
 
-  const handleClearFilters = useCallback(() => setUrlFilters(enforceEntityScope({})), [enforceEntityScope, setUrlFilters]);
+  const handleClearFilters = useCallback(() => {
+    if (onLockedEntityIdsChange) {
+      onLockedEntityIdsChange([]);
+    }
+    setUrlFilters(onLockedEntityIdsChange ? {} : enforceEntityScope({}));
+  }, [enforceEntityScope, onLockedEntityIdsChange, setUrlFilters]);
 
   const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
     const items: SelectedFilterItem[] = [];
@@ -178,6 +185,9 @@ export function InteractionsRefinePanel({
         items.push({
           id: `entity_scope:${value}`,
           label: renderEntityLabel(String(value)),
+          onRemove: onLockedEntityIdsChange
+            ? () => onLockedEntityIdsChange(scopedEntityIds.filter((item) => item !== String(value)))
+            : undefined,
         });
       });
     } else {
@@ -251,12 +261,12 @@ export function InteractionsRefinePanel({
     }
 
     return items;
-  }, [enforceEntityScope, filters, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);
+  }, [enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);
 
   return (
     <RefinePanelLayout title="Interaction filters">
       {selectedFilterItems.length > 0 ? (
-        <RefineSection title="Selected filters">
+        <RefineSection title="Selected filters" defaultOpen={false}>
           <SelectedFiltersSection items={selectedFilterItems} onClearAll={handleClearFilters} />
         </RefineSection>
       ) : null}

@@ -13,6 +13,7 @@ import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filt
 
 interface EntitiesRefinePanelProps {
   lockedEntityIds?: Array<string | number>;
+  onLockedEntityIdsChange?: (entityIds: string[]) => void;
 }
 
 const TAXONOMY_ID_TO_NAME: Record<string, string> = {
@@ -54,7 +55,7 @@ function extractReadableLabel(value: string): string {
   return value;
 }
 
-export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePanelProps) {
+export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsChange }: EntitiesRefinePanelProps) {
   const { query, species, filters: urlFilters, setFilters } = useSearchUrlState();
   const { selectedEntities } = useEntitySelection();
   const [filterCounts, setFilterCounts] = useState<{
@@ -118,8 +119,15 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
   }, [filters, normalizedLockedEntityIds, setFilters]);
 
   const handleClearFilters = useCallback(() => {
-    setFilters(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : { ncbi_tax_id: [species || "9606"] });
-  }, [normalizedLockedEntityIds, setFilters, species]);
+    if (onLockedEntityIdsChange) {
+      onLockedEntityIdsChange([]);
+    }
+    setFilters(onLockedEntityIdsChange
+      ? { ncbi_tax_id: [species || "9606"] }
+      : normalizedLockedEntityIds.length > 0
+        ? { entity_ids: normalizedLockedEntityIds }
+        : { ncbi_tax_id: [species || "9606"] });
+  }, [normalizedLockedEntityIds, onLockedEntityIdsChange, setFilters, species]);
 
   const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
     const items: SelectedFilterItem[] = [];
@@ -142,17 +150,18 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
     };
 
     (filters.entity_ids || []).forEach((value) => {
+      const isLocked = normalizedLockedEntityIds.includes(String(value));
       items.push({
         id: `entity_ids:${value}`,
         label: renderEntityLabel(String(value)),
-        ...(normalizedLockedEntityIds.includes(String(value))
-          ? {}
-          : {
-              onRemove: () => {
-                const nextValues = (filters.entity_ids || []).filter((item) => String(item) !== String(value));
-                setFilters(nextValues.length > 0 ? { ...filters, entity_ids: nextValues } : { ...filters, entity_ids: undefined });
-              },
-            }),
+        onRemove: isLocked
+          ? onLockedEntityIdsChange
+            ? () => onLockedEntityIdsChange(normalizedLockedEntityIds.filter((item) => item !== String(value)))
+            : undefined
+          : () => {
+              const nextValues = (filters.entity_ids || []).filter((item) => String(item) !== String(value));
+              setFilters(nextValues.length > 0 ? { ...filters, entity_ids: nextValues } : { ...filters, entity_ids: undefined });
+            },
       });
     });
 
@@ -225,12 +234,12 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
     });
 
     return items;
-  }, [filters, handleFilterChange, normalizedLockedEntityIds, selectedEntityById, setFilters]);
+  }, [filters, handleFilterChange, normalizedLockedEntityIds, onLockedEntityIdsChange, selectedEntityById, setFilters]);
 
   return (
     <RefinePanelLayout title="Entity filters">
       {selectedFilterItems.length > 0 ? (
-        <RefineSection title="Selected filters">
+        <RefineSection title="Selected filters" defaultOpen={false}>
           <SelectedFiltersSection items={selectedFilterItems} onClearAll={handleClearFilters} />
         </RefineSection>
       ) : null}
