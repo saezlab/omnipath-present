@@ -645,46 +645,44 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     const timer = setTimeout(async () => {
       try {
         if (mode === "entities") {
-          const availablePrefixes = Object.keys(ontologyFacetCountsByPrefix || {});
-          const fallbackPrefix = availablePrefixes[0] || Object.keys(ENTITY_ONTOLOGY_FACET_MAP)[0];
-          const selectedPrefix =
-            (activeTab && ENTITY_ONTOLOGY_FACET_MAP[activeTab] ? activeTab : fallbackPrefix) || "";
-          const facetName = ENTITY_ONTOLOGY_FACET_MAP[selectedPrefix];
+          const availablePrefixes = Object.keys(ontologyFacetCountsByPrefix || {}).filter(
+            (prefix) => !!ENTITY_ONTOLOGY_FACET_MAP[prefix]
+          );
+          const prefixesToSearch = availablePrefixes.length > 0
+            ? availablePrefixes
+            : Object.keys(ENTITY_ONTOLOGY_FACET_MAP);
 
-          if (!facetName) {
-            if (!cancelled) {
-              setFacetSearchCountsByPrefix({});
-            }
-            return;
-          }
+          const responses = await Promise.all(
+            prefixesToSearch.map(async (prefix) => {
+              const facetName = ENTITY_ONTOLOGY_FACET_MAP[prefix];
+              const response = await fetch("/api/meilisearch/facet-search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  facetName,
+                  facetQuery: trimmedQuery,
+                  filters,
+                  limit: 100,
+                }),
+                signal: controller.signal,
+              });
 
-          const response = await fetch("/api/meilisearch/facet-search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              facetName,
-              facetQuery: trimmedQuery,
-              filters,
-              limit: 100,
-            }),
-            signal: controller.signal,
-          });
+              if (!response.ok) {
+                return [prefix, {}] as const;
+              }
 
-          if (!response.ok) {
-            if (!cancelled) {
-              setFacetSearchCountsByPrefix({ [selectedPrefix]: {} });
-            }
-            return;
-          }
+              const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
+              const counts: Record<string, number> = {};
+              (data.facetHits || []).forEach((hit) => {
+                counts[hit.value] = hit.count;
+              });
 
-          const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
-          const counts: Record<string, number> = {};
-          (data.facetHits || []).forEach((hit) => {
-            counts[hit.value] = hit.count;
-          });
+              return [prefix, counts] as const;
+            })
+          );
 
           if (!cancelled) {
-            setFacetSearchCountsByPrefix({ [selectedPrefix]: counts });
+            setFacetSearchCountsByPrefix(Object.fromEntries(responses));
           }
           return;
         }
@@ -696,46 +694,42 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
               return !!counts && Object.keys(counts).length > 0;
             })
             .map(([prefix]) => prefix);
-          const fallbackPrefix = availablePrefixes[0] || Object.keys(PARTICIPANT_ONTOLOGY_FACET_MAP)[0];
-          const selectedPrefix =
-            (activeTab && PARTICIPANT_ONTOLOGY_FACET_MAP[activeTab] ? activeTab : fallbackPrefix) || "";
-          const facetName = PARTICIPANT_ONTOLOGY_FACET_MAP[selectedPrefix];
+          const prefixesToSearch = availablePrefixes.length > 0
+            ? availablePrefixes
+            : Object.keys(PARTICIPANT_ONTOLOGY_FACET_MAP);
 
-          if (!facetName) {
-            if (!cancelled) {
-              setFacetSearchCountsByPrefix({});
-            }
-            return;
-          }
+          const responses = await Promise.all(
+            prefixesToSearch.map(async (prefix) => {
+              const facetName = PARTICIPANT_ONTOLOGY_FACET_MAP[prefix];
+              const response = await fetch("/api/meilisearch/facet-search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  facetName,
+                  facetQuery: trimmedQuery,
+                  filters,
+                  index: "interactions",
+                  limit: 100,
+                }),
+                signal: controller.signal,
+              });
 
-          const response = await fetch("/api/meilisearch/facet-search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              facetName,
-              facetQuery: trimmedQuery,
-              filters,
-              index: "interactions",
-              limit: 100,
-            }),
-            signal: controller.signal,
-          });
+              if (!response.ok) {
+                return [prefix, {}] as const;
+              }
 
-          if (!response.ok) {
-            if (!cancelled) {
-              setFacetSearchCountsByPrefix({ [selectedPrefix]: {} });
-            }
-            return;
-          }
+              const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
+              const counts: Record<string, number> = {};
+              (data.facetHits || []).forEach((hit) => {
+                counts[hit.value] = hit.count;
+              });
 
-          const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
-          const counts: Record<string, number> = {};
-          (data.facetHits || []).forEach((hit) => {
-            counts[hit.value] = hit.count;
-          });
+              return [prefix, counts] as const;
+            })
+          );
 
           if (!cancelled) {
-            setFacetSearchCountsByPrefix({ [selectedPrefix]: counts });
+            setFacetSearchCountsByPrefix(Object.fromEntries(responses));
           }
           return;
         }
