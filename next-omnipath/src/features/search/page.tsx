@@ -401,6 +401,12 @@ export default function SearchPage({
   }, [searchMode]);
 
   useEffect(() => {
+    if (isMobile && searchMode === "batch") {
+      setSearchMode("full-text");
+    }
+  }, [isMobile, searchMode, setSearchMode]);
+
+  useEffect(() => {
     setShowFloatingSearchHeader(false);
     lastSearchScrollTopRef.current = 0;
     upScrollAccumulatorRef.current = 0;
@@ -547,10 +553,12 @@ export default function SearchPage({
                   onSpeciesChange={handleSpeciesChange}
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
-                <Download className="h-4 w-4 mr-1.5" />
-                Export
-              </Button>
+              {!isMobile && (
+                <Button variant="outline" size="sm" onClick={handleEntityExport} className="h-10 rounded-full">
+                  <Download className="h-4 w-4 mr-1.5" />
+                  Export
+                </Button>
+              )}
             </div>
           )}
 
@@ -576,7 +584,7 @@ export default function SearchPage({
             </div>
           )}
 
-          {searchMode === "batch" && (
+          {!isMobile && searchMode === "batch" && (
             <div className="flex flex-col gap-3 rounded-xl border bg-background/50 p-1 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 transition-all backdrop-blur-sm">
               <Textarea
                 placeholder="Paste comma or newline separated identifiers"
@@ -612,7 +620,7 @@ export default function SearchPage({
             <TabsList className="h-auto w-full justify-start rounded-full bg-muted/60 p-1">
               <TabsTrigger value="full-text" className="rounded-full">Full text</TabsTrigger>
               <TabsTrigger value="identifier" className="rounded-full">Identifier lookup</TabsTrigger>
-              <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>
+              {!isMobile && <TabsTrigger value="batch" className="rounded-full">Batch identifiers</TabsTrigger>}
             </TabsList>
           </Tabs>
         </div>
