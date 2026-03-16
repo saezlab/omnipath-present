@@ -1,19 +1,62 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { EntityBadge } from "@/components/entity-badge";
 import { EntityFilterSidebar } from "@/features/search/components/entity-filter-sidebar";
+import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { searchMeilisearch } from "@/features/search/api/queries";
-import { useSearchUrlState } from "@/lib/navigation/url-state";
+import { useEntitySelection, useSearchUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { OntologyRefineSection } from "./ontology-refine-section";
 import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
+import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filters-section";
 
 interface EntitiesRefinePanelProps {
   lockedEntityIds?: Array<string | number>;
 }
 
+const TAXONOMY_ID_TO_NAME: Record<string, string> = {
+  "9606": "Human",
+  "10090": "Mouse",
+  "10116": "Rat",
+  "7227": "Fruit fly",
+  "6239": "C. elegans",
+  "7955": "Zebrafish",
+  "559292": "S. cerevisiae",
+  "284812": "S. pombe",
+  "83333": "E. coli",
+  "224308": "B. subtilis",
+};
+
+function extractCanonicalOntologyId(value: string): string | null {
+  const ontologyIdMatch = value.match(/(MI|OM|GO|HP|KW|DO|MP|CHEBI|CL|UBERON|MONDO):\d{4,}/);
+  return ontologyIdMatch?.[0] || null;
+}
+
+function extractReadableLabel(value: string): string {
+  const ontologyId = extractCanonicalOntologyId(value);
+
+  if (ontologyId) {
+    if (value === ontologyId) return value;
+    if (value.endsWith(`:${ontologyId}:${ontologyId}`)) {
+      return value.slice(0, -`:${ontologyId}:${ontologyId}`.length);
+    }
+    if (value.endsWith(`:${ontologyId}`)) {
+      return value.slice(0, -`:${ontologyId}`.length);
+    }
+  }
+
+  const typedIdMatch = value.match(/^(.+):([A-Z]+:\d+)$/);
+  if (typedIdMatch) {
+    return typedIdMatch[1];
+  }
+
+  return value;
+}
+
 export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePanelProps) {
   const { query, species, filters: urlFilters, setFilters } = useSearchUrlState();
+  const { selectedEntities } = useEntitySelection();
   const [filterCounts, setFilterCounts] = useState<{
     entity_type?: Record<string, number>;
     sources?: Record<string, number>;
@@ -33,6 +76,11 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
     const base = Object.keys(urlFilters).length > 0 ? urlFilters : defaultFilters;
     return normalizedLockedEntityIds.length > 0 ? { ...base, entity_ids: normalizedLockedEntityIds } : base;
   }, [defaultFilters, normalizedLockedEntityIds, urlFilters]);
+
+  const selectedEntityById = useMemo(
+    () => new Map(selectedEntities.map((entity) => [String(entity.entityId ?? entity.id), entity])),
+    [selectedEntities],
+  );
 
   useEffect(() => {
     async function loadFacets() {
@@ -73,8 +121,119 @@ export function EntitiesRefinePanel({ lockedEntityIds = [] }: EntitiesRefinePane
     setFilters(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : { ncbi_tax_id: [species || "9606"] });
   }, [normalizedLockedEntityIds, setFilters, species]);
 
+  const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
+    const items: SelectedFilterItem[] = [];
+
+    const renderEntityLabel = (entityId: string) => {
+      const entity = selectedEntityById.get(entityId);
+      return (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">Entity</span>
+          <div className="min-w-[140px] max-w-[240px]">
+            <EntityBadge
+              displayName={entity?.name || entityId}
+              canonicalIdentifier={String(entity?.entityId ?? entity?.id ?? entityId)}
+              entityId={String(entity?.entityId ?? entity?.id ?? entityId)}
+              entityType={entity?.type}
+            />
+          </div>
+        </div>
+      );
+    };
+
+    (filters.entity_ids || []).forEach((value) => {
+      items.push({
+        id: `entity_ids:${value}`,
+        label: renderEntityLabel(String(value)),
+        ...(normalizedLockedEntityIds.includes(String(value))
+          ? {}
+          : {
+              onRemove: () => {
+                const nextValues = (filters.entity_ids || []).filter((item) => String(item) !== String(value));
+                setFilters(nextValues.length > 0 ? { ...filters, entity_ids: nextValues } : { ...filters, entity_ids: undefined });
+              },
+            }),
+      });
+    });
+
+    const pushOntologyItems = (filterKey: "cv_terms_go" | "cv_terms_mi" | "cv_terms_om" | "cv_terms_hp" | "cv_terms_kw", label: string) => {
+      const values = (filters[filterKey] as string[] | undefined) || [];
+      const grouped = new Map<string, string[]>();
+
+      values.forEach((value) => {
+        const canonicalId = extractCanonicalOntologyId(value) || value;
+        grouped.set(canonicalId, [...(grouped.get(canonicalId) || []), value]);
+      });
+
+      grouped.forEach((groupValues, canonicalId) => {
+        const preferredValue = groupValues.find((value) => value !== canonicalId) || groupValues[0];
+        items.push({
+          id: `${filterKey}:${canonicalId}`,
+          label: (
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">{label}</span>
+              <CvTermHoverCard termId={canonicalId}>
+                <span className="cursor-help underline decoration-dotted underline-offset-2">
+                  {extractReadableLabel(preferredValue)}
+                </span>
+              </CvTermHoverCard>
+            </div>
+          ),
+          onRemove: () => {
+            const nextValues = values.filter((value) => !groupValues.includes(value));
+            setFilters(normalizedLockedEntityIds.length > 0
+              ? { ...filters, [filterKey]: nextValues.length > 0 ? nextValues : undefined, entity_ids: normalizedLockedEntityIds }
+              : { ...filters, [filterKey]: nextValues.length > 0 ? nextValues : undefined });
+          },
+        });
+      });
+    };
+
+    (filters.entity_types || []).forEach((value) => {
+      items.push({
+        id: `entity_types:${value}`,
+        label: `Entity type: ${extractReadableLabel(value)}`,
+        onRemove: () => handleFilterChange({
+          entity_types: (filters.entity_types || []).filter((item) => item !== value),
+        }),
+      });
+    });
+
+    (filters.sources || []).forEach((value) => {
+      items.push({
+        id: `sources:${value}`,
+        label: `Source: ${extractReadableLabel(value)}`,
+        onRemove: () => handleFilterChange({
+          sources: (filters.sources || []).filter((item) => item !== value),
+        }),
+      });
+    });
+
+    (filters.ncbi_tax_id || []).forEach((value) => {
+      items.push({
+        id: `ncbi_tax_id:${value}`,
+        label: `Species: ${TAXONOMY_ID_TO_NAME[value] ? `${TAXONOMY_ID_TO_NAME[value]} (${value})` : value}`,
+        onRemove: () => handleFilterChange({
+          ncbi_tax_id: (filters.ncbi_tax_id || []).filter((item) => item !== value),
+        }),
+      });
+    });
+
+    (["cv_terms_go", "cv_terms_mi", "cv_terms_om", "cv_terms_hp", "cv_terms_kw"] as const).forEach((filterKey) => {
+      const prefix = filterKey.replace("cv_terms_", "").toUpperCase();
+      pushOntologyItems(filterKey, prefix);
+    });
+
+    return items;
+  }, [filters, handleFilterChange, normalizedLockedEntityIds, selectedEntityById, setFilters]);
+
   return (
     <RefinePanelLayout title="Entity filters">
+      {selectedFilterItems.length > 0 ? (
+        <RefineSection title="Selected filters">
+          <SelectedFiltersSection items={selectedFilterItems} onClearAll={handleClearFilters} />
+        </RefineSection>
+      ) : null}
       <RefineSection title="Core filters">
         <EntityFilterSidebar
           filters={filters}
