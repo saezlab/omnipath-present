@@ -37,23 +37,10 @@ function extractTypeLabel(memberType: string): string {
   return colonIndex > 0 ? memberType.substring(0, colonIndex) : memberType;
 }
 
-// Helper function to determine consensus sign from directions
-function getConsensusSign(directions: MeilisearchInteraction['directions']): 'positive' | 'negative' | 'mixed' | null {
-  if (!directions || directions.length === 0) return null;
-
-  const hasPositive = directions.some(d => d.sign === 1 || d.sign === 0);
-  const hasNegative = directions.some(d => d.sign === -1 || d.sign === 0);
-
-  if (hasPositive && hasNegative) return 'mixed';
-  if (hasPositive) return 'positive';
-  if (hasNegative) return 'negative';
+function getConsensusSign(interaction: MeilisearchInteraction): 'positive' | 'negative' | null {
+  if (interaction.sign === 1) return 'positive';
+  if (interaction.sign === -1) return 'negative';
   return null;
-}
-
-// Helper function to determine if members should be swapped based on direction
-function shouldSwapMembers(directions: MeilisearchInteraction['directions']): boolean {
-  if (!directions || directions.length === 0) return false;
-  return directions[0]?.direction === 'b-a';
 }
 
 export function InteractionsExploreTab({
@@ -89,14 +76,11 @@ export function InteractionsExploreTab({
         if (facetDist.interaction_type) {
           counts.interaction_type = facetDist.interaction_type;
         }
-        if (facetDist.has_direction) {
-          counts.has_direction = facetDist.has_direction;
+        if (facetDist.is_directed) {
+          counts.is_directed = facetDist.is_directed;
         }
-        if (facetDist.has_positive_sign) {
-          counts.has_positive_sign = facetDist.has_positive_sign;
-        }
-        if (facetDist.has_negative_sign) {
-          counts.has_negative_sign = facetDist.has_negative_sign;
+        if (facetDist.sign) {
+          counts.sign = facetDist.sign;
         }
         if (facetDist.interaction_annotation_terms) {
           counts.interaction_annotation_terms = facetDist.interaction_annotation_terms;
@@ -229,7 +213,7 @@ export function InteractionsExploreTab({
   // Convert MeilisearchInteraction to format expected by GraphView
   const convertToGraphViewFormat = useCallback((interactions: MeilisearchInteraction[]) => {
     return interactions.map((interaction) => {
-      const consensusSign = getConsensusSign(interaction.directions);
+      const consensusSign = getConsensusSign(interaction);
       const typeA = interaction.member_types[0] ? extractTypeLabel(interaction.member_types[0]) : 'Unknown';
       const typeB = interaction.member_types[1] ? extractTypeLabel(interaction.member_types[1]) : 'Unknown';
 
@@ -245,7 +229,7 @@ export function InteractionsExploreTab({
           canonical_identifier: interaction.member_b_id.toString(),
           display_name: `${typeB} ${interaction.member_b_id}`,
         },
-        has_directed_evidence: interaction.has_direction,
+        has_directed_evidence: interaction.is_directed,
         consensus_sign: consensusSign,
         evidence_count: interaction.evidence.length,
         evidences: []
@@ -293,9 +277,9 @@ export function InteractionsExploreTab({
 
   // Helper to render sign indicator
   const renderSignIndicator = (interaction: MeilisearchInteraction) => {
-    const consensusSign = getConsensusSign(interaction.directions);
+    const consensusSign = getConsensusSign(interaction);
 
-    if (interaction.has_direction) {
+    if (interaction.is_directed) {
       return (
         <ArrowRight className={cn(
           "h-4 w-4",
@@ -406,14 +390,13 @@ export function InteractionsExploreTab({
                 <Table>
                   <TableBody>
                     {results.map((row) => {
-                      const swap = shouldSwapMembers(row.directions);
-                      const sourceId = swap ? row.member_b_id : row.member_a_id;
-                      const targetId = swap ? row.member_a_id : row.member_b_id;
+                      const sourceId = row.member_a_id;
+                      const targetId = row.member_b_id;
                       const sourceEntity = entityMap.get(sourceId);
                       const targetEntity = entityMap.get(targetId);
-                      // Get entity type from member_types array
-                      const sourceTypeRaw = swap ? row.member_types[1] : row.member_types[0];
-                      const targetTypeRaw = swap ? row.member_types[0] : row.member_types[1];
+                      // Directed rows are already ordered source->target in the backend
+                      const sourceTypeRaw = row.member_types[0];
+                      const targetTypeRaw = row.member_types[1];
                       const sourceType = sourceTypeRaw ? extractTypeLabel(sourceTypeRaw) : undefined;
                       const targetType = targetTypeRaw ? extractTypeLabel(targetTypeRaw) : undefined;
 

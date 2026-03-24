@@ -334,55 +334,55 @@ export function FilterSidebar({
       <div className="mb-4 space-y-3">
         <div className="flex flex-wrap gap-2">
           <Button
-            variant={filters.has_direction === true ? "default" : "outline"}
+            variant={filters.is_directed === true ? "default" : "outline"}
             size="sm"
             onClick={() => onFilterChange({
               ...filters,
-              has_direction: filters.has_direction === true ? undefined : true
+              is_directed: filters.is_directed === true ? undefined : true
             })}
-            className={filters.has_direction === true ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
+            className={filters.is_directed === true ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
           >
             <ArrowRight className="h-4 w-4 mr-1" />
-            Directed {filterCounts.has_direction?.true > 0 && `(${formatNumber(filterCounts.has_direction.true)})`}
+            Directed {filterCounts.is_directed?.true > 0 && `(${formatNumber(filterCounts.is_directed.true)})`}
           </Button>
           <Button
-            variant={filters.has_direction === false ? "default" : "outline"}
+            variant={filters.is_directed === false ? "default" : "outline"}
             size="sm"
             onClick={() => onFilterChange({
               ...filters,
-              has_direction: filters.has_direction === false ? undefined : false
+              is_directed: filters.is_directed === false ? undefined : false
             })}
-            className={filters.has_direction === false ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
+            className={filters.is_directed === false ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
           >
             <Minus className="h-4 w-4 mr-1" />
-            Undirected {filterCounts.has_direction?.false > 0 && `(${formatNumber(filterCounts.has_direction.false)})`}
+            Undirected {filterCounts.is_directed?.false > 0 && `(${formatNumber(filterCounts.is_directed.false)})`}
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Button
-            variant={filters.has_positive_sign === true ? "default" : "outline"}
+            variant={filters.signs?.includes(1) ? "default" : "outline"}
             size="sm"
             onClick={() => onFilterChange({
               ...filters,
-              has_positive_sign: filters.has_positive_sign === true ? undefined : true
+              signs: filters.signs?.includes(1) ? (filters.signs.filter((sign) => sign !== 1).length ? filters.signs.filter((sign) => sign !== 1) : undefined) : [...(filters.signs || []), 1]
             })}
-            className={filters.has_positive_sign === true ? "bg-green-600 transition-none hover:bg-green-600" : "transition-none hover:bg-background hover:text-foreground"}
+            className={filters.signs?.includes(1) ? "bg-green-600 transition-none hover:bg-green-600" : "transition-none hover:bg-background hover:text-foreground"}
           >
             <Plus className="h-4 w-4 mr-1" />
-            Activation {filterCounts.has_positive_sign?.true > 0 && `(${formatNumber(filterCounts.has_positive_sign.true)})`}
+            Activation {filterCounts.sign?.['1'] > 0 && `(${formatNumber(filterCounts.sign['1'])})`}
           </Button>
           <Button
-            variant={filters.has_negative_sign === true ? "default" : "outline"}
+            variant={filters.signs?.includes(-1) ? "default" : "outline"}
             size="sm"
             onClick={() => onFilterChange({
               ...filters,
-              has_negative_sign: filters.has_negative_sign === true ? undefined : true
+              signs: filters.signs?.includes(-1) ? (filters.signs.filter((sign) => sign !== -1).length ? filters.signs.filter((sign) => sign !== -1) : undefined) : [...(filters.signs || []), -1]
             })}
-            className={filters.has_negative_sign === true ? "bg-red-600 transition-none hover:bg-red-600" : "transition-none hover:bg-background hover:text-foreground"}
+            className={filters.signs?.includes(-1) ? "bg-red-600 transition-none hover:bg-red-600" : "transition-none hover:bg-background hover:text-foreground"}
           >
             <Minus className="h-4 w-4 mr-1" />
-            Inhibition {filterCounts.has_negative_sign?.true > 0 && `(${formatNumber(filterCounts.has_negative_sign.true)})`}
+            Inhibition {filterCounts.sign?.['-1'] > 0 && `(${formatNumber(filterCounts.sign['-1'])})`}
           </Button>
         </div>
       </div>

@@ -70,16 +70,13 @@ export function buildInteractionFilterString(filters: MeilisearchFilters): strin
     filterParts.push(`(${typeFilters})`);
   }
 
-  if (filters.has_direction !== undefined && filters.has_direction !== null) {
-    filterParts.push(`has_direction = ${filters.has_direction}`);
+  if (filters.is_directed !== undefined && filters.is_directed !== null) {
+    filterParts.push(`is_directed = ${filters.is_directed}`);
   }
 
-  if (filters.has_positive_sign !== undefined && filters.has_positive_sign !== null) {
-    filterParts.push(`has_positive_sign = ${filters.has_positive_sign}`);
-  }
-
-  if (filters.has_negative_sign !== undefined && filters.has_negative_sign !== null) {
-    filterParts.push(`has_negative_sign = ${filters.has_negative_sign}`);
+  if (filters.signs?.length) {
+    const signFilters = filters.signs.map((sign) => `sign = ${sign}`).join(" OR ");
+    filterParts.push(`(${signFilters})`);
   }
 
   if (filters.interaction_annotation_terms?.length) {

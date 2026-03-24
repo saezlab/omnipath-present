@@ -63,14 +63,14 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
       const participantKw = toStringArray(query.participantAnnotationTermsKw) || toStringArray(query.participant_annotation_terms_kw)
       if (participantKw?.length) nextFilters.participant_annotation_terms_kw = participantKw
 
-      if (typeof query.hasDirection === "boolean") nextFilters.has_direction = query.hasDirection
-      if (typeof query.has_direction === "boolean") nextFilters.has_direction = query.has_direction
+      if (typeof query.hasDirection === "boolean") nextFilters.is_directed = query.hasDirection
+      if (typeof query.has_direction === "boolean") nextFilters.is_directed = query.has_direction
 
-      if (typeof query.isPositive === "boolean") nextFilters.has_positive_sign = query.isPositive
-      if (typeof query.has_positive_sign === "boolean") nextFilters.has_positive_sign = query.has_positive_sign
+      if (typeof query.isPositive === "boolean" && query.isPositive) nextFilters.signs = [...(nextFilters.signs || []), 1]
+      if (typeof query.has_positive_sign === "boolean" && query.has_positive_sign) nextFilters.signs = [...(nextFilters.signs || []), 1]
 
-      if (typeof query.isNegative === "boolean") nextFilters.has_negative_sign = query.isNegative
-      if (typeof query.has_negative_sign === "boolean") nextFilters.has_negative_sign = query.has_negative_sign
+      if (typeof query.isNegative === "boolean" && query.isNegative) nextFilters.signs = [...(nextFilters.signs || []), -1]
+      if (typeof query.has_negative_sign === "boolean" && query.has_negative_sign) nextFilters.signs = [...(nextFilters.signs || []), -1]
 
       const sources = toStringArray(query.sources)
       if (sources?.length) nextFilters.sources = sources

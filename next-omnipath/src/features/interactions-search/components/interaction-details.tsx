@@ -25,9 +25,17 @@ function splitLabelAndId(value: string): { label: string; id?: string } {
   };
 }
 
-function shouldSwapMembers(directions: InteractionDirection[]): boolean {
-  if (!directions || directions.length === 0) return false;
-  return directions[0]?.direction === 'b-a';
+function getInteractionDirections(interaction: MeilisearchInteraction | null): InteractionDirection[] {
+  if (!interaction) return [];
+  if (interaction.directions?.length) return interaction.directions;
+  return [{
+    direction: interaction.is_directed ? 'a-b' : 'undirected',
+    sign: interaction.sign,
+  }];
+}
+
+function shouldSwapMembers(_directions: InteractionDirection[]): boolean {
+  return false;
 }
 
 type FormattedAnnotation = {
@@ -129,30 +137,23 @@ function AnnotationChips({
   );
 }
 
-function getOverallSign(directions: InteractionDirection[]): 'positive' | 'negative' | 'mixed' | null {
+function getOverallSign(directions: InteractionDirection[]): 'positive' | 'negative' | null {
   if (!directions || directions.length === 0) return null;
-
-  const hasPositive = directions.some(d => d.sign === 1 || d.sign === 0);
-  const hasNegative = directions.some(d => d.sign === -1 || d.sign === 0);
-
-  if (hasPositive && hasNegative) return 'mixed';
-  if (hasPositive) return 'positive';
-  if (hasNegative) return 'negative';
+  if (directions.some(d => d.sign === 1)) return 'positive';
+  if (directions.some(d => d.sign === -1)) return 'negative';
   return null;
 }
 
-const getSignColor = (sign: 'positive' | 'negative' | 'mixed' | null) => {
+const getSignColor = (sign: 'positive' | 'negative' | null) => {
   if (sign === 'positive') return 'text-green-600 bg-green-50 border-green-200';
   if (sign === 'negative') return 'text-red-600 bg-red-50 border-red-200';
-  if (sign === 'mixed') return 'text-orange-600 bg-orange-50 border-orange-200';
   return 'text-gray-600 bg-gray-50 border-gray-200';
 }
 
-const getSignLabel = (sign: 'positive' | 'negative' | 'mixed' | null) => {
+const getSignLabel = (sign: 'positive' | 'negative' | null) => {
   if (sign === 'positive') return 'Activation';
   if (sign === 'negative') return 'Inhibition';
-  if (sign === 'mixed') return 'Mixed';
-  return 'Unknown';
+  return 'Unsigned';
 }
 
 const POSITIVE_SIGN_ACCESSIONS = new Set([
@@ -334,14 +335,14 @@ function getDirectionLabel(direction: EvidenceDirection, interaction: Meilisearc
 function getSignBadgeClasses(sign: EvidenceSign): string {
   if (sign === 1) return 'text-green-600 bg-green-50 border-green-200';
   if (sign === -1) return 'text-red-600 bg-red-50 border-red-200';
-  if (sign === 0) return 'text-orange-600 bg-orange-50 border-orange-200';
+  if (sign === 0) return 'text-gray-600 bg-gray-50 border-gray-200';
   return 'text-gray-600 bg-gray-50 border-gray-200';
 }
 
 function getSignText(sign: EvidenceSign): string {
   if (sign === 1) return 'Activation';
   if (sign === -1) return 'Inhibition';
-  if (sign === 0) return 'Mixed';
+  if (sign === 0) return 'Unsigned';
   return 'Unspecified sign';
 }
 
@@ -372,7 +373,7 @@ function buildEvidenceGroups(
     targetAnnotations: FormattedAnnotation[];
   }>();
 
-  const fallbackCombos = getFallbackCombos(interaction.directions || []);
+  const fallbackCombos = getFallbackCombos(getInteractionDirections(interaction));
 
   interaction.evidence.forEach((evidence) => {
     const inferredCombos = inferEvidenceCombos(interaction, evidence);
@@ -432,10 +433,12 @@ function buildEvidenceGroups(
 }
 
 export function InteractionDetails({ selectedInteraction }: InteractionDetailsProps) {
+  const directions = useMemo(() => getInteractionDirections(selectedInteraction), [selectedInteraction]);
+
   const overallSign = useMemo(() => {
     if (!selectedInteraction) return null;
-    return getOverallSign(selectedInteraction.directions);
-  }, [selectedInteraction]);
+    return getOverallSign(directions);
+  }, [directions, selectedInteraction]);
 
   const getInteractionColor = () => {
     if (!selectedInteraction) return "text-gray-500";
@@ -452,12 +455,12 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
 
     return {
       total: selectedInteraction.evidence.length,
-      directions: selectedInteraction.directions.length,
+      directions: directions.length,
       annotationTerms: allTerms.length,
     };
   }, [selectedInteraction]);
 
-  const swap = selectedInteraction ? shouldSwapMembers(selectedInteraction.directions) : false;
+  const swap = shouldSwapMembers(directions);
 
   const evidenceGroups = useMemo(() => {
     if (!selectedInteraction) return [] as AggregatedEvidenceGroup[];
@@ -502,7 +505,7 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
 
           <div className="flex flex-col items-center gap-2">
             <div className={cn("flex items-center", getInteractionColor())}>
-              {selectedInteraction.has_direction ? (
+              {selectedInteraction.is_directed ? (
                 <ArrowRight className="h-8 w-8" />
               ) : (
                 <Minus className="h-8 w-8" />
@@ -546,20 +549,20 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
       </div>
 
       <Accordion type="multiple" defaultValue={["directions", "evidence"]} className="space-y-4">
-        {selectedInteraction.directions.length > 0 && (
+        {directions.length > 0 && (
           <AccordionItem value="directions" className="rounded-lg border">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">
               <div className="flex items-center gap-2">
                 <ArrowRight className="h-5 w-5" />
                 <span className="font-medium">Directions & Signs</span>
                 <Badge variant="secondary" className="ml-2">
-                  {selectedInteraction.directions.length}
+                  {directions.length}
                 </Badge>
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-4 pb-4">
               <div className="space-y-2">
-                {selectedInteraction.directions.map((dir, index) => (
+                {directions.map((dir, index) => (
                   <div key={index} className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
                     <Badge variant="outline" className="text-xs">
                       {dir.direction === 'a-b' ? `${selectedInteraction.member_a_id} → ${selectedInteraction.member_b_id}` : `${selectedInteraction.member_b_id} → ${selectedInteraction.member_a_id}`}

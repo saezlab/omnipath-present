@@ -50,21 +50,23 @@ export function buildUrlForToolResult(toolResult: ToolResult): string | null {
           participant_annotation_terms_kw: toStringArray(toolResult.query.participantAnnotationTermsKw).length > 0
             ? toStringArray(toolResult.query.participantAnnotationTermsKw)
             : toStringArray(toolResult.query.participant_annotation_terms_kw),
-          has_direction: typeof toolResult.query.hasDirection === "boolean"
+          is_directed: typeof toolResult.query.hasDirection === "boolean"
             ? toolResult.query.hasDirection
             : typeof toolResult.query.has_direction === "boolean"
               ? toolResult.query.has_direction
               : undefined,
-          has_positive_sign: typeof toolResult.query.isPositive === "boolean"
-            ? toolResult.query.isPositive
-            : typeof toolResult.query.has_positive_sign === "boolean"
-              ? toolResult.query.has_positive_sign
-              : undefined,
-          has_negative_sign: typeof toolResult.query.isNegative === "boolean"
-            ? toolResult.query.isNegative
-            : typeof toolResult.query.has_negative_sign === "boolean"
-              ? toolResult.query.has_negative_sign
-              : undefined,
+          signs: [
+            ...(typeof toolResult.query.isPositive === "boolean" && toolResult.query.isPositive
+              ? [1 as const]
+              : typeof toolResult.query.has_positive_sign === "boolean" && toolResult.query.has_positive_sign
+                ? [1 as const]
+                : []),
+            ...(typeof toolResult.query.isNegative === "boolean" && toolResult.query.isNegative
+              ? [-1 as const]
+              : typeof toolResult.query.has_negative_sign === "boolean" && toolResult.query.has_negative_sign
+                ? [-1 as const]
+                : []),
+          ],
           sources: toStringArray(toolResult.query.sources),
         },
       });

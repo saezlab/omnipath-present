@@ -17,15 +17,15 @@ export interface InteractionEvidence {
 
 // Direction with sign information
 export interface InteractionDirection {
-  direction: 'a-b' | 'b-a';
-  sign: -1 | 0 | 1; // -1 = negative/inhibition, 0 = mixed, 1 = positive/activation
+  direction: 'a-b' | 'b-a' | 'undirected';
+  sign: -1 | 0 | 1; // -1 = inhibition, 0 = unsigned, 1 = activation
 }
 
 export interface MeilisearchInteraction {
   // Deterministic numeric identifier for exports/subsetting
   interaction_id?: number;
 
-  // Primary key - pair key like "idA-idB"
+  // Primary semantic key for the split interaction document
   interaction_key: string;
 
   // Member entity IDs (string IDs)
@@ -38,16 +38,20 @@ export interface MeilisearchInteraction {
   // Canonical interaction type pair, e.g. "Protein:MI:0326|Small molecule:MI:0328"
   interaction_type?: string;
 
+  // Split interaction state
+  is_directed: boolean;
+  sign: -1 | 0 | 1;
+
   // Evidence array with nested annotation data
   evidence: InteractionEvidence[];
 
-  // Directions with sign information
-  directions: InteractionDirection[];
+  // Deprecated compatibility fields
+  directions?: InteractionDirection[];
+  has_direction?: boolean;
+  has_positive_sign?: boolean;
+  has_negative_sign?: boolean;
 
   // Flattened filter fields
-  has_direction: boolean;
-  has_positive_sign: boolean;
-  has_negative_sign: boolean;
   interaction_annotation_terms: string[];
   participant_annotation_terms_go?: string[];
   participant_annotation_terms_mi?: string[];
@@ -121,9 +125,8 @@ export interface MeilisearchFilters {
   member_b_id?: string | number;
   entity_ids?: Array<string | number>;  // Filter by multiple entity IDs (matches member_a_id OR member_b_id)
   interaction_types?: string[];
-  has_direction?: boolean | null;
-  has_positive_sign?: boolean | null;
-  has_negative_sign?: boolean | null;
+  is_directed?: boolean | null;
+  signs?: Array<-1 | 0 | 1>;
   interaction_annotation_terms?: string[];
   participant_annotation_terms_go?: string[];
   participant_annotation_terms_mi?: string[];

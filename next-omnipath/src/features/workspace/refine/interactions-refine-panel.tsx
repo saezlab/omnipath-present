@@ -95,9 +95,8 @@ export function InteractionsRefinePanel({
       const facetDist = response.facetDistribution || {};
       const counts: Record<string, Record<string, number>> = {};
       if (facetDist.interaction_type) counts.interaction_type = facetDist.interaction_type;
-      if (facetDist.has_direction) counts.has_direction = facetDist.has_direction;
-      if (facetDist.has_positive_sign) counts.has_positive_sign = facetDist.has_positive_sign;
-      if (facetDist.has_negative_sign) counts.has_negative_sign = facetDist.has_negative_sign;
+      if (facetDist.is_directed) counts.is_directed = facetDist.is_directed;
+      if (facetDist.sign) counts.sign = facetDist.sign;
       if (facetDist.interaction_annotation_terms) counts.interaction_annotation_terms = facetDist.interaction_annotation_terms;
       if (facetDist.participant_annotation_terms_go) counts.participant_annotation_terms_go = facetDist.participant_annotation_terms_go;
       if (facetDist.participant_annotation_terms_mi) counts.participant_annotation_terms_mi = facetDist.participant_annotation_terms_mi;
@@ -228,37 +227,29 @@ export function InteractionsRefinePanel({
       pushOntologyItems(filterKey, label);
     });
 
-    if (filters.has_direction === true) {
+    if (filters.is_directed === true) {
       items.push({
-        id: "has_direction:true",
+        id: "is_directed:true",
         label: "Directed",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, has_direction: undefined })),
+        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
       });
     }
 
-    if (filters.has_direction === false) {
+    if (filters.is_directed === false) {
       items.push({
-        id: "has_direction:false",
+        id: "is_directed:false",
         label: "Undirected",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, has_direction: undefined })),
+        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
       });
     }
 
-    if (filters.has_positive_sign === true) {
+    (filters.signs || []).forEach((value) => {
       items.push({
-        id: "has_positive_sign:true",
-        label: "Activation",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, has_positive_sign: undefined })),
+        id: `signs:${value}`,
+        label: value === 1 ? "Activation" : value === -1 ? "Inhibition" : "Unsigned",
+        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, signs: filters.signs?.filter((item) => item !== value) || undefined })),
       });
-    }
-
-    if (filters.has_negative_sign === true) {
-      items.push({
-        id: "has_negative_sign:true",
-        label: "Inhibition",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, has_negative_sign: undefined })),
-      });
-    }
+    });
 
     return items;
   }, [enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);

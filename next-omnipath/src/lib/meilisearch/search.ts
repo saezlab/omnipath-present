@@ -129,9 +129,8 @@ export async function searchInteractionsMeilisearch(
       offset,
       facets: [
         'interaction_type',
-        'has_direction',
-        'has_positive_sign',
-        'has_negative_sign',
+        'is_directed',
+        'sign',
         'interaction_annotation_terms',
         'participant_annotation_terms_go',
         'participant_annotation_terms_mi',

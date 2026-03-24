@@ -579,9 +579,9 @@ Do not use broad entity search as a substitute for identifier resolution when an
         if (normalizedParticipantAnnotationTermsOm?.length) apiFilters.participant_annotation_terms_om = normalizedParticipantAnnotationTermsOm;
         if (normalizedParticipantAnnotationTermsHp?.length) apiFilters.participant_annotation_terms_hp = normalizedParticipantAnnotationTermsHp;
         if (normalizedParticipantAnnotationTermsKw?.length) apiFilters.participant_annotation_terms_kw = normalizedParticipantAnnotationTermsKw;
-        if (hasDirection !== undefined) apiFilters.has_direction = hasDirection;
-        if (isPositive !== undefined) apiFilters.has_positive_sign = isPositive;
-        if (isNegative !== undefined) apiFilters.has_negative_sign = isNegative;
+        if (hasDirection !== undefined) apiFilters.is_directed = hasDirection;
+        if (isPositive) apiFilters.signs = [...(apiFilters.signs || []), 1];
+        if (isNegative) apiFilters.signs = [...(apiFilters.signs || []), -1];
         if (sources?.length) apiFilters.sources = sources;
 
         const requestParams = {
@@ -607,12 +607,13 @@ Do not use broad entity search as a substitute for identifier resolution when an
           causalStatements: facetStats['causal_statements_facet'] || {},
           causalMechanisms: facetStats['causal_mechanisms_facet'] || {},
           interactorTypes: facetStats['interactor_types_facet'] || {},
-          signs: facetStats['signs'] || {},
+          signs: facetStats['sign'] || facetStats['signs'] || {},
           consensusSign: facetStats['consensus_sign'] || {
-            positive: facetStats['has_positive_sign']?.['true'] || 0,
-            negative: facetStats['has_negative_sign']?.['true'] || 0,
+            positive: facetStats['sign']?.['1'] || 0,
+            negative: facetStats['sign']?.['-1'] || 0,
+            unsigned: facetStats['sign']?.['0'] || 0,
           },
-          isDirected: facetStats['is_directed'] || facetStats['has_direction'] || {},
+          isDirected: facetStats['is_directed'] || {},
           consensusDirection: facetStats['consensus_direction'] || {},
           evidenceCountDistribution: facetStats['evidence_count'] || {}
         };
