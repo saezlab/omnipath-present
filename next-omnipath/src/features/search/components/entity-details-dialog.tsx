@@ -3,7 +3,8 @@
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useMemo, useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Loader2 } from "lucide-react";
 import type { SearchResult } from "./result-card";
 import { MoleculeStructure } from "./molecule_structure";
@@ -146,10 +147,6 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
 
 export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetailsDialogProps) {
     const [activeTab, setActiveTab] = useState("interactions");
-    const [interactionsCount, setInteractionsCount] = useState<number | null>(null);
-    const [associationsCount, setAssociationsCount] = useState<number>(0);
-    const [associatedEntityIds, setAssociatedEntityIds] = useState<string[]>([]);
-    const [loadingCounts, setLoadingCounts] = useState(true);
 
     // Get entity ID
     const entityId = useMemo(() => {
@@ -170,74 +167,63 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
         }
     }, [entityIds]);
 
-    // Fetch counts when dialog opens
-    useEffect(() => {
-        if (!open || !entityId) {
-            setInteractionsCount(null);
-            setAssociationsCount(0);
-            setAssociatedEntityIds([]);
-            setLoadingCounts(true);
-            return;
-        }
+    const { data: entityCounts, isLoading: loadingCounts } = useQuery({
+        queryKey: ["entity-details-counts", entityId],
+        enabled: open && !!entityId,
+        staleTime: 5 * 60 * 1000,
+        queryFn: async () => {
+            const resolvedEntityId = entityId!;
 
-        async function fetchCounts() {
-            setLoadingCounts(true);
-            try {
-                // Fetch interactions count
-                const interactionsResponse = await searchInteractionsMeilisearch({
+            const interactionsResponse = await searchInteractionsMeilisearch({
+                query: "",
+                index: INDEXES.INTERACTIONS,
+                limit: 1,
+                offset: 0,
+                filters: { entity_ids: [resolvedEntityId] }
+            });
+
+            const { searchAssociationsMeilisearch } = await import("@/lib/meilisearch/search");
+            const [parentsResponse, membersResponse] = await Promise.all([
+                searchAssociationsMeilisearch({
                     query: "",
-                    index: INDEXES.INTERACTIONS,
-                    limit: 1,
+                    index: INDEXES.ASSOCIATIONS,
+                    limit: 10000,
                     offset: 0,
-                    filters: { entity_ids: [entityId!] }
-                });
-                setInteractionsCount(interactionsResponse.estimatedTotalHits || 0);
+                    filters: { member_entity_ids: [resolvedEntityId] }
+                }),
+                searchAssociationsMeilisearch({
+                    query: "",
+                    index: INDEXES.ASSOCIATIONS,
+                    limit: 10000,
+                    offset: 0,
+                    filters: { parent_entity_ids: [resolvedEntityId] }
+                })
+            ]);
 
-                // Fetch associations (bidirectional query like entity-selection-context does)
-                const { searchAssociationsMeilisearch } = await import("@/lib/meilisearch/search");
-                const [parentsResponse, membersResponse] = await Promise.all([
-                    searchAssociationsMeilisearch({
-                        query: "",
-                        index: INDEXES.ASSOCIATIONS,
-                        limit: 10000,
-                        offset: 0,
-                        filters: { member_entity_ids: [entityId!] }
-                    }),
-                    searchAssociationsMeilisearch({
-                        query: "",
-                        index: INDEXES.ASSOCIATIONS,
-                        limit: 10000,
-                        offset: 0,
-                        filters: { parent_entity_ids: [entityId!] }
-                    })
-                ]);
+            const entityIdSet = new Set<string>();
+            const parentHits = parentsResponse.hits as MeilisearchAssociation[];
+            const memberHits = membersResponse.hits as MeilisearchAssociation[];
 
-                // Extract unique entity IDs
-                const entityIdSet = new Set<string>();
-                const parentHits = parentsResponse.hits as MeilisearchAssociation[];
-                const memberHits = membersResponse.hits as MeilisearchAssociation[];
+            parentHits.forEach(hit => {
+                if (hit.parent_entity_id) entityIdSet.add(hit.parent_entity_id);
+            });
+            memberHits.forEach(hit => {
+                if (hit.member_entity_id) entityIdSet.add(hit.member_entity_id);
+            });
 
-                parentHits.forEach(hit => {
-                    if (hit.parent_entity_id) entityIdSet.add(hit.parent_entity_id);
-                });
-                memberHits.forEach(hit => {
-                    if (hit.member_entity_id) entityIdSet.add(hit.member_entity_id);
-                });
+            const associatedEntityIds = Array.from(entityIdSet);
 
-                const associatedIds = Array.from(entityIdSet);
-                setAssociatedEntityIds(associatedIds);
-                setAssociationsCount(associatedIds.length);
-            } catch (error) {
-                console.error("Error fetching counts:", error);
-                setInteractionsCount(0);
-                setAssociationsCount(0);
-            } finally {
-                setLoadingCounts(false);
-            }
+            return {
+                interactionsCount: interactionsResponse.estimatedTotalHits || 0,
+                associationsCount: associatedEntityIds.length,
+                associatedEntityIds,
+            };
         }
+    });
 
-        fetchCounts();
-    }, [open, entityId]);
+    const interactionsCount = entityCounts?.interactionsCount ?? null;
+    const associationsCount = entityCounts?.associationsCount ?? 0;
+    const associatedEntityIds = entityCounts?.associatedEntityIds ?? [];
 
     // Set default active tab based on what's available
     useEffect(() => {

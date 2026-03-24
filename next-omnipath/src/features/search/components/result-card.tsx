@@ -12,14 +12,14 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useQuery } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { MoleculeStructure } from "./molecule_structure";
-import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search";
-import { INDEXES } from "@/lib/meilisearch/client";
 import { EntityDetailsDialog } from "./entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
+import { useEntity } from "@/hooks/use-entity";
 
 // Component that shows a ResultCardContent in a HoverCard for entities
 export function EntityHoverCard({
@@ -29,35 +29,11 @@ export function EntityHoverCard({
   entityId: string;
   children: React.ReactNode;
 }) {
-  const [entity, setEntity] = useState<SearchResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
-
-  const handleOpenChange = async (open: boolean) => {
-    if (open && !hasLoaded) {
-      setLoading(true);
-      try {
-        const normalizedId = entityId.trim();
-        const { documents } = await fetchMeilisearchDocuments(
-          INDEXES.ENTITIES,
-          [normalizedId],
-          "entity_id",
-        );
-
-        if (documents.length > 0) {
-          setEntity(documents[0] as SearchResult);
-        }
-      } catch (error) {
-        console.error('Failed to fetch entity:', error);
-      } finally {
-        setLoading(false);
-        setHasLoaded(true);
-      }
-    }
-  };
+  const [isOpen, setIsOpen] = useState(false);
+  const { data: entity, loading } = useEntity(isOpen ? entityId : undefined);
 
   return (
-    <HoverCard openDelay={300} closeDelay={100} onOpenChange={handleOpenChange}>
+    <HoverCard openDelay={300} closeDelay={100} onOpenChange={setIsOpen}>
       <HoverCardTrigger asChild>
         {children}
       </HoverCardTrigger>
@@ -86,49 +62,44 @@ export function CvTermHoverCard({
   termId: string;
   children: React.ReactNode;
 }) {
-  const [term, setTerm] = useState<SearchResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
-  const handleOpenChange = async (open: boolean) => {
-    if (open && !hasLoaded) {
-      setLoading(true);
-      try {
-        const response = await fetch("/api/ontology/terms", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            termIds: [termId]
-          }),
-        });
+  const { data: term, isLoading: loading } = useQuery({
+    queryKey: ["cv-term", termId],
+    enabled: isOpen && termId.trim().length > 0,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const response = await fetch("/api/ontology/terms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ termIds: [termId] }),
+      });
 
-        if (!response.ok) throw new Error("Failed to fetch term");
-
-        const data = await response.json();
-        const terms = data.terms || {};
-        const termData = terms[termId];
-
-        if (termData) {
-          // Map to SearchResult format for compatibility with ResultCardContent
-          setTerm({
-            id: termData.id,
-            type: "cv_term",
-            name: termData.name,
-            definition: termData.definition,
-            namespace_name: termData.namespace,
-          } as SearchResult);
-        }
-      } catch (error) {
-        console.error('Failed to fetch CV term:', error);
-      } finally {
-        setLoading(false);
-        setHasLoaded(true);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch term (${response.status})`);
       }
-    }
-  };
+
+      const data = await response.json() as {
+        terms?: Record<string, { id: string; name?: string; definition?: string; namespace?: string } | null>;
+      };
+      const termData = data.terms?.[termId];
+
+      if (!termData) {
+        return null;
+      }
+
+      return {
+        id: termData.id,
+        type: "cv_term",
+        name: termData.name,
+        definition: termData.definition,
+        namespace_name: termData.namespace,
+      } as SearchResult;
+    },
+  });
 
   return (
-    <HoverCard openDelay={300} closeDelay={100} onOpenChange={handleOpenChange}>
+    <HoverCard openDelay={300} closeDelay={100} onOpenChange={setIsOpen}>
       <HoverCardTrigger asChild>
         {children}
       </HoverCardTrigger>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -29,8 +30,6 @@ interface AnnotationBranchGroup {
 
 export function AnnotationsExploreTab() {
     const { selectedEntities } = useEntitySelection();
-    const [annotationTree, setAnnotationTree] = useState<TreeNode | null>(null);
-    const [loading, setLoading] = useState(false);
 
     // Aggregate CV term accessions from selected entities
     const cvTermCounts = useMemo(() => {
@@ -47,39 +46,27 @@ export function AnnotationsExploreTab() {
     // Get unique CV term IDs
     const cvTermIds = useMemo(() => Array.from(cvTermCounts.keys()), [cvTermCounts]);
 
-    // Fetch ontology tree when term IDs change
-    useEffect(() => {
-        if (cvTermIds.length === 0) {
-            setAnnotationTree(null);
-            return;
-        }
+    const { data: annotationTree, isLoading: loading } = useQuery({
+        queryKey: ["ontology-tree", cvTermIds],
+        enabled: cvTermIds.length > 0,
+        staleTime: 5 * 60 * 1000,
+        queryFn: async () => {
+            const response = await fetch("/api/ontology/tree", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    termIds: cvTermIds
+                }),
+            });
 
-        setLoading(true);
-        const loadTree = async () => {
-            try {
-                const response = await fetch("/api/ontology/tree", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        termIds: cvTermIds
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Failed to load hierarchy (${response.status})`);
-                }
-
-                const data = (await response.json()) as { root?: TreeNode | null };
-                setAnnotationTree(data.root || null);
-            } catch (error) {
-                console.error("Error loading ontology tree:", error);
-            } finally {
-                setLoading(false);
+            if (!response.ok) {
+                throw new Error(`Failed to load hierarchy (${response.status})`);
             }
-        };
 
-        loadTree();
-    }, [cvTermIds]);
+            const data = (await response.json()) as { root?: TreeNode | null };
+            return data.root || null;
+        },
+    });
 
     // Build annotation groups from tree
     const annotationGroups = useMemo(() => {

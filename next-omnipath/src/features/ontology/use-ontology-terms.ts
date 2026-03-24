@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 export interface OntologyTermInfo {
   id: string;
@@ -14,40 +15,26 @@ export function useOntologyTerms(termIds: string[]) {
     () => Array.from(new Set(termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0))).sort(),
     [termIds],
   );
-  const [termsById, setTermsById] = useState<Record<string, OntologyTermInfo | null>>({});
 
-  useEffect(() => {
-    let cancelled = false;
+  const { data } = useQuery({
+    queryKey: ["ontology-terms", normalizedIds],
+    enabled: normalizedIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const response = await fetch("/api/ontology/terms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ termIds: normalizedIds }),
+      });
 
-    const missingIds = normalizedIds.filter((termId) => !(termId in termsById));
-    if (missingIds.length === 0) {
-      return;
-    }
-
-    void (async () => {
-      try {
-        const response = await fetch("/api/ontology/terms", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ termIds: missingIds }),
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const data = (await response.json()) as { terms?: Record<string, OntologyTermInfo | null> };
-        if (cancelled) return;
-        setTermsById((current) => ({ ...current, ...(data.terms || {}) }));
-      } catch {
-        // ignore lookup failures; callers can fall back to raw IDs
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ontology terms (${response.status})`);
       }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [normalizedIds, termsById]);
+      const data = (await response.json()) as { terms?: Record<string, OntologyTermInfo | null> };
+      return data.terms || {};
+    },
+  });
 
-  return termsById;
+  return data ?? {};
 }
