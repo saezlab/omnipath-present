@@ -48,20 +48,14 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
       const interactionAnnotationTerms = toStringArray(query.interactionAnnotationTerms) || toStringArray(query.interaction_annotation_terms)
       if (interactionAnnotationTerms?.length) nextFilters.interaction_annotation_terms = interactionAnnotationTerms
 
-      const participantGo = toStringArray(query.participantAnnotationTermsGo) || toStringArray(query.participant_annotation_terms_go)
-      if (participantGo?.length) nextFilters.participant_annotation_terms_go = participantGo
-
-      const participantMi = toStringArray(query.participantAnnotationTermsMi) || toStringArray(query.participant_annotation_terms_mi)
-      if (participantMi?.length) nextFilters.participant_annotation_terms_mi = participantMi
-
-      const participantOm = toStringArray(query.participantAnnotationTermsOm) || toStringArray(query.participant_annotation_terms_om)
-      if (participantOm?.length) nextFilters.participant_annotation_terms_om = participantOm
-
-      const participantHp = toStringArray(query.participantAnnotationTermsHp) || toStringArray(query.participant_annotation_terms_hp)
-      if (participantHp?.length) nextFilters.participant_annotation_terms_hp = participantHp
-
-      const participantKw = toStringArray(query.participantAnnotationTermsKw) || toStringArray(query.participant_annotation_terms_kw)
-      if (participantKw?.length) nextFilters.participant_annotation_terms_kw = participantKw
+      const participantTerms = [
+        ...(toStringArray(query.participantAnnotationTermsGo) || toStringArray(query.participant_annotation_terms_go) || []),
+        ...(toStringArray(query.participantAnnotationTermsMi) || toStringArray(query.participant_annotation_terms_mi) || []),
+        ...(toStringArray(query.participantAnnotationTermsOm) || toStringArray(query.participant_annotation_terms_om) || []),
+        ...(toStringArray(query.participantAnnotationTermsHp) || toStringArray(query.participant_annotation_terms_hp) || []),
+        ...(toStringArray(query.participantAnnotationTermsKw) || toStringArray(query.participant_annotation_terms_kw) || []),
+      ]
+      if (participantTerms.length) nextFilters.participant_annotation_terms = Array.from(new Set(participantTerms))
 
       if (typeof query.hasDirection === "boolean") nextFilters.is_directed = query.hasDirection
       if (typeof query.has_direction === "boolean") nextFilters.is_directed = query.has_direction

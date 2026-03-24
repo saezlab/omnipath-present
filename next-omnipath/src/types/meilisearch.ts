@@ -55,11 +55,7 @@ export interface MeilisearchInteraction {
 
   // Flattened filter fields
   interaction_annotation_terms: string[];
-  participant_annotation_terms_go?: string[];
-  participant_annotation_terms_mi?: string[];
-  participant_annotation_terms_om?: string[];
-  participant_annotation_terms_hp?: string[];
-  participant_annotation_terms_kw?: string[];
+  participant_annotation_terms?: string[];
   sources?: string[];
 
   // Index signature to satisfy DataRow constraint
@@ -130,11 +126,7 @@ export interface MeilisearchFilters {
   is_directed?: boolean | null;
   signs?: Array<-1 | 0 | 1>;
   interaction_annotation_terms?: string[];
-  participant_annotation_terms_go?: string[];
-  participant_annotation_terms_mi?: string[];
-  participant_annotation_terms_om?: string[];
-  participant_annotation_terms_hp?: string[];
-  participant_annotation_terms_kw?: string[];
+  participant_annotation_terms?: string[];
 
   // Entity + source-browser filters
   entity_types?: string[];
@@ -143,11 +135,7 @@ export interface MeilisearchFilters {
   update_category_cv?: string[];
   content_category_cv_terms?: string[];
   ncbi_tax_id?: string[];
-  cv_terms_go?: string[];
-  cv_terms_mi?: string[];
-  cv_terms_om?: string[];
-  cv_terms_hp?: string[];
-  cv_terms_kw?: string[];
+  ontology_terms?: string[];
 
   // Association filters
   parent_entity_ids?: Array<string | number>;

@@ -99,13 +99,14 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
         sources: facetDistribution.sources || {},
         ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
       });
-      setOntologyFacetCountsByPrefix({
-        GO: facetDistribution.cv_terms_go || {},
-        MI: facetDistribution.cv_terms_mi || {},
-        OM: facetDistribution.cv_terms_om || {},
-        HP: facetDistribution.cv_terms_hp || {},
-        KW: facetDistribution.cv_terms_kw || {},
+      const allOntologyCounts = facetDistribution.ontology_terms || {};
+      const groupedCounts: Record<string, Record<string, number>> = {};
+      Object.entries(allOntologyCounts).forEach(([value, count]) => {
+        const match = value.match(/^([A-Z][A-Z0-9_-]*):/);
+        const prefix = match ? match[1] : 'OTHER';
+        (groupedCounts[prefix] ||= {})[value] = count as number;
       });
+      setOntologyFacetCountsByPrefix(groupedCounts);
     }
 
     void loadFacets();
@@ -166,7 +167,7 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
       });
     });
 
-    const pushOntologyItems = (filterKey: "cv_terms_go" | "cv_terms_mi" | "cv_terms_om" | "cv_terms_hp" | "cv_terms_kw", label: string) => {
+    const pushOntologyItems = (filterKey: "ontology_terms", label: string) => {
       const values = (filters[filterKey] as string[] | undefined) || [];
       const grouped = new Map<string, string[]>();
 
@@ -228,10 +229,7 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
       });
     });
 
-    (["cv_terms_go", "cv_terms_mi", "cv_terms_om", "cv_terms_hp", "cv_terms_kw"] as const).forEach((filterKey) => {
-      const prefix = filterKey.replace("cv_terms_", "").toUpperCase();
-      pushOntologyItems(filterKey, prefix);
-    });
+    pushOntologyItems("ontology_terms", "Ontology");
 
     return items;
   }, [filters, handleFilterChange, normalizedLockedEntityIds, onLockedEntityIdsChange, selectedEntityById, setFilters]);

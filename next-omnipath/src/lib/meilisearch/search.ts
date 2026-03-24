@@ -51,11 +51,7 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
         'entity_type',
         'sources',
         'ncbi_tax_id',
-        'cv_terms_go',
-        'cv_terms_mi',
-        'cv_terms_om',
-        'cv_terms_hp',
-        'cv_terms_kw',
+        'ontology_terms',
       ];
 
       if (Object.keys(filters).length > 0) {
@@ -132,11 +128,7 @@ export async function searchInteractionsMeilisearch(
         'is_directed',
         'sign',
         'interaction_annotation_terms',
-        'participant_annotation_terms_go',
-        'participant_annotation_terms_mi',
-        'participant_annotation_terms_om',
-        'participant_annotation_terms_hp',
-        'participant_annotation_terms_kw',
+        'participant_annotation_terms',
         'sources',
       ],
     };

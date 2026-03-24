@@ -37,11 +37,7 @@ interface SearchPageProps {
     entity_types?: string[];
     sources?: string[];
     ncbi_tax_id?: string[];
-    cv_terms_go?: string[];
-    cv_terms_mi?: string[];
-    cv_terms_om?: string[];
-    cv_terms_hp?: string[];
-    cv_terms_kw?: string[];
+    ontology_terms?: string[];
   };
   // Whether to show filter sidebar even when embedded
   showFilters?: boolean;
@@ -93,7 +89,7 @@ export default function SearchPage({
     }
     return base;
   });
-  const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; cv_terms?: Record<string, number> }>({});
+  const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; ontology_terms?: Record<string, number> }>({});
   const [ontologyFacetCountsByPrefix, setOntologyFacetCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
   const [lookupEntities, setLookupEntities] = useState<SearchResult[]>([]);
@@ -191,13 +187,13 @@ export default function SearchPage({
       // Update filter counts from facet distribution (only on first page)
       if (offset === 0 && 'facetDistribution' in response && response.facetDistribution && initialSearchType === "search_entities") {
         const facetDistribution = response.facetDistribution || {};
-        const perOntologyCounts: Record<string, Record<string, number>> = {
-          GO: facetDistribution.cv_terms_go || {},
-          MI: facetDistribution.cv_terms_mi || {},
-          OM: facetDistribution.cv_terms_om || {},
-          HP: facetDistribution.cv_terms_hp || {},
-          KW: facetDistribution.cv_terms_kw || {},
-        };
+        const allOntologyCounts = facetDistribution.ontology_terms || {};
+        const perOntologyCounts: Record<string, Record<string, number>> = {};
+        Object.entries(allOntologyCounts).forEach(([value, count]) => {
+          const match = value.match(/^([A-Z][A-Z0-9_-]*):/);
+          const prefix = match ? match[1] : 'OTHER';
+          (perOntologyCounts[prefix] ||= {})[value] = count as number;
+        });
         setOntologyFacetCountsByPrefix(perOntologyCounts);
         setFilterCounts({
           entity_type: response.facetDistribution.entity_type || {},

@@ -35,21 +35,23 @@ export function buildUrlForToolResult(toolResult: ToolResult): string | null {
           interaction_annotation_terms: toStringArray(toolResult.query.interactionAnnotationTerms).length > 0
             ? toStringArray(toolResult.query.interactionAnnotationTerms)
             : toStringArray(toolResult.query.interaction_annotation_terms),
-          participant_annotation_terms_go: toStringArray(toolResult.query.participantAnnotationTermsGo).length > 0
-            ? toStringArray(toolResult.query.participantAnnotationTermsGo)
-            : toStringArray(toolResult.query.participant_annotation_terms_go),
-          participant_annotation_terms_mi: toStringArray(toolResult.query.participantAnnotationTermsMi).length > 0
-            ? toStringArray(toolResult.query.participantAnnotationTermsMi)
-            : toStringArray(toolResult.query.participant_annotation_terms_mi),
-          participant_annotation_terms_om: toStringArray(toolResult.query.participantAnnotationTermsOm).length > 0
-            ? toStringArray(toolResult.query.participantAnnotationTermsOm)
-            : toStringArray(toolResult.query.participant_annotation_terms_om),
-          participant_annotation_terms_hp: toStringArray(toolResult.query.participantAnnotationTermsHp).length > 0
-            ? toStringArray(toolResult.query.participantAnnotationTermsHp)
-            : toStringArray(toolResult.query.participant_annotation_terms_hp),
-          participant_annotation_terms_kw: toStringArray(toolResult.query.participantAnnotationTermsKw).length > 0
-            ? toStringArray(toolResult.query.participantAnnotationTermsKw)
-            : toStringArray(toolResult.query.participant_annotation_terms_kw),
+          participant_annotation_terms: Array.from(new Set([
+            ...(toStringArray(toolResult.query.participantAnnotationTermsGo).length > 0
+              ? toStringArray(toolResult.query.participantAnnotationTermsGo)
+              : toStringArray(toolResult.query.participant_annotation_terms_go)),
+            ...(toStringArray(toolResult.query.participantAnnotationTermsMi).length > 0
+              ? toStringArray(toolResult.query.participantAnnotationTermsMi)
+              : toStringArray(toolResult.query.participant_annotation_terms_mi)),
+            ...(toStringArray(toolResult.query.participantAnnotationTermsOm).length > 0
+              ? toStringArray(toolResult.query.participantAnnotationTermsOm)
+              : toStringArray(toolResult.query.participant_annotation_terms_om)),
+            ...(toStringArray(toolResult.query.participantAnnotationTermsHp).length > 0
+              ? toStringArray(toolResult.query.participantAnnotationTermsHp)
+              : toStringArray(toolResult.query.participant_annotation_terms_hp)),
+            ...(toStringArray(toolResult.query.participantAnnotationTermsKw).length > 0
+              ? toStringArray(toolResult.query.participantAnnotationTermsKw)
+              : toStringArray(toolResult.query.participant_annotation_terms_kw)),
+          ])),
           is_directed: typeof toolResult.query.hasDirection === "boolean"
             ? toolResult.query.hasDirection
             : typeof toolResult.query.has_direction === "boolean"

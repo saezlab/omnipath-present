@@ -39,7 +39,6 @@ class TermSearchRequest(BaseModel):
     """Request for searching ontology terms by name or synonym."""
 
     queries: list[str] = Field(default_factory=list)
-    prefixes: list[str] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=50)
 
 
@@ -134,11 +133,7 @@ class InteractionExportFilters(BaseModel):
 
     # Ontology term filters
     interaction_annotation_terms: list[str] = Field(default_factory=list)
-    participant_annotation_terms_go: list[str] = Field(default_factory=list)
-    participant_annotation_terms_mi: list[str] = Field(default_factory=list)
-    participant_annotation_terms_om: list[str] = Field(default_factory=list)
-    participant_annotation_terms_hp: list[str] = Field(default_factory=list)
-    participant_annotation_terms_kw: list[str] = Field(default_factory=list)
+    participant_annotation_terms: list[str] = Field(default_factory=list)
     ontology_terms: list[str] = Field(default_factory=list)
 
     sources: list[str] = Field(default_factory=list)
@@ -156,14 +151,7 @@ class EntityExportFilters(BaseModel):
     # Backward-compatible key used by current clients
     ncbi_tax_id: list[str] = Field(default_factory=list)
 
-    # Prefix-scoped ontology filters
-    cv_terms_go: list[str] = Field(default_factory=list)
-    cv_terms_mi: list[str] = Field(default_factory=list)
-    cv_terms_om: list[str] = Field(default_factory=list)
-    cv_terms_hp: list[str] = Field(default_factory=list)
-    cv_terms_kw: list[str] = Field(default_factory=list)
-
-    # Optional generic ontology term list; routed by prefix (GO/MI/OM/HP/KW)
+    # Unified ontology term filters
     ontology_terms: list[str] = Field(default_factory=list)
 
 

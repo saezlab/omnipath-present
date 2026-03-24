@@ -23,25 +23,9 @@ export function buildEntityFilterString(filters: MeilisearchFilters): string {
     filterParts.push(`(${taxIdFilters} OR ncbi_tax_id IS NULL)`);
   }
 
-  if (filters.cv_terms_go?.length) {
-    const cvTermFilters = filters.cv_terms_go.map(term => `cv_terms_go = "${term}"`).join(" OR ");
-    filterParts.push(`(${cvTermFilters})`);
-  }
-  if (filters.cv_terms_mi?.length) {
-    const cvTermFilters = filters.cv_terms_mi.map(term => `cv_terms_mi = "${term}"`).join(" OR ");
-    filterParts.push(`(${cvTermFilters})`);
-  }
-  if (filters.cv_terms_om?.length) {
-    const cvTermFilters = filters.cv_terms_om.map(term => `cv_terms_om = "${term}"`).join(" OR ");
-    filterParts.push(`(${cvTermFilters})`);
-  }
-  if (filters.cv_terms_hp?.length) {
-    const cvTermFilters = filters.cv_terms_hp.map(term => `cv_terms_hp = "${term}"`).join(" OR ");
-    filterParts.push(`(${cvTermFilters})`);
-  }
-  if (filters.cv_terms_kw?.length) {
-    const cvTermFilters = filters.cv_terms_kw.map(term => `cv_terms_kw = "${term}"`).join(" OR ");
-    filterParts.push(`(${cvTermFilters})`);
+  if (filters.ontology_terms?.length) {
+    const ontologyFilters = filters.ontology_terms.map(term => `ontology_terms = "${term}"`).join(" OR ");
+    filterParts.push(`(${ontologyFilters})`);
   }
 
   return filterParts.join(" AND ");
@@ -87,11 +71,7 @@ export function buildInteractionFilterString(filters: MeilisearchFilters): strin
   }
 
   const participantFilterKeys: Array<keyof MeilisearchFilters> = [
-    "participant_annotation_terms_go",
-    "participant_annotation_terms_mi",
-    "participant_annotation_terms_om",
-    "participant_annotation_terms_hp",
-    "participant_annotation_terms_kw",
+    "participant_annotation_terms",
   ];
 
   participantFilterKeys.forEach((key) => {

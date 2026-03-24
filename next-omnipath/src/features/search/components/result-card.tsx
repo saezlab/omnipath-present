@@ -273,11 +273,7 @@ export interface SearchResult {
   sources?: string[];
   complexes?: number[];
   cv_terms?: string[];
-  cv_terms_go?: string[];
-  cv_terms_mi?: string[];
-  cv_terms_om?: string[];
-  cv_terms_hp?: string[];
-  cv_terms_kw?: string[];
+  ontology_terms?: string[];
   pathways?: number[];
   reactions?: number[];
   num_interactions?: number;

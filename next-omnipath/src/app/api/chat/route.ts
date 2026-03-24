@@ -205,12 +205,7 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
         if (sources?.length) filters.sources = sources;
         const normalizedOntologyTerms = await normalizeOntologyFilterValues(ontologyTerms);
         if (normalizedOntologyTerms?.length) {
-          // Broadly search across all cv_terms
-          filters.cv_terms_go = normalizedOntologyTerms;
-          filters.cv_terms_mi = normalizedOntologyTerms;
-          filters.cv_terms_om = normalizedOntologyTerms;
-          filters.cv_terms_hp = normalizedOntologyTerms;
-          filters.cv_terms_kw = normalizedOntologyTerms;
+          filters.ontology_terms = normalizedOntologyTerms;
         }
 
         const data = await searchMeilisearch({
@@ -574,11 +569,16 @@ Do not use broad entity search as a substitute for identifier resolution when an
 
         if (interactionTypes?.length) apiFilters.interaction_types = interactionTypes;
         if (normalizedInteractionAnnotationTerms?.length) apiFilters.interaction_annotation_terms = normalizedInteractionAnnotationTerms;
-        if (normalizedParticipantAnnotationTermsGo?.length) apiFilters.participant_annotation_terms_go = normalizedParticipantAnnotationTermsGo;
-        if (normalizedParticipantAnnotationTermsMi?.length) apiFilters.participant_annotation_terms_mi = normalizedParticipantAnnotationTermsMi;
-        if (normalizedParticipantAnnotationTermsOm?.length) apiFilters.participant_annotation_terms_om = normalizedParticipantAnnotationTermsOm;
-        if (normalizedParticipantAnnotationTermsHp?.length) apiFilters.participant_annotation_terms_hp = normalizedParticipantAnnotationTermsHp;
-        if (normalizedParticipantAnnotationTermsKw?.length) apiFilters.participant_annotation_terms_kw = normalizedParticipantAnnotationTermsKw;
+        const mergedParticipantAnnotationTerms = [
+          ...(normalizedParticipantAnnotationTermsGo || []),
+          ...(normalizedParticipantAnnotationTermsMi || []),
+          ...(normalizedParticipantAnnotationTermsOm || []),
+          ...(normalizedParticipantAnnotationTermsHp || []),
+          ...(normalizedParticipantAnnotationTermsKw || []),
+        ];
+        if (mergedParticipantAnnotationTerms.length) {
+          apiFilters.participant_annotation_terms = Array.from(new Set(mergedParticipantAnnotationTerms));
+        }
         if (hasDirection !== undefined) apiFilters.is_directed = hasDirection;
         if (isPositive) apiFilters.signs = [...(apiFilters.signs || []), 1];
         if (isNegative) apiFilters.signs = [...(apiFilters.signs || []), -1];

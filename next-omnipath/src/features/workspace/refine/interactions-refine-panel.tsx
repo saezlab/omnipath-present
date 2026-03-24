@@ -99,11 +99,7 @@ export function InteractionsRefinePanel({
       if (facetDist.is_directed) counts.is_directed = facetDist.is_directed;
       if (facetDist.sign) counts.sign = facetDist.sign;
       if (facetDist.interaction_annotation_terms) counts.interaction_annotation_terms = facetDist.interaction_annotation_terms;
-      if (facetDist.participant_annotation_terms_go) counts.participant_annotation_terms_go = facetDist.participant_annotation_terms_go;
-      if (facetDist.participant_annotation_terms_mi) counts.participant_annotation_terms_mi = facetDist.participant_annotation_terms_mi;
-      if (facetDist.participant_annotation_terms_om) counts.participant_annotation_terms_om = facetDist.participant_annotation_terms_om;
-      if (facetDist.participant_annotation_terms_hp) counts.participant_annotation_terms_hp = facetDist.participant_annotation_terms_hp;
-      if (facetDist.participant_annotation_terms_kw) counts.participant_annotation_terms_kw = facetDist.participant_annotation_terms_kw;
+      if (facetDist.participant_annotation_terms) counts.participant_annotation_terms = facetDist.participant_annotation_terms;
       if (facetDist.sources) counts.sources = facetDist.sources;
       setFilterCounts(counts);
     }
@@ -217,15 +213,7 @@ export function InteractionsRefinePanel({
 
     pushOntologyItems("interaction_annotation_terms", "Interaction annotation");
 
-    ([
-      ["participant_annotation_terms_go", "Participant GO"],
-      ["participant_annotation_terms_mi", "Participant MI"],
-      ["participant_annotation_terms_om", "Participant OM"],
-      ["participant_annotation_terms_hp", "Participant HP"],
-      ["participant_annotation_terms_kw", "Participant KW"],
-    ] as const).forEach(([filterKey, label]) => {
-      pushOntologyItems(filterKey, label);
-    });
+    pushOntologyItems("participant_annotation_terms", "Participant annotation");
 
     if (filters.is_directed === true) {
       items.push({

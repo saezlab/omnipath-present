@@ -92,7 +92,7 @@ def _expand_ontology_term_variants(term: str) -> list[str]:
 def _normalize_interaction_filters(filters: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(filters)
 
-    # Accept generic ontology term key as alias
+    # Accept generic ontology term key as alias for interaction-level terms.
     expanded_ontology_terms: list[str] = []
     for term in normalized.get("ontology_terms") or []:
         expanded_ontology_terms.extend(_expand_ontology_term_variants(str(term)))
@@ -100,6 +100,9 @@ def _normalize_interaction_filters(filters: dict[str, Any]) -> dict[str, Any]:
     normalized["interaction_annotation_terms"] = _merge_list_values(
         list(normalized.get("interaction_annotation_terms") or []),
         expanded_ontology_terms,
+    )
+    normalized["participant_annotation_terms"] = _merge_list_values(
+        list(normalized.get("participant_annotation_terms") or []),
     )
 
     # direction enum -> boolean helper field
@@ -135,40 +138,14 @@ def _normalize_entity_filters(filters: dict[str, Any]) -> dict[str, Any]:
         list(normalized.get("taxonomy_ids") or []),
     )
 
-    # Route generic ontology terms by prefix to cv_terms_* arrays.
-    # If bare IDs are provided (e.g. GO:0005634), also include likely indexed variants.
+    expanded_ontology_terms: list[str] = []
     for term in normalized.get("ontology_terms") or []:
-        term_str = str(term)
-        if ":" not in term_str:
-            continue
+        expanded_ontology_terms.extend(_expand_ontology_term_variants(str(term)))
 
-        expanded = _expand_ontology_term_variants(term_str)
-
-        # Determine namespace from canonical ID when possible.
-        # For already-expanded strings, fall back to containment checks.
-        prefix = term_str.split(":", 1)[0].upper()
-        if prefix not in {"GO", "MI", "OM", "HP", "KW"}:
-            if ":GO:" in term_str:
-                prefix = "GO"
-            elif ":MI:" in term_str:
-                prefix = "MI"
-            elif ":OM:" in term_str:
-                prefix = "OM"
-            elif ":HP:" in term_str:
-                prefix = "HP"
-            elif ":KW:" in term_str:
-                prefix = "KW"
-
-        if prefix == "GO":
-            normalized["cv_terms_go"] = _merge_list_values(normalized.get("cv_terms_go") or [], expanded)
-        elif prefix == "MI":
-            normalized["cv_terms_mi"] = _merge_list_values(normalized.get("cv_terms_mi") or [], expanded)
-        elif prefix == "OM":
-            normalized["cv_terms_om"] = _merge_list_values(normalized.get("cv_terms_om") or [], expanded)
-        elif prefix == "HP":
-            normalized["cv_terms_hp"] = _merge_list_values(normalized.get("cv_terms_hp") or [], expanded)
-        elif prefix == "KW":
-            normalized["cv_terms_kw"] = _merge_list_values(normalized.get("cv_terms_kw") or [], expanded)
+    normalized["ontology_terms"] = _merge_list_values(
+        list(normalized.get("ontology_terms") or []),
+        expanded_ontology_terms,
+    )
 
     return normalized
 
@@ -340,11 +317,7 @@ def write_interaction_subset_parquet_direct(query: str, filters: dict[str, Any],
 
     for key in (
         "interaction_annotation_terms",
-        "participant_annotation_terms_go",
-        "participant_annotation_terms_mi",
-        "participant_annotation_terms_om",
-        "participant_annotation_terms_hp",
-        "participant_annotation_terms_kw",
+        "participant_annotation_terms",
         "sources",
     ):
         values = [str(v) for v in (filters.get(key) or [])]
@@ -362,11 +335,7 @@ def write_interaction_subset_parquet_direct(query: str, filters: dict[str, Any],
         for col in (
             "sources",
             "interaction_annotation_terms",
-            "participant_annotation_terms_go",
-            "participant_annotation_terms_mi",
-            "participant_annotation_terms_om",
-            "participant_annotation_terms_hp",
-            "participant_annotation_terms_kw",
+            "participant_annotation_terms",
         ):
             if _column_in_schema(schema_names, col):
                 query_exprs.append(_contains_query_list(col, query_lower))
@@ -403,10 +372,9 @@ def write_entity_subset_parquet_direct(query: str, filters: dict[str, Any], outp
     if ncbi_tax_ids and _column_in_schema(schema_names, "ncbi_tax_id"):
         expressions.append(_scalar_in("ncbi_tax_id", ncbi_tax_ids) | pl.col("ncbi_tax_id").is_null())
 
-    for key in ("cv_terms_go", "cv_terms_mi", "cv_terms_om", "cv_terms_hp", "cv_terms_kw"):
-        values = [str(v) for v in (filters.get(key) or [])]
-        if values and _column_in_schema(schema_names, key):
-            expressions.append(_list_contains_any(key, values))
+    ontology_terms = [str(v) for v in (filters.get("ontology_terms") or [])]
+    if ontology_terms and _column_in_schema(schema_names, "ontology_terms"):
+        expressions.append(_list_contains_any("ontology_terms", ontology_terms))
 
     query_expression: pl.Expr | None = None
     query_text = (query or "").strip()
@@ -423,11 +391,7 @@ def write_entity_subset_parquet_direct(query: str, filters: dict[str, Any], outp
             "descriptions",
             "references",
             "sources",
-            "cv_terms_go",
-            "cv_terms_mi",
-            "cv_terms_om",
-            "cv_terms_hp",
-            "cv_terms_kw",
+            "ontology_terms",
         ):
             if _column_in_schema(schema_names, col):
                 query_exprs.append(_contains_query_list(col, query_lower))

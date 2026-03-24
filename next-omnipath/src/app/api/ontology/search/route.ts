@@ -3,7 +3,6 @@ import { getApiServiceUrl } from "@/lib/api/config";
 
 interface TermSearchRequestPayload {
   queries?: string[];
-  prefixes?: string[];
   limit?: number;
 }
 
@@ -11,7 +10,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as TermSearchRequestPayload;
     const queries = (body.queries || []).map((query) => query.trim()).filter((query) => query.length > 0);
-    const prefixes = (body.prefixes || []).map((prefix) => prefix.trim()).filter((prefix) => prefix.length > 0);
     const limit = typeof body.limit === "number" ? body.limit : 20;
 
     if (queries.length === 0) {
@@ -21,7 +19,7 @@ export async function POST(req: NextRequest) {
     const response = await fetch(`${getApiServiceUrl()}/terms/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queries, prefixes, limit }),
+      body: JSON.stringify({ queries, limit }),
     });
 
     if (!response.ok) {

@@ -329,20 +329,8 @@ async def get_terms_batch(request: TermsRequest):
 
 @app.post("/terms/search", response_model=TermSearchResponse)
 async def search_terms(request: TermSearchRequest):
-    """Search ontology terms by name/synonym and return matching accessions."""
-    from .config import PREFIX_TO_ONTOLOGY
-
-    ontology_ids: list[str]
-    if request.prefixes:
-        ontology_ids = list(
-            dict.fromkeys(
-                PREFIX_TO_ONTOLOGY[prefix.upper()]
-                for prefix in request.prefixes
-                if prefix.upper() in PREFIX_TO_ONTOLOGY
-            )
-        )
-    else:
-        ontology_ids = list(dict.fromkeys(PREFIX_TO_ONTOLOGY.values()))
+    """Search ontology terms by name/synonym across all configured ontologies."""
+    ontology_ids = list(registry.list_available().keys())
 
     results = {
         query: search_terms_by_name(query, ontology_ids=ontology_ids, limit=request.limit)

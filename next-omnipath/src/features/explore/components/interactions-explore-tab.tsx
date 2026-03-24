@@ -85,20 +85,8 @@ export function InteractionsExploreTab({
         if (facetDist.interaction_annotation_terms) {
           counts.interaction_annotation_terms = facetDist.interaction_annotation_terms;
         }
-        if (facetDist.participant_annotation_terms_go) {
-          counts.participant_annotation_terms_go = facetDist.participant_annotation_terms_go;
-        }
-        if (facetDist.participant_annotation_terms_mi) {
-          counts.participant_annotation_terms_mi = facetDist.participant_annotation_terms_mi;
-        }
-        if (facetDist.participant_annotation_terms_om) {
-          counts.participant_annotation_terms_om = facetDist.participant_annotation_terms_om;
-        }
-        if (facetDist.participant_annotation_terms_hp) {
-          counts.participant_annotation_terms_hp = facetDist.participant_annotation_terms_hp;
-        }
-        if (facetDist.participant_annotation_terms_kw) {
-          counts.participant_annotation_terms_kw = facetDist.participant_annotation_terms_kw;
+        if (facetDist.participant_annotation_terms) {
+          counts.participant_annotation_terms = facetDist.participant_annotation_terms;
         }
         if (facetDist.sources) {
           counts.sources = facetDist.sources;
@@ -130,11 +118,7 @@ export function InteractionsExploreTab({
   // Check if there are ontology terms available
   const hasOntologyTerms = !!(
     (filterCounts?.interaction_annotation_terms && Object.keys(filterCounts.interaction_annotation_terms).length > 0) ||
-    (filterCounts?.participant_annotation_terms_go && Object.keys(filterCounts.participant_annotation_terms_go).length > 0) ||
-    (filterCounts?.participant_annotation_terms_mi && Object.keys(filterCounts.participant_annotation_terms_mi).length > 0) ||
-    (filterCounts?.participant_annotation_terms_om && Object.keys(filterCounts.participant_annotation_terms_om).length > 0) ||
-    (filterCounts?.participant_annotation_terms_hp && Object.keys(filterCounts.participant_annotation_terms_hp).length > 0) ||
-    (filterCounts?.participant_annotation_terms_kw && Object.keys(filterCounts.participant_annotation_terms_kw).length > 0)
+    (filterCounts?.participant_annotation_terms && Object.keys(filterCounts.participant_annotation_terms).length > 0)
   );
 
   // Update error state from infinite scroll hook
