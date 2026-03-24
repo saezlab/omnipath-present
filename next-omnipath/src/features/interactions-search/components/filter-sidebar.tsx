@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,16 +9,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MeilisearchFilters } from "@/types/meilisearch"
-import { ArrowRight, Plus, Minus, X, Filter, Search } from "lucide-react"
+import { X, Filter, Search, ArrowRight, Minus, Plus, Ban } from "lucide-react"
 import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { EntityHoverCard, CvTermHoverCard } from "@/features/search/components/result-card"
+import { useOntologyTerms } from "@/features/ontology/use-ontology-terms"
 
 interface FilterOption {
   value: string;
   count: number;
   label?: string;
-  icon?: string;
+  icon?: ReactNode;
   prefix?: string;
   filterKey?: keyof MeilisearchFilters;
 }
@@ -94,7 +95,7 @@ function extractTermLabel(value: string): string {
   }
 
   if (value === termId) {
-    return value;
+    return termId;
   }
 
   const repeatedSuffix = `:${termId}:${termId}`;
@@ -166,6 +167,7 @@ interface FilterOptionRowProps {
   highlighted?: boolean;
 }
 
+
 function FilterOptionRow({
   filterKey,
   option,
@@ -218,10 +220,10 @@ function FilterOptionRow({
 
   const labelContent = (
     <span className={cn(
-      "truncate",
+      "truncate inline-flex items-center",
       highlighted ? "font-medium" : ""
     )}>
-      {showIcon && icon && <span className="mr-1.5">{icon}</span>}
+      {showIcon && icon && <span className="mr-1.5 inline-flex items-center">{icon}</span>}
       {displayLabel}
     </span>
   );
@@ -328,64 +330,101 @@ export function FilterSidebar({
       .sort((a, b) => b.count - a.count);
   };
 
+  const selectedPropertyValues = [
+    ...(filters.is_directed === true ? ['directed'] : []),
+    ...(filters.is_directed === false ? ['undirected'] : []),
+    ...((filters.signs || []).map((sign) => String(sign))),
+  ];
+
+  const interactionPropertyOptions: FilterOption[] = [
+    ...(filterCounts.is_directed?.true !== undefined ? [{
+      value: 'directed',
+      count: filterCounts.is_directed.true,
+      label: 'Directed',
+      icon: <ArrowRight className="h-3.5 w-3.5" />,
+      filterKey: 'is_directed' as keyof MeilisearchFilters,
+    }] : []),
+    ...(filterCounts.is_directed?.false !== undefined ? [{
+      value: 'undirected',
+      count: filterCounts.is_directed.false,
+      label: 'Undirected',
+      icon: <Minus className="h-3.5 w-3.5" />,
+      filterKey: 'is_directed' as keyof MeilisearchFilters,
+    }] : []),
+    ...(filterCounts.sign?.['1'] !== undefined ? [{
+      value: '1',
+      count: filterCounts.sign['1'],
+      label: 'Activation',
+      icon: <Plus className="h-3.5 w-3.5 text-green-600" />,
+      filterKey: 'signs' as keyof MeilisearchFilters,
+    }] : []),
+    ...(filterCounts.sign?.['-1'] !== undefined ? [{
+      value: '-1',
+      count: filterCounts.sign['-1'],
+      label: 'Inhibition',
+      icon: <Ban className="h-3.5 w-3.5 text-red-600" />,
+      filterKey: 'signs' as keyof MeilisearchFilters,
+    }] : []),
+    ...(filterCounts.sign?.['0'] !== undefined ? [{
+      value: '0',
+      count: filterCounts.sign['0'],
+      label: 'Unsigned',
+      icon: <Minus className="h-3.5 w-3.5 text-muted-foreground" />,
+      filterKey: 'signs' as keyof MeilisearchFilters,
+    }] : []),
+  ];
+
+  const handlePropertyToggle = (value: string) => {
+    if (value === 'directed') {
+      onFilterChange({
+        ...filters,
+        is_directed: filters.is_directed === true ? undefined : true,
+      });
+      return;
+    }
+
+    if (value === 'undirected') {
+      onFilterChange({
+        ...filters,
+        is_directed: filters.is_directed === false ? undefined : false,
+      });
+      return;
+    }
+
+    const signValue = Number(value) as -1 | 0 | 1;
+    const currentSigns = filters.signs || [];
+    const nextSigns = currentSigns.includes(signValue)
+      ? currentSigns.filter((sign) => sign !== signValue)
+      : [...currentSigns, signValue];
+
+    onFilterChange({
+      ...filters,
+      signs: nextSigns.length > 0 ? nextSigns : undefined,
+    });
+  };
+
   const content = (
     <div className="space-y-4">
-      {/* Quick Filters */}
-      <div className="mb-4 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={filters.is_directed === true ? "default" : "outline"}
-            size="sm"
-            onClick={() => onFilterChange({
-              ...filters,
-              is_directed: filters.is_directed === true ? undefined : true
+      {interactionPropertyOptions.length > 0 ? (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            {interactionPropertyOptions.map((option) => {
+              const filterKey = option.filterKey;
+              if (!filterKey) return null;
+              return (
+                <FilterOptionRow
+                  key={option.value}
+                  filterKey={filterKey}
+                  option={option}
+                  selectedValues={selectedPropertyValues}
+                  onToggle={handlePropertyToggle}
+                  showIcon={true}
+                />
+              );
             })}
-            className={filters.is_directed === true ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
-          >
-            <ArrowRight className="h-4 w-4 mr-1" />
-            Directed {filterCounts.is_directed?.true > 0 && `(${formatNumber(filterCounts.is_directed.true)})`}
-          </Button>
-          <Button
-            variant={filters.is_directed === false ? "default" : "outline"}
-            size="sm"
-            onClick={() => onFilterChange({
-              ...filters,
-              is_directed: filters.is_directed === false ? undefined : false
-            })}
-            className={filters.is_directed === false ? "transition-none hover:bg-primary" : "transition-none hover:bg-background hover:text-foreground"}
-          >
-            <Minus className="h-4 w-4 mr-1" />
-            Undirected {filterCounts.is_directed?.false > 0 && `(${formatNumber(filterCounts.is_directed.false)})`}
-          </Button>
+          </div>
         </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={filters.signs?.includes(1) ? "default" : "outline"}
-            size="sm"
-            onClick={() => onFilterChange({
-              ...filters,
-              signs: filters.signs?.includes(1) ? (filters.signs.filter((sign) => sign !== 1).length ? filters.signs.filter((sign) => sign !== 1) : undefined) : [...(filters.signs || []), 1]
-            })}
-            className={filters.signs?.includes(1) ? "bg-green-600 transition-none hover:bg-green-600" : "transition-none hover:bg-background hover:text-foreground"}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Activation {filterCounts.sign?.['1'] > 0 && `(${formatNumber(filterCounts.sign['1'])})`}
-          </Button>
-          <Button
-            variant={filters.signs?.includes(-1) ? "default" : "outline"}
-            size="sm"
-            onClick={() => onFilterChange({
-              ...filters,
-              signs: filters.signs?.includes(-1) ? (filters.signs.filter((sign) => sign !== -1).length ? filters.signs.filter((sign) => sign !== -1) : undefined) : [...(filters.signs || []), -1]
-            })}
-            className={filters.signs?.includes(-1) ? "bg-red-600 transition-none hover:bg-red-600" : "transition-none hover:bg-background hover:text-foreground"}
-          >
-            <Minus className="h-4 w-4 mr-1" />
-            Inhibition {filterCounts.sign?.['-1'] > 0 && `(${formatNumber(filterCounts.sign['-1'])})`}
-          </Button>
-        </div>
-      </div>
+      ) : null}
 
       <Accordion type="multiple" defaultValue={["interaction_types"]} className="w-full">
         {/* Interaction Type Filter */}
@@ -485,6 +524,26 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   const [facetSearchCountsByPrefix, setFacetSearchCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [facetSearchCounts, setFacetSearchCounts] = useState<Record<string, number>>({});
 
+  const ontologyTermIds = useMemo(() => {
+    const values = new Set<string>();
+    const pushCounts = (counts?: Record<string, number>) => {
+      Object.keys(counts || {}).forEach((value) => {
+        const termId = extractTermId(value);
+        if (termId) values.add(termId);
+      });
+    };
+
+    Object.values(ontologyFacetCountsByPrefix || {}).forEach(pushCounts);
+    Object.values(facetSearchCountsByPrefix || {}).forEach(pushCounts);
+    pushCounts(facetSearchCounts);
+    pushCounts(interactionFilterCounts?.interaction_annotation_terms);
+    Object.values(PARTICIPANT_ONTOLOGY_FACET_MAP).forEach((key) => pushCounts(interactionFilterCounts?.[key as string]));
+
+    return Array.from(values);
+  }, [facetSearchCounts, facetSearchCountsByPrefix, interactionFilterCounts, ontologyFacetCountsByPrefix]);
+
+  const ontologyTermsById = useOntologyTerms(ontologyTermIds);
+
   useEffect(() => {
     if (mode !== "interactions") return;
 
@@ -510,16 +569,19 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   }, [interactionScope, mode]);
 
   const annotationOptions = useMemo<FilterOption[]>(() => {
+    const resolveLabel = (value: string) => {
+      const termId = extractTermId(value);
+      return (termId ? ontologyTermsById[termId]?.name : undefined) || extractTermLabel(value);
+    };
+
     if (mode === "entities") {
-      const countsByPrefix = annotationQuery.trim()
-        ? facetSearchCountsByPrefix
-        : (ontologyFacetCountsByPrefix || {});
+      const countsByPrefix = ontologyFacetCountsByPrefix || {};
       return Object.entries(countsByPrefix)
         .flatMap(([prefix, counts]) =>
           Object.entries(counts).map(([value, count]) => ({
             value,
             count,
-            label: extractTermLabel(value),
+            label: resolveLabel(value),
             icon: prefix,
           }))
         )
@@ -527,19 +589,17 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     }
 
     if (interactionScope === "participant") {
-      const countsByPrefix = annotationQuery.trim()
-        ? facetSearchCountsByPrefix
-        : Object.entries(PARTICIPANT_ONTOLOGY_FACET_MAP).reduce<Record<string, Record<string, number>>>((acc, [prefix, filterKey]) => {
-            acc[prefix] = interactionFilterCounts?.[filterKey as string] || {};
-            return acc;
-          }, {});
+      const countsByPrefix = Object.entries(PARTICIPANT_ONTOLOGY_FACET_MAP).reduce<Record<string, Record<string, number>>>((acc, [prefix, filterKey]) => {
+        acc[prefix] = interactionFilterCounts?.[filterKey as string] || {};
+        return acc;
+      }, {});
 
       return Object.entries(countsByPrefix)
         .flatMap(([prefix, counts]) =>
           Object.entries(counts).map(([value, count]) => ({
             value,
             count,
-            label: extractTermLabel(value),
+            label: resolveLabel(value),
             icon: prefix,
             prefix,
             filterKey: PARTICIPANT_ONTOLOGY_FACET_MAP[prefix],
@@ -548,30 +608,17 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
         .sort((a, b) => b.count - a.count);
     }
 
-    const counts = annotationQuery.trim()
-      ? facetSearchCounts
-      : interactionFilterCounts?.interaction_annotation_terms;
+    const counts = interactionFilterCounts?.interaction_annotation_terms;
     if (!counts) return [];
     return Object.entries(counts)
-      .map(([value, count]) => {
-        const label = extractTermLabel(value);
-        return {
-          value,
-          count,
-          label,
-          filterKey: "interaction_annotation_terms" as keyof MeilisearchFilters,
-        };
-      })
+      .map(([value, count]) => ({
+        value,
+        count,
+        label: resolveLabel(value),
+        filterKey: "interaction_annotation_terms" as keyof MeilisearchFilters,
+      }))
       .sort((a, b) => b.count - a.count);
-  }, [
-    annotationQuery,
-    facetSearchCounts,
-    facetSearchCountsByPrefix,
-    interactionFilterCounts,
-    interactionScope,
-    mode,
-    ontologyFacetCountsByPrefix
-  ]);
+  }, [interactionFilterCounts, interactionScope, mode, ontologyFacetCountsByPrefix, ontologyTermsById]);
 
   const annotationTermOptions = useMemo(() => {
     const mapped = new Map<string, FilterOption>();
@@ -593,9 +640,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   const termsByPrefix = useMemo(() => {
     if (mode === "entities") {
       const groups = new Map<string, { termIds: string[]; totalCount: number }>();
-      const countsByPrefix = annotationQuery.trim()
-        ? facetSearchCountsByPrefix
-        : (ontologyFacetCountsByPrefix || {});
+      const countsByPrefix = ontologyFacetCountsByPrefix || {};
       Object.entries(countsByPrefix).forEach(([prefix, counts]) => {
         const termIds = Object.keys(counts)
           .map((value) => extractTermId(value))
@@ -633,158 +678,11 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
   );
 
   useEffect(() => {
-    const trimmedQuery = annotationQuery.trim();
-    if (!trimmedQuery) {
-      setFacetSearchCountsByPrefix({});
-      setFacetSearchCounts({});
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        if (mode === "entities") {
-          const availablePrefixes = Object.keys(ontologyFacetCountsByPrefix || {}).filter(
-            (prefix) => !!ENTITY_ONTOLOGY_FACET_MAP[prefix]
-          );
-          const prefixesToSearch = availablePrefixes.length > 0
-            ? availablePrefixes
-            : Object.keys(ENTITY_ONTOLOGY_FACET_MAP);
-
-          const responses = await Promise.all(
-            prefixesToSearch.map(async (prefix) => {
-              const facetName = ENTITY_ONTOLOGY_FACET_MAP[prefix];
-              const response = await fetch("/api/meilisearch/facet-search", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  facetName,
-                  facetQuery: trimmedQuery,
-                  filters,
-                  limit: 100,
-                }),
-                signal: controller.signal,
-              });
-
-              if (!response.ok) {
-                return [prefix, {}] as const;
-              }
-
-              const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
-              const counts: Record<string, number> = {};
-              (data.facetHits || []).forEach((hit) => {
-                counts[hit.value] = hit.count;
-              });
-
-              return [prefix, counts] as const;
-            })
-          );
-
-          if (!cancelled) {
-            setFacetSearchCountsByPrefix(Object.fromEntries(responses));
-          }
-          return;
-        }
-
-        if (interactionScope === "participant") {
-          const availablePrefixes = Object.entries(PARTICIPANT_ONTOLOGY_FACET_MAP)
-            .filter(([, key]) => {
-              const counts = interactionFilterCounts?.[key as string];
-              return !!counts && Object.keys(counts).length > 0;
-            })
-            .map(([prefix]) => prefix);
-          const prefixesToSearch = availablePrefixes.length > 0
-            ? availablePrefixes
-            : Object.keys(PARTICIPANT_ONTOLOGY_FACET_MAP);
-
-          const responses = await Promise.all(
-            prefixesToSearch.map(async (prefix) => {
-              const facetName = PARTICIPANT_ONTOLOGY_FACET_MAP[prefix];
-              const response = await fetch("/api/meilisearch/facet-search", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  facetName,
-                  facetQuery: trimmedQuery,
-                  filters,
-                  index: "interactions",
-                  limit: 100,
-                }),
-                signal: controller.signal,
-              });
-
-              if (!response.ok) {
-                return [prefix, {}] as const;
-              }
-
-              const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
-              const counts: Record<string, number> = {};
-              (data.facetHits || []).forEach((hit) => {
-                counts[hit.value] = hit.count;
-              });
-
-              return [prefix, counts] as const;
-            })
-          );
-
-          if (!cancelled) {
-            setFacetSearchCountsByPrefix(Object.fromEntries(responses));
-          }
-          return;
-        }
-
-        const response = await fetch("/api/meilisearch/facet-search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            facetName: "interaction_annotation_terms",
-            facetQuery: trimmedQuery,
-            filters,
-            index: "interactions",
-            limit: 100,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          if (!cancelled) {
-            setFacetSearchCounts({});
-          }
-          return;
-        }
-
-        const data = (await response.json()) as { facetHits?: { value: string; count: number }[] };
-        const counts: Record<string, number> = {};
-        (data.facetHits || []).forEach((hit) => {
-          counts[hit.value] = hit.count;
-        });
-
-        if (!cancelled) {
-          setFacetSearchCounts(counts);
-        }
-      } catch {
-        if (!cancelled) {
-          setFacetSearchCountsByPrefix({});
-          setFacetSearchCounts({});
-        }
-      }
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [
-    activeTab,
-    annotationQuery,
-    filters,
-    interactionFilterCounts,
-    interactionScope,
-    mode,
-    ontologyFacetCountsByPrefix,
-  ]);
+    // Ontology labels are now resolved via the ontology API and filtered client-side.
+    // Clear any previous remote facet-search state when the query changes.
+    setFacetSearchCountsByPrefix({});
+    setFacetSearchCounts({});
+  }, [annotationQuery, interactionScope, mode]);
 
   const ontologyTabs = useMemo(() => {
     const tabs: OntologyTabGroup[] = [];
@@ -845,15 +743,6 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
 
   const filteredTabs = useMemo<FilteredOntologyTab[]>(() => {
     return ontologyTabs.map((tab) => {
-      if (mode === "entities" && annotationQuery.trim()) {
-        return {
-          ...tab,
-          filteredUnmatched: [],
-          filteredTerms: tab.terms,
-          hasMatches: tab.terms.length > 0,
-        };
-      }
-
       if (!normalizedQuery) {
         return {
           ...tab,

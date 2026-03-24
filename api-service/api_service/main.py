@@ -10,6 +10,7 @@ from time import perf_counter
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+import polars as pl
 from ontograph.queries.introspection import IntrospectionPronto
 
 from .models import (
@@ -28,8 +29,10 @@ from .models import (
     InteractionExportRequest,
     EntityExportRequest,
     AssociationExportRequest,
+    EvidenceLookupResponse,
 )
 from .registry import registry
+from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -226,6 +229,41 @@ def search_terms_by_name(query: str, ontology_ids: list[str], limit: int = 10) -
 async def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+def _load_evidence_row(parquet_path: Path, id_column: str, key_column: str, record_id: int) -> EvidenceLookupResponse:
+    """Load a single evidence-bearing row from parquet by numeric ID."""
+    if not parquet_path.exists():
+        raise HTTPException(status_code=500, detail=f"Missing parquet file: {parquet_path}")
+
+    df = (
+        pl.scan_parquet(str(parquet_path))
+        .filter(pl.col(id_column) == record_id)
+        .select([id_column, key_column, "evidence"])
+        .collect(streaming=True)
+    )
+
+    if df.is_empty():
+        raise HTTPException(status_code=404, detail=f"Record '{record_id}' not found")
+
+    row = df.row(0, named=True)
+    return EvidenceLookupResponse(
+        id=int(row[id_column]),
+        key=str(row[key_column]),
+        evidence=list(row.get("evidence") or []),
+    )
+
+
+@app.get("/interactions/{interaction_id}/evidence", response_model=EvidenceLookupResponse)
+async def get_interaction_evidence(interaction_id: int):
+    """Return full evidence payload for a single interaction."""
+    return _load_evidence_row(INTERACTIONS_PARQUET, "interaction_id", "interaction_key", interaction_id)
+
+
+@app.get("/associations/{association_id}/evidence", response_model=EvidenceLookupResponse)
+async def get_association_evidence(association_id: int):
+    """Return full evidence payload for a single association."""
+    return _load_evidence_row(ASSOCIATIONS_PARQUET, "association_id", "association_key", association_id)
 
 
 # --- Ontology listing ---

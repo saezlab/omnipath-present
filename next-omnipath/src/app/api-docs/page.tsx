@@ -27,18 +27,22 @@ const schemas: Record<string, Row[]> = {
   ],
   interactions: [
     ["interaction_id", "Int64", "2847361"],
-    ["interaction_key", "String", "P:UNIPROT:P04637|P:UNIPROT:P31749"],
-    ["member_a_id", "String", "P:UNIPROT:P04637"],
-    ["member_b_id", "String", "P:UNIPROT:P31749"],
+    ["interaction_key", "String", "P:UP:P04637:UNK-P:UP:P31749:UNK|d|1"],
+    ["member_a_id", "String", "P:UP:P04637:UNK"],
+    ["member_b_id", "String", "P:UP:P31749:UNK"],
     ["member_types", "List(String)", "[\"protein:MI:0326\", \"protein:MI:0326\"]"],
     ["interaction_type", "String", "protein:MI:0326|protein:MI:0326"],
+    ["is_directed", "Boolean", "true"],
+    ["sign", "Int8", "1"],
     ["evidence", "List(Struct{ evidence_serial, source, interaction_annotations, member_a_annotations, member_b_annotations })", "[{ evidence_serial: 1, source: \"SIGNOR:OM:1152\", ... }]"],
-    ["directions", "List(Struct{ direction: String, sign: Int8 })", "[{ direction: \"a-b\", sign: 1 }]"],
+    ["evidence_count", "Int64", "3"],
     ["sources", "List(String)", "[\"SIGNOR:OM:1152\"]"],
     ["interaction_annotation_terms", "List(String)", "[\"MI:0217\"]"],
-    ["has_direction", "Boolean", "true"],
-    ["has_positive_sign", "Boolean", "true"],
-    ["has_negative_sign", "Boolean", "false"],
+    ["participant_annotation_terms_go", "List(String)", "[\"GO:0004672\"]"],
+    ["participant_annotation_terms_mi", "List(String)", "[\"MI:0326\"]"],
+    ["participant_annotation_terms_om", "List(String)", "[\"OM:0013\"]"],
+    ["participant_annotation_terms_hp", "List(String)", "[\"HP:0001250\"]"],
+    ["participant_annotation_terms_kw", "List(String)", "[\"KW:0464\"]"],
   ],
   associations: [
     ["association_id", "Int64", "948211"],
@@ -68,15 +72,12 @@ const filters: Record<"entities" | "interactions" | "associations", FilterRow[]>
   ],
   interactions: [
     ["entity_ids", "string[]", "Matches member_a_id OR member_b_id"],
-    ["member_a_id", "string", "Either member in pair"],
-    ["member_b_id", "string", "Either member in pair"],
+    ["member_a_id", "string", "Matches either member in pair"],
+    ["member_b_id", "string", "Matches either member in pair"],
     ["interaction_types", "string[]", "Interaction type terms"],
-    ["direction", "'any' | 'directed' | 'undirected'", "Maps to has_direction"],
-    ["sign", "'any' | 'positive' | 'negative' | 'mixed'", "Maps to has_positive_sign / has_negative_sign"],
-    ["has_direction", "boolean", "Explicit direction flag"],
-    ["has_positive_sign", "boolean", "Explicit sign helper"],
-    ["has_negative_sign", "boolean", "Explicit sign helper"],
-    ["interaction_annotation_terms", "string[]", "Ontology annotation terms"],
+    ["is_directed", "boolean", "Exact directed / undirected state"],
+    ["signs", "Array<-1 | 0 | 1>", "-1 = negative, 0 = unsigned, 1 = positive"],
+    ["interaction_annotation_terms", "string[]", "Ontology annotation terms on the interaction"],
     ["participant_annotation_terms_go", "string[]", "Participant GO annotations"],
     ["participant_annotation_terms_mi", "string[]", "Participant MI annotations"],
     ["participant_annotation_terms_om", "string[]", "Participant OM annotations"],
@@ -168,15 +169,8 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
     interactionPartOm,
     interactionPartHp,
     interactionPartKw,
-    interactionHasDirection,
-    interactionHasPositiveSign,
-    interactionHasNegativeSign,
-    interactionAnyCount,
-    interactionDirectedCount,
-    interactionUndirectedCount,
-    interactionPositiveCount,
-    interactionNegativeCount,
-    interactionMixedCount,
+    interactionIsDirected,
+    interactionSigns,
     associationParentTypes,
     associationMemberTypes,
     associationSources,
@@ -198,15 +192,8 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
     getFacetExamples(INDEXES.INTERACTIONS, "participant_annotation_terms_om"),
     getFacetExamples(INDEXES.INTERACTIONS, "participant_annotation_terms_hp"),
     getFacetExamples(INDEXES.INTERACTIONS, "participant_annotation_terms_kw"),
-    getFacetExamples(INDEXES.INTERACTIONS, "has_direction"),
-    getFacetExamples(INDEXES.INTERACTIONS, "has_positive_sign"),
-    getFacetExamples(INDEXES.INTERACTIONS, "has_negative_sign"),
-    getIndexCount(INDEXES.INTERACTIONS),
-    getIndexCount(INDEXES.INTERACTIONS, "has_direction = true"),
-    getIndexCount(INDEXES.INTERACTIONS, "has_direction = false"),
-    getIndexCount(INDEXES.INTERACTIONS, "has_positive_sign = true AND has_negative_sign = false"),
-    getIndexCount(INDEXES.INTERACTIONS, "has_positive_sign = false AND has_negative_sign = true"),
-    getIndexCount(INDEXES.INTERACTIONS, "has_positive_sign = true AND has_negative_sign = true"),
+    getFacetExamples(INDEXES.INTERACTIONS, "is_directed"),
+    getFacetExamples(INDEXES.INTERACTIONS, "sign"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "parent_entity_type"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "member_entity_type"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "sources"),
@@ -234,20 +221,8 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
       participant_annotation_terms_om: interactionPartOm,
       participant_annotation_terms_hp: interactionPartHp,
       participant_annotation_terms_kw: interactionPartKw,
-      has_direction: interactionHasDirection,
-      has_positive_sign: interactionHasPositiveSign,
-      has_negative_sign: interactionHasNegativeSign,
-      direction: [
-        { value: "any", count: interactionAnyCount },
-        { value: "directed", count: interactionDirectedCount },
-        { value: "undirected", count: interactionUndirectedCount },
-      ].sort((a, b) => (b.count || 0) - (a.count || 0)),
-      sign: [
-        { value: "any", count: interactionAnyCount },
-        { value: "positive", count: interactionPositiveCount },
-        { value: "negative", count: interactionNegativeCount },
-        { value: "mixed", count: interactionMixedCount },
-      ].sort((a, b) => (b.count || 0) - (a.count || 0)),
+      is_directed: interactionIsDirected,
+      signs: interactionSigns,
       ontology_terms: interactionAnnotationTerms,
     },
     associations: {
@@ -357,7 +332,7 @@ export default async function ApiDocsPage() {
   )
   const interactionExampleUrl = buildDownloadUrl(
     "/api/exports/interactions/parquet",
-    { sources: [facetExamples.interactions.sources[0]?.value || "SIGNOR:OM:1152"], direction: "directed" },
+    { sources: [facetExamples.interactions.sources[0]?.value || "SIGNOR:OM:1152"], is_directed: true },
     "directed_interactions_example"
   )
   const associationExampleUrl = buildDownloadUrl(
@@ -379,8 +354,8 @@ export default async function ApiDocsPage() {
     "/api/exports/interactions/parquet",
     {
       entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
-      direction: "directed",
-      sign: "positive",
+      is_directed: true,
+      signs: [1],
       ontology_terms: ["MI:0217"],
     },
     "tutorial_tp53_akt1_phospho_interactions"
@@ -497,8 +472,8 @@ export default async function ApiDocsPage() {
     "filename": "tutorial_tp53_akt1_phospho_interactions",
     "filters": {
       "entity_ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
-      "direction": "directed",
-      "sign": "positive",
+      "is_directed": true,
+      "signs": [1],
       "ontology_terms": ["MI:0217"]
     }
   }'`}</Code>
@@ -590,8 +565,8 @@ export default async function ApiDocsPage() {
     "query": "",
     "filename": "directed_positive_interactions",
     "filters": {
-      "direction": "directed",
-      "sign": "positive"
+      "is_directed": true,
+      "signs": [1]
     }
   }'`}</Code>
             </div>

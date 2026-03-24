@@ -8,6 +8,7 @@ import { searchMeilisearch } from "@/features/search/api/queries";
 import { useEntitySelection, useSearchUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { OntologyRefineSection } from "./ontology-refine-section";
+import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
 import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
 import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filters-section";
 
@@ -175,7 +176,6 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
       });
 
       grouped.forEach((groupValues, canonicalId) => {
-        const preferredValue = groupValues.find((value) => value !== canonicalId) || groupValues[0];
         items.push({
           id: `${filterKey}:${canonicalId}`,
           label: (
@@ -183,7 +183,7 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
               <span className="text-muted-foreground">{label}</span>
               <CvTermHoverCard termId={canonicalId}>
                 <span className="cursor-help underline decoration-dotted underline-offset-2">
-                  {extractReadableLabel(preferredValue)}
+                  <OntologyTermLabel termId={canonicalId} />
                 </span>
               </CvTermHoverCard>
             </div>

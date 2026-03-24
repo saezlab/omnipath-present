@@ -19,52 +19,45 @@ Primary purpose: interaction-level retrieval and export.
 ### Core fields
 
 - `interaction_id: int64` (deterministic ID for export/subsetting)
-- `interaction_key: string` (stable pair key)
-- `member_a_id: int64`
-- `member_b_id: int64`
+- `interaction_key: string` (stable interaction-state key)
+- `member_a_id: string`
+- `member_b_id: string`
 - `member_types: string[]`
 - `interaction_type: string`
+- `is_directed: boolean`
+- `sign: int8` (`-1` inhibition/negative, `0` unsigned/unknown, `1` activation/positive)
 - `evidence: object[]`
-- `directions: object[]`
+- `evidence_count: int64`
 - `sources: string[]`
 - `interaction_annotation_terms: string[]`
+- `participant_annotation_terms_go: string[]`
+- `participant_annotation_terms_mi: string[]`
+- `participant_annotation_terms_om: string[]`
+- `participant_annotation_terms_hp: string[]`
+- `participant_annotation_terms_kw: string[]`
 
-### Derived/filter helper fields
+### Notes
 
-- `has_direction: boolean`
-- `has_positive_sign: boolean`
-- `has_negative_sign: boolean`
+- Interaction documents are now split by interaction state.
+- Direction and sign are represented directly on each interaction document via `is_directed` and `sign`.
+- Older helper fields such as `has_direction`, `has_positive_sign`, `has_negative_sign`, and `directions[]` are no longer part of the canonical export schema.
 
-### Enums / constrained values
+### Filter-facing values
 
-#### Direction enum (API-facing)
+#### Direction filter
 
-- `any` (default)
-- `directed`
-- `undirected`
+- `is_directed: boolean`
 
-Mapping:
+#### Sign filter
 
-- `directed` -> `has_direction = true`
-- `undirected` -> `has_direction = false`
+- `signs: (-1 | 0 | 1)[]`
 
-#### Sign enum (API-facing)
+Examples:
 
-- `any` (default)
-- `positive`
-- `negative`
-- `mixed`
-
-Mapping:
-
-- `positive` -> `has_positive_sign = true AND has_negative_sign = false`
-- `negative` -> `has_positive_sign = false AND has_negative_sign = true`
-- `mixed` -> `has_positive_sign = true AND has_negative_sign = true`
-
-#### Evidence-level direction/sign values (stored in `directions[]`)
-
-- `direction`: `"a-b" | "b-a"`
-- `sign`: `-1 | 0 | 1` (`-1` inhibition/negative, `1` activation/positive, `0` mixed/unknown)
+- `signs: [1]` -> positive interactions
+- `signs: [-1]` -> negative interactions
+- `signs: [0]` -> unsigned/unknown interactions
+- `signs: [1, -1]` -> positive or negative interactions
 
 ---
 
@@ -273,11 +266,18 @@ To keep the API minimal and explicit:
 
 ### Interactions filters
 
-- `entity_ids: int[]`
+- `entity_ids: string[]`
+- `member_a_id: string`
+- `member_b_id: string`
 - `interaction_types: string[]`
-- `direction: any|directed|undirected`
-- `sign: any|positive|negative|mixed`
+- `is_directed: boolean`
+- `signs: (-1 | 0 | 1)[]`
 - `interaction_annotation_terms: string[]`
+- `participant_annotation_terms_go: string[]`
+- `participant_annotation_terms_mi: string[]`
+- `participant_annotation_terms_om: string[]`
+- `participant_annotation_terms_hp: string[]`
+- `participant_annotation_terms_kw: string[]`
 - `sources: string[]`
 
 ### Entities filters

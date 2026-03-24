@@ -8,6 +8,7 @@ import { searchInteractions } from "@/features/interactions-search/api/queries";
 import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
+import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
 import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filters-section";
 
 interface InteractionsRefinePanelProps {
@@ -155,7 +156,6 @@ export function InteractionsRefinePanel({
       });
 
       grouped.forEach((groupValues, canonicalId) => {
-        const preferredValue = groupValues.find((value) => value !== canonicalId) || groupValues[0];
         items.push({
           id: `${filterKey}:${canonicalId}`,
           label: (
@@ -163,7 +163,7 @@ export function InteractionsRefinePanel({
               <span className="text-muted-foreground">{label}</span>
               <CvTermHoverCard termId={canonicalId}>
                 <span className="cursor-help underline decoration-dotted underline-offset-2">
-                  {extractReadableLabel(preferredValue)}
+                  <OntologyTermLabel termId={canonicalId} />
                 </span>
               </CvTermHoverCard>
             </div>

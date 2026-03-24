@@ -231,7 +231,7 @@ export function InteractionsExploreTab({
         },
         has_directed_evidence: interaction.is_directed,
         consensus_sign: consensusSign,
-        evidence_count: interaction.evidence.length,
+        evidence_count: interaction.evidence_count || 0,
         evidences: []
       };
     });
@@ -429,7 +429,7 @@ export function InteractionsExploreTab({
                           </TableCell>
                           <TableCell className="w-[20%] text-center">
                             <Badge variant="outline">
-                              {formatNumber(row.evidence.length)}
+                              {formatNumber(row.evidence_count || 0)}
                             </Badge>
                           </TableCell>
                         </TableRow>

@@ -42,8 +42,10 @@ export interface MeilisearchInteraction {
   is_directed: boolean;
   sign: -1 | 0 | 1;
 
-  // Evidence array with nested annotation data
-  evidence: InteractionEvidence[];
+  // Evidence array with nested annotation data (loaded lazily in detail views)
+  evidence?: InteractionEvidence[];
+
+  evidence_count?: number;
 
   // Deprecated compatibility fields
   directions?: InteractionDirection[];
@@ -106,8 +108,8 @@ export interface MeilisearchAssociation {
   // Sources
   sources: string[];
 
-  // Evidence + annotations
-  evidence: AssociationEvidence[];
+  // Evidence + annotations (loaded lazily when needed)
+  evidence?: AssociationEvidence[];
   association_annotation_terms: string[];
 
   // Index signature

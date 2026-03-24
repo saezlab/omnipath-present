@@ -206,6 +206,14 @@ class AssociationExportRequest(BaseModel):
     filename: str | None = None
 
 
+class EvidenceLookupResponse(BaseModel):
+    """Evidence lookup response for a single interaction or association."""
+
+    id: int
+    key: str
+    evidence: list[dict]
+
+
 class ErrorResponse(BaseModel):
     """Error response."""
 
