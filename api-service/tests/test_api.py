@@ -1,5 +1,8 @@
 """Tests for ontology service API."""
 
+from pathlib import Path
+import tempfile
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
@@ -8,6 +11,8 @@ from unittest.mock import MagicMock, patch
 @pytest.fixture
 def mock_registry():
     """Create a mock registry that doesn't load real ontologies."""
+    import api_service.main  # noqa: F401
+
     with patch("api_service.main.registry") as mock:
         # Setup mock client
         mock_client = MagicMock()
@@ -174,3 +179,50 @@ def test_ontology_not_found(client, mock_registry):
     mock_registry.get.return_value = None
     response = client.get("/unknown_ontology/term/X:0001")
     assert response.status_code == 404
+
+
+def test_download_single_resource(client):
+    """Single-resource downloads proxy a file response."""
+    from api_service.resource_downloads import DownloadArtifact
+
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact_path = Path(tmp) / "entities.parquet"
+        artifact_path.write_bytes(b"parquet-bytes")
+
+        with patch("api_service.main.build_single_resource_download") as mock_download:
+            mock_download.return_value = DownloadArtifact(
+                path=artifact_path,
+                media_type="application/x-parquet",
+                filename="signor_entities.parquet",
+                is_temporary=False,
+            )
+            response = client.get("/resources/signor/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/x-parquet"
+    assert "signor_entities.parquet" in response.headers["content-disposition"]
+    assert response.content == b"parquet-bytes"
+
+
+
+def test_download_multiple_resources(client):
+    """Multi-resource downloads return a zip bundle."""
+    from api_service.resource_downloads import DownloadArtifact
+
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact_path = Path(tmp) / "resources.zip"
+        artifact_path.write_bytes(b"zip-bytes")
+
+        with patch("api_service.main.build_multi_resource_download") as mock_download:
+            mock_download.return_value = DownloadArtifact(
+                path=artifact_path,
+                media_type="application/zip",
+                filename="resources_bundle.zip",
+                is_temporary=False,
+            )
+            response = client.post("/resources/download", json={"resource_ids": ["signor", "reactome"]})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "resources_bundle.zip" in response.headers["content-disposition"]
+    assert response.content == b"zip-bytes"

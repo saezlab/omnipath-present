@@ -4,6 +4,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search"
 import { INDEXES } from "@/lib/meilisearch/client"
+import { useEntityDataSource } from "@/contexts/entity-data-source-context"
 import type { SearchResult } from "@/features/search/components/result-card"
 
 interface UseEntityResult {
@@ -13,13 +14,19 @@ interface UseEntityResult {
 }
 
 export function useEntity(entityId: string | undefined): UseEntityResult {
+  const entityDataSource = useEntityDataSource()
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["entity", entityId],
+    queryKey: ["entity", entityId, entityDataSource ? "custom-source" : "meilisearch"],
     queryFn: async () => {
       if (!entityId) return null
 
       const normalizedId = entityId.trim()
       if (!normalizedId) return null
+
+      if (entityDataSource) {
+        return entityDataSource.getEntity(normalizedId)
+      }
 
       const { documents } = await fetchMeilisearchDocuments(
         INDEXES.ENTITIES,

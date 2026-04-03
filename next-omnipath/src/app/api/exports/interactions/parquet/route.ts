@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiServiceUrl } from "@/lib/api/config";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface ExportRequestPayload {
   query?: string;
   filters?: Record<string, unknown>;
@@ -30,22 +33,29 @@ async function forwardExport(payload: ExportRequestPayload) {
       filters: payload.filters || {},
       filename: payload.filename,
     }),
+    cache: "no-store",
   });
 
   if (!upstream.ok) {
     const text = await upstream.text();
-    return NextResponse.json(
-      { error: `API export error: ${upstream.status} ${text}` },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: `API export error: ${upstream.status} ${text}` }, { status: 502 });
   }
 
   const headers = new Headers();
   headers.set("Content-Type", upstream.headers.get("Content-Type") || "application/x-parquet");
+  headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  headers.set("Pragma", "no-cache");
+  headers.set("Expires", "0");
+
   const contentDisposition = upstream.headers.get("Content-Disposition");
   if (contentDisposition) headers.set("Content-Disposition", contentDisposition);
+
+  const contentLength = upstream.headers.get("Content-Length");
+  if (contentLength) headers.set("Content-Length", contentLength);
+
   const rowCount = upstream.headers.get("X-Export-Row-Count");
   if (rowCount) headers.set("X-Export-Row-Count", rowCount);
+
   const durationMs = upstream.headers.get("X-Export-Duration-Ms");
   if (durationMs) headers.set("X-Export-Duration-Ms", durationMs);
 

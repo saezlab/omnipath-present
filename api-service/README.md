@@ -23,6 +23,12 @@ uv sync
 uv run uvicorn api_service.main:app --reload --port 8081
 ```
 
+For resource download endpoints, point the service at the gold resource root if it is not auto-detected:
+
+```bash
+export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
+```
+
 ## API Endpoints
 
 ### Health & Discovery
@@ -57,6 +63,8 @@ uv run uvicorn api_service.main:app --reload --port 8081
 | POST | `/exports/interactions/parquet` | Export filtered interactions as Parquet subset |
 | POST | `/exports/entities/parquet` | Export filtered entities as Parquet subset |
 | POST | `/exports/associations/parquet` | Export filtered associations as Parquet subset |
+| GET | `/resources/{resource_id}/download` | Download the current gold artifact set for one resource |
+| POST | `/resources/download` | Bundle multiple selected resource gold artifact sets into one zip |
 
 ## Examples
 

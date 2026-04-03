@@ -31,14 +31,14 @@ export function MainNav() {
         <span className="hidden sm:inline">Interactions</span>
       </Link>
       <Link
-        href="/sources"
+        href="/resources"
         className={cn(
           "flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/sources" ? "text-primary" : "text-muted-foreground",
+          pathname === "/resources" ? "text-primary" : "text-muted-foreground",
         )}
       >
         <Database className="h-4 w-4" />
-        <span className="hidden sm:inline">Datasources</span>
+        <span className="hidden sm:inline">Resources</span>
       </Link>
       <Link
         href="/chat"

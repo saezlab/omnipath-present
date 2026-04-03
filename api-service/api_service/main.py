@@ -29,10 +29,12 @@ from .models import (
     InteractionExportRequest,
     EntityExportRequest,
     AssociationExportRequest,
+    ResourceDownloadRequest,
     EvidenceLookupResponse,
 )
 from .registry import registry
 from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET
+from .resource_downloads import build_multi_resource_download, build_single_resource_download
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -465,6 +467,17 @@ async def get_tree(request: TermsRequest):
 # --- Data export ---
 
 
+def _build_file_response(*, path: Path, media_type: str, filename: str, background_tasks: BackgroundTasks, temporary: bool):
+    if temporary:
+        background_tasks.add_task(lambda p: Path(p).unlink(missing_ok=True), str(path))
+
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        filename=filename,
+    )
+
+
 def _run_export(
     *,
     request: InteractionExportRequest | EntityExportRequest | AssociationExportRequest,
@@ -487,12 +500,12 @@ def _run_export(
         safe_name = (request.filename or default_filename).strip() or default_filename
         download_name = safe_name if safe_name.lower().endswith(".parquet") else f"{safe_name}.parquet"
 
-        background_tasks.add_task(lambda p: Path(p).unlink(missing_ok=True), str(temp_path))
-
-        response = FileResponse(
-            path=str(temp_path),
+        response = _build_file_response(
+            path=temp_path,
             media_type="application/x-parquet",
             filename=download_name,
+            background_tasks=background_tasks,
+            temporary=True,
         )
         response.headers["X-Export-Row-Count"] = str(row_count)
         response.headers["X-Export-Strategy"] = "parquet"
@@ -543,4 +556,34 @@ def export_associations_parquet(request: AssociationExportRequest, background_ta
         default_filename="associations_subset",
         log_label="Association",
     )
+
+
+@app.get("/resources/{resource_id}/download")
+def download_single_resource(resource_id: str, background_tasks: BackgroundTasks):
+    artifact = build_single_resource_download(resource_id)
+    response = _build_file_response(
+        path=artifact.path,
+        media_type=artifact.media_type,
+        filename=artifact.filename,
+        background_tasks=background_tasks,
+        temporary=artifact.is_temporary,
+    )
+    response.headers["X-Resource-Download-Mode"] = "single"
+    response.headers["X-Resource-Id"] = resource_id
+    return response
+
+
+@app.post("/resources/download")
+def download_multiple_resources(request: ResourceDownloadRequest, background_tasks: BackgroundTasks):
+    artifact = build_multi_resource_download(request.resource_ids, filename=request.filename)
+    response = _build_file_response(
+        path=artifact.path,
+        media_type=artifact.media_type,
+        filename=artifact.filename,
+        background_tasks=background_tasks,
+        temporary=artifact.is_temporary,
+    )
+    response.headers["X-Resource-Download-Mode"] = "bundle"
+    response.headers["X-Resource-Count"] = str(len(request.resource_ids))
+    return response
 

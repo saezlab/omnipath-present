@@ -53,8 +53,8 @@ export function DataJourneyFlow() {
           description="Raw source data organized by category"
           icon={<FileText className="h-5 w-5 text-orange-600" />}
           bgClass="bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-orange-200"
-          buttonText="Browse Datasources"
-          href="/sources"
+          buttonText="Browse Resources"
+          href="/resources"
         />
         
         <div className="hidden lg:block">

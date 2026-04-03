@@ -8,17 +8,20 @@ RUN pip install uv
 
 # Copy dependency files
 COPY omnipath-present/api-service/pyproject.toml .
+COPY omnipath-present/api-service/uv.lock .
 COPY omnipath-present/api-service/README.md .
 
 # Copy application code
 COPY omnipath-present/api-service/api_service/ api_service/
 
-# Install dependencies (ontograph is pulled from git via tool.uv.sources)
-RUN uv pip install --system -e .
+# Install dependencies from the checked-in lockfile.
+# This avoids re-resolving ontograph's transitive git dependencies during the image build.
+RUN uv sync --frozen --no-dev
 
 # Create data and cache directories
 RUN mkdir -p /app/data /app/cache
 
+ENV PATH="/app/.venv/bin:$PATH"
 ENV ONTOLOGY_DATA_DIR=/app/data
 ENV ONTOLOGY_CACHE_DIR=/app/cache
 

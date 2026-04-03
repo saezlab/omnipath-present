@@ -194,6 +194,13 @@ class AssociationExportRequest(BaseModel):
     filename: str | None = None
 
 
+class ResourceDownloadRequest(BaseModel):
+    """Request payload for bundling one or more resource gold artifact sets."""
+
+    resource_ids: list[str] = Field(default_factory=list)
+    filename: str | None = None
+
+
 class EvidenceLookupResponse(BaseModel):
     """Evidence lookup response for a single interaction or association."""
 

@@ -48,8 +48,8 @@ const navigationItems = [
     icon: GitBranch,
   },
   {
-    title: "Sources",
-    url: "/sources",
+    title: "Resources",
+    url: "/resources",
     icon: Database,
   },
   {
@@ -145,7 +145,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore/') || pathname === '/sources') && sidebarContent && (
+        {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore/') || pathname === '/sources' || pathname === '/resources') && sidebarContent && (
           <>
             <div className="px-3">
               <SidebarSeparator />

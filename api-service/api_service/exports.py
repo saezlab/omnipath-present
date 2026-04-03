@@ -356,7 +356,7 @@ def write_entity_subset_parquet_direct(query: str, filters: dict[str, Any], outp
     raw_entity_ids = list(filters.get("entity_ids") or [])
     entity_ids = _normalize_id_list(raw_entity_ids)
     if raw_entity_ids and not entity_ids:
-        return write_subset_parquet(ENTITIES_PARQUET, "entity_id", [], output_path, exclude_columns=["names", "synonyms", "gene_symbols"])
+        return write_subset_parquet(ENTITIES_PARQUET, "entity_id", [], output_path)
     if entity_ids and _column_in_schema(schema_names, "entity_id"):
         expressions.append(_scalar_in("entity_id", entity_ids))
 
@@ -402,7 +402,6 @@ def write_entity_subset_parquet_direct(query: str, filters: dict[str, Any], outp
         output_path,
         _combine_and(expressions),
         query_expression,
-        exclude_columns=["names", "synonyms", "gene_symbols"],
     )
 
 

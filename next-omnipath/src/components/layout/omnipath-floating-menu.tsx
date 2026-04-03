@@ -252,7 +252,7 @@ export function OmniPathFloatingMenu() {
               Navigate
             </DropdownMenuLabel>
             <DropdownMenuItem asChild className="rounded-xl">
-              <Link href="/sources">Sources</Link>
+              <Link href="/resources">Resources</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild className="rounded-xl">
               <Link href="/api-docs" className="flex items-center justify-between gap-2">

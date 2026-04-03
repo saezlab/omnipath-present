@@ -243,6 +243,41 @@ const isSmallMolecule = (result: SearchResult): boolean => {
 // e.g., {key: "uniprot:OM:0001", value: "P0A6M2"}
 export type Identifier = { key: string; value: string };
 
+function objectValuesInKeyOrder(value: Record<string, unknown>): unknown[] {
+  return Object.keys(value)
+    .filter((key) => /^\d+$/.test(key))
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => value[key]);
+}
+
+function toUnknownArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object" && "toJSON" in value && typeof value.toJSON === "function") {
+    return toUnknownArray(value.toJSON());
+  }
+  if (value && typeof value === "object") return objectValuesInKeyOrder(value as Record<string, unknown>);
+  return [];
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.trim() ? [value] : [];
+  }
+  if (value && typeof value === "object") {
+    return toUnknownArray(value).map((item) => String(item)).filter(Boolean);
+  }
+  return [];
+}
+
+function toIdentifierArray(value: unknown): Identifier[] {
+  return toUnknownArray(value).filter((item): item is Identifier => {
+    return typeof item === "object" && item !== null && "key" in item && "value" in item;
+  });
+}
+
 export interface SearchResult {
   id: string;
   entity_id?: string | number;  // Canonical entity ID
@@ -400,14 +435,14 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
 
   // Memoize identifiers for stable reference in JSX
   const identifiers = useMemo(() =>
-    result._formatted?.identifiers || result.identifiers || [],
+    toIdentifierArray(result._formatted?.identifiers || result.identifiers),
     [result._formatted?.identifiers, result.identifiers]
   );
 
   // Get primary name from names or identifiers, prefer the shortest meaningful name
   const primaryName = useMemo(() => {
-    const names = result._formatted?.names || result.names || [];
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const names = toStringArray(result._formatted?.names || result.names);
+    const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
     const validNames: string[] = [];
 
     // Collect valid names (skip ID-like names)
@@ -442,7 +477,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
 
   // Extract SMILES from identifiers (stored in "biotin tag" identifier type)
   const smiles = useMemo(() => {
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
     for (const id of identifiers) {
       const idType = id.key?.split(':')[0].toLowerCase().trim();
       if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
@@ -669,13 +704,13 @@ export function ResultCard({ result }: { result: SearchResult }) {
   };
 
   // Extract data based on type
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
-  const identifiers = result._formatted?.identifiers || result.identifiers || [];
-  const synonyms = result._formatted?.synonyms || result.synonyms || [];
-  const references = result._formatted?.references || result.references || [];
-  const sources = result._formatted?.sources || result.sources || [];
+  const descriptions = toStringArray(result._formatted?.descriptions || result.descriptions);
+  const names = toStringArray(result._formatted?.names || result.names);
+  const geneSymbols = toStringArray(result._formatted?.gene_symbols || result.gene_symbols);
+  const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
+  const synonyms = toStringArray(result._formatted?.synonyms || result.synonyms);
+  const references = toStringArray(result._formatted?.references || result.references);
+  const sources = toStringArray(result._formatted?.sources || result.sources);
   const complexes = result.complexes || [];
   const cvTerms = getUnifiedCvTerms(result);
   const entityType = result._formatted?.entity_type || result.entity_type;
@@ -927,9 +962,9 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const type = result.type || "entity";
 
   // Extract data
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
+  const descriptions = toStringArray(result._formatted?.descriptions || result.descriptions);
+  const names = toStringArray(result._formatted?.names || result.names);
+  const geneSymbols = toStringArray(result._formatted?.gene_symbols || result.gene_symbols);
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;
