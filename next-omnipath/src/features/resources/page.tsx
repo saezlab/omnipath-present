@@ -160,6 +160,16 @@ export default function ResourcesPage({
     [selectedResources],
   );
 
+  const openInDuckDbHref = useMemo(() => {
+    const params = new URLSearchParams({ resources: selectedIds.join(",") });
+    return `/duckdb/resources/workspace?${params.toString()}`;
+  }, [selectedIds]);
+
+  const canOpenInDuckDb = useMemo(
+    () => selectedResources.some((resource) => (resource.interaction_count || 0) > 0),
+    [selectedResources],
+  );
+
   function toggleSelected(resourceId: string) {
     setSelectedIds((current) =>
       current.includes(resourceId) ? current.filter((id) => id !== resourceId) : [...current, resourceId],
@@ -269,7 +279,7 @@ export default function ResourcesPage({
                 return (
                   <article
                     key={resource.resource_id}
-                    className="mb-4 break-inside-avoid rounded-xl border border-border/50 bg-card p-4 transition-colors hover:bg-muted/10 max-h-[42rem] overflow-hidden"
+                    className="mb-4 break-inside-avoid rounded-xl border border-border/50 bg-card p-4 transition-colors hover:bg-muted/10"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-3">
@@ -444,10 +454,19 @@ export default function ResourcesPage({
                   {downloadingSelection ? "Preparing bundle…" : "Download selection"}
                   <Download className="h-4 w-4" />
                 </Button>
-                <Button disabled>
-                  Open for local querying
-                  <Database className="h-4 w-4" />
-                </Button>
+                {canOpenInDuckDb ? (
+                  <Button asChild>
+                    <Link href={openInDuckDbHref}>
+                      Open in DuckDB
+                      <Database className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button disabled>
+                    Open in DuckDB
+                    <Database className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
           </div>

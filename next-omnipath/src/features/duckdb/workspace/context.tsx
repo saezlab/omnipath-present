@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchResult } from "@/features/search/components/result-card";
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
@@ -16,12 +17,15 @@ import {
 import {
   mountEntitySubset,
   mountInteractionSubset,
+  mountResourceEntities,
+  mountResourceInteractions,
   queryEntityById,
   queryEntitySummaries,
   queryInteractionEntityIds,
   queryInteractionFacets,
   queryInteractionPage,
 } from "@/lib/duckdb/sql";
+import { fetchResourceWorkspaceArtifact, fetchResourceWorkspaceManifest } from "@/lib/resource-workspace";
 import { materializeEntitiesSubset, materializeInteractionsSubset } from "@/lib/subsets/client";
 import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 import type { DuckDbFacetCounts, InteractionLocalFilters, SubsetArtifact } from "@/types/subsets";
@@ -130,7 +134,12 @@ function createSessionLabel(serverEntityScope: string[], rowCount?: number): str
   return `DuckDB subset • ${timestamp}`;
 }
 
+async function releaseObjectUrls(urls: string[]) {
+  await Promise.all(urls.map((url) => releaseObjectUrl(url)));
+}
+
 export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
+  const searchParams = useSearchParams();
   const { entityIds: urlEntityIds, filters: urlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds } = useEntitySelection();
   const [loading, setLoading] = useState(false);
@@ -155,6 +164,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
   const connectionRef = useRef<AsyncDuckDBConnection | null>(null);
   const currentInteractionsObjectUrlRef = useRef<string | undefined>(undefined);
   const currentEntitiesObjectUrlRef = useRef<string | undefined>(undefined);
+  const currentResourceObjectUrlsRef = useRef<string[]>([]);
   const localFiltersRef = useRef<InteractionLocalFilters>(EMPTY_LOCAL_FILTERS);
 
   const setLoadingState = useCallback((stage: DuckDbLoadingStage, label: string | null, progress: number | null) => {
@@ -169,6 +179,17 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     return [];
   }, [selectedEntityIds, urlEntityIds]);
 
+  const resourceIds = useMemo(() => {
+    const raw = searchParams.get("resources") || "";
+    return raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .filter((value, index, array) => array.indexOf(value) === index);
+  }, [searchParams]);
+
+  const isResourceWorkspace = resourceIds.length > 0;
+
   const serverFilters = useMemo(() => {
     if (serverEntityScope.length === 0) return urlFilters;
     return {
@@ -179,7 +200,11 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [serverEntityScope, urlFilters]);
 
-  const serverCacheKey = useMemo(() => buildDuckDbSessionCacheKey(serverFilters), [serverFilters]);
+  const serverCacheKey = useMemo(() => (
+    isResourceWorkspace
+      ? `resource-v1:${resourceIds.join(",")}`
+      : buildDuckDbSessionCacheKey(serverFilters)
+  ), [isResourceWorkspace, resourceIds, serverFilters]);
 
   useEffect(() => {
     localFiltersRef.current = localFilters;
@@ -243,6 +268,8 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
   }) => {
     const connection = await ensureConnection();
 
+    await releaseObjectUrls(currentResourceObjectUrlsRef.current);
+    currentResourceObjectUrlsRef.current = [];
     await releaseObjectUrl(currentInteractionsObjectUrlRef.current);
     currentInteractionsObjectUrlRef.current = URL.createObjectURL(interactionBlob);
 
@@ -272,7 +299,89 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     await refreshLocalQueries(0, localFiltersRef.current);
   }, [ensureConnection, refreshLocalQueries, setLoadingState]);
 
+  const loadResourceWorkspace = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setPageIndex(0);
+    setLoadingState("requesting_interactions", "Resolving selected resource artifacts…", 12);
+
+    try {
+      const manifest = await fetchResourceWorkspaceManifest(resourceIds);
+      const interactionResources = manifest.resources.filter((resource) => resource.artifacts.includes("interactions.parquet"));
+      const entityResources = manifest.resources.filter((resource) => resource.artifacts.includes("entities.parquet"));
+
+      if (interactionResources.length === 0) {
+        throw new Error("Selected resources do not provide interactions.parquet artifacts for the current DuckDB workspace.");
+      }
+
+      const connection = await ensureConnection();
+
+      await releaseObjectUrl(currentInteractionsObjectUrlRef.current);
+      currentInteractionsObjectUrlRef.current = undefined;
+      await releaseObjectUrl(currentEntitiesObjectUrlRef.current);
+      currentEntitiesObjectUrlRef.current = undefined;
+      await releaseObjectUrls(currentResourceObjectUrlsRef.current);
+      currentResourceObjectUrlsRef.current = [];
+
+      const interactionFiles: Array<{ fileName: string; resourceId: string }> = [];
+      let interactionRowTotal = 0;
+
+      for (const resource of interactionResources) {
+        setLoadingState("downloading_interactions", `Downloading ${resource.resource_id} interactions…`, 20);
+        const artifact = await fetchResourceWorkspaceArtifact(resource.resource_id, "interactions.parquet");
+        currentResourceObjectUrlsRef.current.push(artifact.objectUrl);
+        await registerParquetFile(artifact.fileName, artifact.blob);
+        interactionFiles.push({ fileName: artifact.fileName, resourceId: resource.resource_id });
+      }
+
+      setLoadingState("loading_interactions", "Loading selected resource interactions into DuckDB…", 50);
+      await mountResourceInteractions(connection, interactionFiles);
+      const countRows = await connection.query("SELECT COUNT(*) AS total_count FROM interactions_subset");
+      interactionRowTotal = Number(countRows.toArray()[0]?.total_count ?? 0);
+
+      const entityFiles: Array<{ fileName: string; resourceId: string }> = [];
+      for (const resource of entityResources) {
+        setLoadingState("downloading_entities", `Downloading ${resource.resource_id} entities…`, 70);
+        const artifact = await fetchResourceWorkspaceArtifact(resource.resource_id, "entities.parquet");
+        currentResourceObjectUrlsRef.current.push(artifact.objectUrl);
+        await registerParquetFile(artifact.fileName, artifact.blob);
+        entityFiles.push({ fileName: artifact.fileName, resourceId: resource.resource_id });
+      }
+
+      if (entityFiles.length > 0) {
+        setLoadingState("loading_entities", "Loading selected resource entities into DuckDB…", 88);
+        await mountResourceEntities(connection, entityFiles);
+        const summaries = await queryEntitySummaries(connection);
+        setEntitySummaries(summaries);
+      } else {
+        setEntitySummaries(new Map());
+      }
+
+      setRowCount(interactionRowTotal);
+      setDurationMs(undefined);
+      setMaterialized(true);
+      setDatasetSource("server");
+      setActiveSessionId(null);
+      await refreshLocalQueries(0, localFiltersRef.current);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Failed to load selected resources");
+      setMaterialized(false);
+      setRows([]);
+      setTotalCount(0);
+      setFacets(emptyFacets());
+      setEntitySummaries(new Map());
+    } finally {
+      setLoading(false);
+      setLoadingState("idle", null, null);
+    }
+  }, [ensureConnection, refreshLocalQueries, resourceIds, setLoadingState]);
+
   const refreshSubset = useCallback(async () => {
+    if (isResourceWorkspace) {
+      await loadResourceWorkspace();
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setPageIndex(0);
@@ -377,7 +486,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       setLoadingState("idle", null, null);
     }
-  }, [ensureConnection, refreshLocalQueries, refreshSavedSessions, serverCacheKey, serverEntityScope, serverFilters, setLoadingState]);
+  }, [ensureConnection, isResourceWorkspace, loadResourceWorkspace, refreshLocalQueries, refreshSavedSessions, serverCacheKey, serverEntityScope, serverFilters, setLoadingState]);
 
   const loadSavedSession = useCallback(async (sessionId: string) => {
     setLoading(true);
@@ -410,6 +519,11 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
   }, [loadArtifactsIntoWorkspace, setLoadingState]);
 
   const loadSubset = useCallback(async () => {
+    if (isResourceWorkspace) {
+      await loadResourceWorkspace();
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setPageIndex(0);
@@ -441,7 +555,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     await refreshSubset();
-  }, [loadArtifactsIntoWorkspace, refreshSubset, serverCacheKey, setLoadingState]);
+  }, [isResourceWorkspace, loadArtifactsIntoWorkspace, loadResourceWorkspace, refreshSubset, serverCacheKey, setLoadingState]);
 
   useEffect(() => {
     void loadSubset();
@@ -463,6 +577,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       void releaseObjectUrl(currentInteractionsObjectUrlRef.current);
       void releaseObjectUrl(currentEntitiesObjectUrlRef.current);
+      void releaseObjectUrls(currentResourceObjectUrlsRef.current);
       if (connectionRef.current) {
         void connectionRef.current.close();
       }

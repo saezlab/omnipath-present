@@ -14,6 +14,10 @@ const DEFAULT_INTERACTION_COLUMNS = [
   "evidence_count",
 ];
 
+function buildUnionQuery(selects: string[]): string {
+  return selects.join(" UNION ALL ");
+}
+
 function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -164,12 +168,58 @@ export async function mountInteractionSubset(
   await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS SELECT * FROM read_parquet(${sqlString(fileName)})`);
 }
 
+export async function mountResourceInteractions(
+  connection: AsyncDuckDBConnection,
+  files: Array<{ fileName: string; resourceId: string }>,
+  viewName = "interactions_subset",
+): Promise<void> {
+  const query = buildUnionQuery(
+    files.map(({ fileName, resourceId }) => `
+      SELECT
+        CAST(interaction_id AS VARCHAR) AS interaction_key,
+        interaction_id,
+        CAST(entity_a_id AS VARCHAR) AS member_a_id,
+        CAST(entity_b_id AS VARCHAR) AS member_b_id,
+        COALESCE(NULLIF(mechanism_term, ''), NULLIF(statement_term, ''), 'interaction') AS interaction_type,
+        CASE WHEN direction IS NULL OR direction = 0 THEN FALSE ELSE TRUE END AS is_directed,
+        CAST(sign AS INTEGER) AS sign,
+        COALESCE(array_length(evidence), 0) AS evidence_count,
+        list_value(CAST(source AS VARCHAR)) AS sources,
+        []::VARCHAR[] AS interaction_annotation_terms,
+        []::VARCHAR[] AS participant_annotation_terms,
+        CAST(source AS VARCHAR) AS source,
+        ${sqlString(resourceId)} AS resource_id,
+        mechanism_term,
+        statement_term,
+        evidence
+      FROM read_parquet(${sqlString(fileName)})
+    `),
+  );
+
+  await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS ${query}`);
+}
+
 export async function mountEntitySubset(
   connection: AsyncDuckDBConnection,
   fileName: string,
   viewName = "entities_subset",
 ): Promise<void> {
   await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS SELECT * FROM read_parquet(${sqlString(fileName)})`);
+}
+
+export async function mountResourceEntities(
+  connection: AsyncDuckDBConnection,
+  files: Array<{ fileName: string; resourceId: string }>,
+  viewName = "entities_subset",
+): Promise<void> {
+  const query = buildUnionQuery(
+    files.map(({ fileName, resourceId }) => `
+      SELECT *, ${sqlString(resourceId)} AS resource_id
+      FROM read_parquet(${sqlString(fileName)})
+    `),
+  );
+
+  await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS ${query}`);
 }
 
 export async function queryInteractionPage(
@@ -354,15 +404,27 @@ function deriveEntityPresentation(entity: SearchResult): {
 
 function adaptEntityRowToSearchResult(row: Record<string, unknown>): SearchResult {
   const entityId = String(row.entity_id ?? row.id ?? "");
-  const names = toStringArray(row.names);
+  const fallbackDisplayName = typeof row.display_name === "string" ? row.display_name.trim() : "";
+  const fallbackCanonicalIdentifier = typeof row.canonical_identifier === "string" ? row.canonical_identifier.trim() : "";
+  const fallbackSource = typeof row.source === "string" ? row.source.trim() : "";
+  const names = toStringArray(row.names).length > 0
+    ? toStringArray(row.names)
+    : [fallbackDisplayName || fallbackCanonicalIdentifier].filter(Boolean);
   const geneSymbols = toStringArray(row.gene_symbols);
   const descriptions = toStringArray(row.descriptions);
   const references = toStringArray(row.references);
-  const sources = toStringArray(row.sources);
+  const sources = toStringArray(row.sources).length > 0 ? toStringArray(row.sources) : [fallbackSource].filter(Boolean);
   const synonyms = toStringArray(row.synonyms);
   const ontologyTerms = toStringArray(row.ontology_terms);
   const cvTerms = toStringArray(row.cv_terms);
-  const identifiers = toIdentifierArray(row.identifiers);
+  const identifiers = toIdentifierArray(row.identifiers).length > 0
+    ? toIdentifierArray(row.identifiers)
+    : fallbackCanonicalIdentifier
+      ? [{
+          key: typeof row.canonical_identifier_type === "string" ? row.canonical_identifier_type : "identifier",
+          value: fallbackCanonicalIdentifier,
+        }]
+      : [];
 
   return {
     ...(row as SearchResult),

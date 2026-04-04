@@ -30,11 +30,13 @@ from .models import (
     EntityExportRequest,
     AssociationExportRequest,
     ResourceDownloadRequest,
+    ResourceWorkspaceRequest,
     EvidenceLookupResponse,
 )
 from .registry import registry
 from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET
 from .resource_downloads import build_multi_resource_download, build_single_resource_download
+from .resource_workspace import build_workspace_manifest, resolve_workspace_artifact
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -585,5 +587,25 @@ def download_multiple_resources(request: ResourceDownloadRequest, background_tas
     )
     response.headers["X-Resource-Download-Mode"] = "bundle"
     response.headers["X-Resource-Count"] = str(len(request.resource_ids))
+    return response
+
+
+@app.post("/resources/workspace/manifest")
+def get_resource_workspace_manifest(request: ResourceWorkspaceRequest):
+    return build_workspace_manifest(request.resource_ids)
+
+
+@app.get("/resources/{resource_id}/artifacts/{artifact_name}")
+def download_resource_workspace_artifact(resource_id: str, artifact_name: str, background_tasks: BackgroundTasks):
+    artifact_path = resolve_workspace_artifact(resource_id, artifact_name)
+    response = _build_file_response(
+        path=artifact_path,
+        media_type="application/x-parquet",
+        filename=f"{resource_id}_{artifact_path.name}",
+        background_tasks=background_tasks,
+        temporary=False,
+    )
+    response.headers["X-Resource-Id"] = resource_id
+    response.headers["X-Artifact-Name"] = artifact_path.name
     return response
 

@@ -201,6 +201,12 @@ class ResourceDownloadRequest(BaseModel):
     filename: str | None = None
 
 
+class ResourceWorkspaceRequest(BaseModel):
+    """Request payload for opening one or more resources in DuckDB."""
+
+    resource_ids: list[str] = Field(default_factory=list)
+
+
 class EvidenceLookupResponse(BaseModel):
     """Evidence lookup response for a single interaction or association."""
 
