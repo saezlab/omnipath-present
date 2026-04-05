@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowRight, Minus } from "lucide-react";
+import { AlertCircle, ArrowRight } from "lucide-react";
 import { EntityBadge } from "@/components/entity-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,19 +76,20 @@ function toAttributeRow(value: unknown): { term?: unknown; value?: unknown; unit
 
 function renderSignIndicator(sign: unknown, isDirected: unknown) {
   const signValue = Number(sign);
-
-  if (isDirected === true) {
-    return (
-      <ArrowRight
-        className={cn(
-          "h-4 w-4",
-          signValue === 1 ? "text-green-500" : signValue === -1 ? "text-red-500" : "text-muted-foreground",
-        )}
-      />
-    );
-  }
-
-  return <Minus className="h-4 w-4 text-muted-foreground" />;
+  const directed = isDirected === true || isDirected === 1 || isDirected === "1" || isDirected === "true" || isDirected === "TRUE";
+  return (
+    <div className="flex items-center justify-center">
+      {signValue === -1 ? (
+        <span className="text-2xl leading-none font-semibold text-red-500">⊣</span>
+      ) : signValue === 1 ? (
+        <ArrowRight className="h-6 w-6 text-green-500" />
+      ) : directed ? (
+        <ArrowRight className="h-6 w-6 text-foreground" />
+      ) : (
+        <span className="text-2xl leading-none font-semibold text-foreground">−</span>
+      )}
+    </div>
+  );
 }
 
 export function DuckDbResourceResultsPane() {
@@ -166,9 +167,9 @@ export function DuckDbResourceResultsPane() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[38%]">Entity A</TableHead>
-                  <TableHead className="w-[44px] text-center"></TableHead>
-                  <TableHead className="w-[38%]">Entity B</TableHead>
+                  <TableHead className="w-[37%]">Entity A</TableHead>
+                  <TableHead className="w-[120px] text-center"></TableHead>
+                  <TableHead className="w-[37%]">Entity B</TableHead>
                   <TableHead>Resource</TableHead>
                 </TableRow>
               </TableHeader>
@@ -198,7 +199,7 @@ export function DuckDbResourceResultsPane() {
                             />
                           </div>
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="px-6 text-center">
                           <div className="flex justify-center">{renderSignIndicator(row.sign, row.is_directed)}</div>
                         </TableCell>
                         <TableCell className="max-w-0">

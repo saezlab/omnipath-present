@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, ArrowRight, Database, LoaderCircle, Minus } from "lucide-react";
+import { AlertCircle, ArrowRight, Database, LoaderCircle } from "lucide-react";
 import { EntityBadge } from "@/components/entity-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,19 +17,20 @@ function safeText(value: unknown, fallback: string): string {
 
 function renderSignIndicator(sign: unknown, isDirected: unknown) {
   const signValue = Number(sign);
-
-  if (isDirected === true) {
-    return (
-      <ArrowRight
-        className={cn(
-          "h-4 w-4",
-          signValue === 1 ? "text-green-500" : signValue === -1 ? "text-red-500" : "text-muted-foreground",
-        )}
-      />
-    );
-  }
-
-  return <Minus className="h-4 w-4 text-muted-foreground" />;
+  const directed = isDirected === true || isDirected === 1 || isDirected === "1" || isDirected === "true" || isDirected === "TRUE";
+  return (
+    <div className="flex items-center justify-center">
+      {signValue === -1 ? (
+        <span className="text-2xl leading-none font-semibold text-red-500">⊣</span>
+      ) : signValue === 1 ? (
+        <ArrowRight className="h-6 w-6 text-green-500" />
+      ) : directed ? (
+        <ArrowRight className="h-6 w-6 text-foreground" />
+      ) : (
+        <span className="text-2xl leading-none font-semibold text-foreground">−</span>
+      )}
+    </div>
+  );
 }
 
 export function DuckDbResultsPane() {
@@ -77,9 +78,9 @@ export function DuckDbResultsPane() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[35%]">Source</TableHead>
-                  <TableHead className="w-[50px] text-center"></TableHead>
-                  <TableHead className="w-[35%]">Target</TableHead>
+                  <TableHead className="w-[34%]">Source</TableHead>
+                  <TableHead className="w-[120px] text-center"></TableHead>
+                  <TableHead className="w-[34%]">Target</TableHead>
                   <TableHead className="w-[20%] text-center">Evidence</TableHead>
                 </TableRow>
               </TableHeader>
@@ -105,7 +106,7 @@ export function DuckDbResultsPane() {
                           entityType={typeof sourceEntity?.entity_type_name === "string" ? sourceEntity.entity_type_name : undefined}
                         />
                       </TableCell>
-                      <TableCell className="w-[50px] text-center">
+                      <TableCell className="w-[120px] px-6 text-center">
                         <div className="flex justify-center">{renderSignIndicator(row.sign, row.is_directed)}</div>
                       </TableCell>
                       <TableCell className="max-w-0 w-[35%]">

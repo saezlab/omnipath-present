@@ -160,7 +160,11 @@ export async function mountResourceInteractions(
         ${entityFileName
           ? participantTypePairSql("entity_a.entity_type", "entity_b.entity_type")
           : "NULL"} AS interaction_type,
-        CASE WHEN interactions.direction IS NULL OR interactions.direction = 0 THEN FALSE ELSE TRUE END AS is_directed,
+        CASE
+          WHEN interactions.sign IS NOT NULL THEN TRUE
+          WHEN interactions.direction IS NULL OR interactions.direction = 0 THEN FALSE
+          ELSE TRUE
+        END AS is_directed,
         COALESCE(array_length(interactions.evidence), 0) AS evidence_count,
         CAST(interactions.source AS VARCHAR) AS source,
         ${sqlString(resourceId)} AS resource_id,

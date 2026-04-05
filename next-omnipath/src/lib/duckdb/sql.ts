@@ -266,7 +266,11 @@ export async function mountResourceInteractions(
         CAST(entity_a_id AS VARCHAR) AS member_a_id,
         CAST(entity_b_id AS VARCHAR) AS member_b_id,
         COALESCE(NULLIF(mechanism_term, ''), NULLIF(statement_term, ''), 'interaction') AS interaction_type,
-        CASE WHEN direction IS NULL OR direction = 0 THEN FALSE ELSE TRUE END AS is_directed,
+        CASE
+          WHEN sign IS NOT NULL THEN TRUE
+          WHEN direction IS NULL OR direction = 0 THEN FALSE
+          ELSE TRUE
+        END AS is_directed,
         CAST(sign AS INTEGER) AS sign,
         COALESCE(array_length(evidence), 0) AS evidence_count,
         list_value(CAST(source AS VARCHAR)) AS sources,
