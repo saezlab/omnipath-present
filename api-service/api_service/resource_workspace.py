@@ -11,7 +11,8 @@ WORKSPACE_ARTIFACT_NAMES = {
     "interactions.parquet",
     "associations.parquet",
     "annotations.parquet",
-    "entity_identifiers.parquet",
+    "entity_identifiers_source.parquet",
+    "entity_identifiers_resolved.parquet",
 }
 
 

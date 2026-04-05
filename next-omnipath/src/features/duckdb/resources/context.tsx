@@ -7,6 +7,7 @@ import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { createConnection, registerParquetFile, releaseObjectUrl } from "@/lib/duckdb/browser";
 import {
   mountResourceEntities,
+  mountResourceIdentifierRows,
   mountResourceInteractions,
   queryResourceEntityById,
   queryResourceEntitySummaries,
@@ -154,6 +155,8 @@ export function DuckDbResourceWorkspaceProvider({ children }: { children: ReactN
       const manifest = await fetchResourceWorkspaceManifest(resourceIds);
       const interactionResources = manifest.resources.filter((resource) => resource.artifacts.includes("interactions.parquet"));
       const entityResources = manifest.resources.filter((resource) => resource.artifacts.includes("entities.parquet"));
+      const sourceIdentifierResources = manifest.resources.filter((resource) => resource.artifacts.includes("entity_identifiers_source.parquet"));
+      const resolvedIdentifierResources = manifest.resources.filter((resource) => resource.artifacts.includes("entity_identifiers_resolved.parquet"));
 
       if (interactionResources.length === 0) {
         throw new Error("Selected resources do not provide interactions.parquet artifacts.");
@@ -180,9 +183,27 @@ export function DuckDbResourceWorkspaceProvider({ children }: { children: ReactN
         entityFiles.push({ fileName: artifact.fileName, resourceId: resource.resource_id });
       }
 
+      const sourceIdentifierFiles: Array<{ fileName: string; resourceId: string }> = [];
+      for (const resource of sourceIdentifierResources) {
+        const artifact = await fetchResourceWorkspaceArtifact(resource.resource_id, "entity_identifiers_source.parquet");
+        currentObjectUrlsRef.current.push(artifact.objectUrl);
+        await registerParquetFile(artifact.fileName, artifact.blob);
+        sourceIdentifierFiles.push({ fileName: artifact.fileName, resourceId: resource.resource_id });
+      }
+
+      const resolvedIdentifierFiles: Array<{ fileName: string; resourceId: string }> = [];
+      for (const resource of resolvedIdentifierResources) {
+        const artifact = await fetchResourceWorkspaceArtifact(resource.resource_id, "entity_identifiers_resolved.parquet");
+        currentObjectUrlsRef.current.push(artifact.objectUrl);
+        await registerParquetFile(artifact.fileName, artifact.blob);
+        resolvedIdentifierFiles.push({ fileName: artifact.fileName, resourceId: resource.resource_id });
+      }
+
       if (entityFiles.length > 0) {
         setLoadingState("loading_entities", "Loading selected resource entities into DuckDB…", 85);
         await mountResourceEntities(connection, entityFiles);
+        await mountResourceIdentifierRows(connection, sourceIdentifierFiles, { includeCanonicalFlag: false, viewName: "resource_entity_identifiers_source" });
+        await mountResourceIdentifierRows(connection, resolvedIdentifierFiles, { includeCanonicalFlag: true, viewName: "resource_entity_identifiers_resolved" });
         setEntitySummaries(await queryResourceEntitySummaries(connection));
       } else {
         setEntitySummaries(new Map());

@@ -38,6 +38,74 @@ function readableEntityType(value: unknown): string | undefined {
   return normalized.replace(/:[A-Z]+:\d+$/, "");
 }
 
+function normalizeIdentifierType(value: unknown): string {
+  const label = readableEntityType(value) || (typeof value === "string" ? value : "");
+  return label.trim().toLowerCase();
+}
+
+function classifyEntityType(value: unknown): "protein" | "small_molecule" | "other" {
+  const normalized = (readableEntityType(value) || "").toLowerCase().replace(/[\s_]/g, "");
+  if (normalized === "protein") return "protein";
+  if (["smallmolecule", "compound", "metabolite", "drug", "lipid"].includes(normalized)) return "small_molecule";
+  return "other";
+}
+
+function displayPriority(entityType: unknown, identifierType: unknown): number {
+  const type = normalizeIdentifierType(identifierType);
+  const category = classifyEntityType(entityType);
+  if (category === "protein") {
+    if (type.includes("gene name primary")) return 0;
+    if (type.includes("gene name") || type.includes("hgnc symbol")) return 1;
+    if (type === "name" || type.includes("protein name")) return 2;
+    if (type.includes("systematic name")) return 3;
+    if (type.includes("uniprot")) return 10;
+  }
+  if (category === "small_molecule") {
+    if (type === "name" || type.includes("common name") || type.includes("preferred name")) return 0;
+    if (type.includes("chebi")) return 1;
+    if (type.includes("hmdb")) return 2;
+    if (type.includes("chembl")) return 3;
+    if (type.includes("pubchem")) return 4;
+    if (type.includes("inchi")) return 10;
+  }
+  if (type === "name") return 0;
+  if (type.includes("gene name")) return 1;
+  return 100;
+}
+
+function secondaryPriority(entityType: unknown, identifierType: unknown): number {
+  const type = normalizeIdentifierType(identifierType);
+  const category = classifyEntityType(entityType);
+  if (category === "protein") {
+    if (type.includes("uniprot")) return 0;
+    if (type.includes("ensembl")) return 1;
+    if (type.includes("entrez")) return 2;
+    return 100;
+  }
+  if (category === "small_molecule") {
+    if (type.includes("chebi")) return 0;
+    if (type.includes("hmdb")) return 1;
+    if (type.includes("chembl")) return 2;
+    if (type.includes("pubchem")) return 3;
+    if (type.includes("inchi")) return 10;
+    return 100;
+  }
+  if (type.includes("uniprot") || type.includes("chebi")) return 0;
+  return 100;
+}
+
+function orderIdentifierRows(
+  rows: Array<{ identifier: string; identifier_type: string }>,
+  entityType: unknown,
+): Array<{ identifier: string; identifier_type: string }> {
+  return [...rows].sort((a, b) => {
+    const aBest = Math.min(displayPriority(entityType, a.identifier_type), secondaryPriority(entityType, a.identifier_type));
+    const bBest = Math.min(displayPriority(entityType, b.identifier_type), secondaryPriority(entityType, b.identifier_type));
+    if (aBest !== bBest) return aBest - bBest;
+    return a.identifier.localeCompare(b.identifier);
+  });
+}
+
 async function runRowsQuery(connection: AsyncDuckDBConnection, sql: string): Promise<Record<string, unknown>[]> {
   const result = await connection.query(sql);
   return result.toArray().map((row) => {
@@ -121,12 +189,43 @@ export async function mountResourceEntities(
       SELECT
         CAST(entity_id AS VARCHAR) AS entity_id,
         entity_type,
-        display_name,
-        canonical_identifier,
-        canonical_identifier_type,
         taxonomy_id,
         source,
         entity_attributes,
+        ${sqlString(resourceId)} AS resource_id
+      FROM read_parquet(${sqlString(fileName)})
+    `),
+  );
+
+  await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS ${query}`);
+}
+
+export async function mountResourceIdentifierRows(
+  connection: AsyncDuckDBConnection,
+  files: Array<{ fileName: string; resourceId: string }>,
+  options: { includeCanonicalFlag: boolean; viewName: string },
+): Promise<void> {
+  const { includeCanonicalFlag, viewName } = options;
+  if (files.length === 0) {
+    await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS SELECT
+      CAST(NULL AS VARCHAR) AS entity_id,
+      CAST(NULL AS VARCHAR) AS identifier,
+      CAST(NULL AS VARCHAR) AS identifier_type,
+      ${includeCanonicalFlag ? 'CAST(NULL AS BOOLEAN) AS is_canonical,' : ''}
+      CAST(NULL AS VARCHAR) AS source,
+      CAST(NULL AS VARCHAR) AS resource_id
+    WHERE FALSE`);
+    return;
+  }
+
+  const query = buildUnionQuery(
+    files.map(({ fileName, resourceId }) => `
+      SELECT
+        CAST(entity_id AS VARCHAR) AS entity_id,
+        CAST(identifier AS VARCHAR) AS identifier,
+        CAST(identifier_type AS VARCHAR) AS identifier_type,
+        ${includeCanonicalFlag ? 'CAST(is_canonical AS BOOLEAN) AS is_canonical,' : 'FALSE AS is_canonical,'}
+        CAST(source AS VARCHAR) AS source,
         ${sqlString(resourceId)} AS resource_id
       FROM read_parquet(${sqlString(fileName)})
     `),
@@ -193,19 +292,48 @@ export async function queryResourceEntitySummaries(
   connection: AsyncDuckDBConnection,
   viewName = "resource_entities",
 ): Promise<Map<string, { id: string; canonical_identifier: string; display_name: string; entity_type_name?: string }>> {
-  const rows = await runRowsQuery(
-    connection,
-    `SELECT entity_id, entity_type, display_name, canonical_identifier FROM ${viewName}`,
-  );
+  const [entityRows, sourceRows, resolvedRows] = await Promise.all([
+    runRowsQuery(connection, `SELECT entity_id, entity_type FROM ${viewName}`),
+    runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type FROM resource_entity_identifiers_source`),
+    runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type, is_canonical FROM resource_entity_identifiers_resolved`),
+  ]);
+
+  const sourceByEntity = new Map<string, Array<{ identifier: string; identifier_type: string }>>();
+  for (const row of sourceRows) {
+    const entityId = String(row.entity_id ?? "");
+    if (!entityId) continue;
+    const items = sourceByEntity.get(entityId) || [];
+    items.push({ identifier: String(row.identifier ?? ""), identifier_type: String(row.identifier_type ?? "") });
+    sourceByEntity.set(entityId, items);
+  }
+
+  const resolvedByEntity = new Map<string, Array<{ identifier: string; identifier_type: string; is_canonical: boolean }>>();
+  for (const row of resolvedRows) {
+    const entityId = String(row.entity_id ?? "");
+    if (!entityId) continue;
+    const items = resolvedByEntity.get(entityId) || [];
+    items.push({ identifier: String(row.identifier ?? ""), identifier_type: String(row.identifier_type ?? ""), is_canonical: Boolean(row.is_canonical) });
+    resolvedByEntity.set(entityId, items);
+  }
 
   return new Map(
-    rows.map((row) => {
+    entityRows.map((row) => {
       const id = String(row.entity_id ?? "");
+      const entityType = row.entity_type;
+      const sourceIdentifiers = orderIdentifierRows(sourceByEntity.get(id) || [], entityType);
+      const resolvedIdentifiers = orderIdentifierRows((resolvedByEntity.get(id) || []).map((item) => ({ identifier: item.identifier, identifier_type: item.identifier_type })), entityType);
+      const canonicalResolved = (resolvedByEntity.get(id) || []).find((item) => item.is_canonical);
+      const secondaryIdentifier = resolvedIdentifiers.sort((a, b) => secondaryPriority(entityType, a.identifier_type) - secondaryPriority(entityType, b.identifier_type))[0]?.identifier;
+      const displayName = sourceIdentifiers.sort((a, b) => displayPriority(entityType, a.identifier_type) - displayPriority(entityType, b.identifier_type))[0]?.identifier
+        || secondaryIdentifier
+        || canonicalResolved?.identifier
+        || id;
+      const canonicalIdentifier = secondaryIdentifier || canonicalResolved?.identifier || id;
       return [id, {
         id,
-        canonical_identifier: String(row.canonical_identifier ?? id),
-        display_name: String(row.display_name ?? row.canonical_identifier ?? id),
-        entity_type_name: readableEntityType(row.entity_type),
+        canonical_identifier: canonicalIdentifier,
+        display_name: displayName,
+        entity_type_name: readableEntityType(entityType),
       }];
     }),
   );
@@ -218,7 +346,43 @@ export async function queryResourceEntityById(
 ): Promise<SearchResult | null> {
   const rows = await runRowsQuery(
     connection,
-    `SELECT entity_id, entity_type, display_name, canonical_identifier, canonical_identifier_type, taxonomy_id, source FROM ${viewName} WHERE entity_id = ${sqlString(entityId)} LIMIT 1`,
+    `WITH source_rows AS (
+      SELECT identifier, identifier_type, source
+      FROM resource_entity_identifiers_source
+      WHERE entity_id = ${sqlString(entityId)}
+    ),
+    resolved_rows AS (
+      SELECT identifier, identifier_type, is_canonical, source
+      FROM resource_entity_identifiers_resolved
+      WHERE entity_id = ${sqlString(entityId)}
+    ),
+    source_names AS (
+      SELECT coalesce(
+        max(CASE WHEN lower(identifier_type) LIKE '%gene name primary%' THEN identifier END),
+        max(CASE WHEN lower(identifier_type) LIKE '%name%' THEN identifier END),
+        max(CASE WHEN lower(identifier_type) LIKE '%systematic name%' THEN identifier END)
+      ) AS display_name
+      FROM source_rows
+    ),
+    canonical AS (
+      SELECT
+        max(CASE WHEN is_canonical THEN identifier END) AS canonical_identifier,
+        max(CASE WHEN is_canonical THEN identifier_type END) AS canonical_identifier_type
+      FROM resolved_rows
+    )
+    SELECT
+      entities.entity_id,
+      entities.entity_type,
+      entities.taxonomy_id,
+      entities.source,
+      source_names.display_name,
+      canonical.canonical_identifier,
+      canonical.canonical_identifier_type
+    FROM ${viewName} AS entities
+    LEFT JOIN source_names ON TRUE
+    LEFT JOIN canonical ON TRUE
+    WHERE entities.entity_id = ${sqlString(entityId)}
+    LIMIT 1`,
   );
 
   if (rows.length === 0) return null;
@@ -226,7 +390,17 @@ export async function queryResourceEntityById(
   const displayName = String(row.display_name ?? row.canonical_identifier ?? row.entity_id ?? "");
   const canonicalIdentifier = String(row.canonical_identifier ?? row.entity_id ?? "");
 
-  return {
+  const identifierRows = orderIdentifierRows(
+    await runRowsQuery(
+      connection,
+      `SELECT identifier, identifier_type FROM resource_entity_identifiers_resolved WHERE entity_id = ${sqlString(entityId)}
+       UNION
+       SELECT identifier, identifier_type FROM resource_entity_identifiers_source WHERE entity_id = ${sqlString(entityId)}`,
+    ) as Array<{ identifier: string; identifier_type: string }>,
+    row.entity_type,
+  );
+
+  const entityPayload = {
     ...(row as SearchResult),
     id: String(row.entity_id ?? entityId),
     entity_id: String(row.entity_id ?? entityId),
@@ -239,8 +413,20 @@ export async function queryResourceEntityById(
     synonyms: [],
     ontology_terms: [],
     cv_terms: [],
-    identifiers: canonicalIdentifier
-      ? [{ key: String(row.canonical_identifier_type ?? "identifier"), value: canonicalIdentifier }]
-      : [],
+    identifiers: identifierRows.map((identifierRow) => ({
+      key: String(identifierRow.identifier_type ?? "identifier"),
+      value: String(identifierRow.identifier ?? ""),
+    })).filter((item) => item.value.length > 0),
   };
+
+  if (typeof window !== 'undefined') {
+    console.log('[DuckDB:queryResourceEntityById] entity payload', {
+      entityId,
+      entityType: entityPayload.entity_type,
+      names: entityPayload.names,
+      identifiers: entityPayload.identifiers,
+    });
+  }
+
+  return entityPayload;
 }

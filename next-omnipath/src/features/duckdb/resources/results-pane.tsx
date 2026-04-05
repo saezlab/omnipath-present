@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertCircle, ArrowRight, Minus } from "lucide-react";
 import { EntityBadge } from "@/components/entity-badge";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
-import { CvTermHoverCard } from "@/features/search/components/result-card";
+import { CvTermHoverCard, ResultCard } from "@/features/search/components/result-card";
 import { cn } from "@/lib/utils";
 import { useDuckDbResourceWorkspace } from "./context";
 
@@ -95,6 +95,7 @@ export function DuckDbResourceResultsPane() {
   const {
     entitySummaries,
     error,
+    getEntityById,
     loading,
     materialized,
     pageIndex,
@@ -105,6 +106,25 @@ export function DuckDbResourceResultsPane() {
   } = useDuckDbResourceWorkspace();
 
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
+  const [selectedEntityA, setSelectedEntityA] = useState<any | null>(null);
+  const [selectedEntityB, setSelectedEntityB] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (!selectedRow) {
+      setSelectedEntityA(null);
+      setSelectedEntityB(null);
+      return;
+    }
+    const entityAId = String(selectedRow.entity_a_id ?? "");
+    const entityBId = String(selectedRow.entity_b_id ?? "");
+    void Promise.all([
+      entityAId ? getEntityById(entityAId) : Promise.resolve(null),
+      entityBId ? getEntityById(entityBId) : Promise.resolve(null),
+    ]).then(([entityA, entityB]) => {
+      setSelectedEntityA(entityA);
+      setSelectedEntityB(entityB);
+    });
+  }, [getEntityById, selectedRow]);
 
   const pageStart = rows.length === 0 ? 0 : pageIndex * pageSize + 1;
   const pageEnd = pageIndex * pageSize + rows.length;
@@ -204,6 +224,13 @@ export function DuckDbResourceResultsPane() {
                                 Evidence and attribute payloads from the selected gold interaction row.
                               </p>
                             </div>
+
+                            {(selectedEntityA || selectedEntityB) ? (
+                              <div className="grid gap-4 pb-4 md:grid-cols-2">
+                                {selectedEntityA ? <ResultCard result={selectedEntityA} /> : <div className="text-sm text-muted-foreground">No entity A details available.</div>}
+                                {selectedEntityB ? <ResultCard result={selectedEntityB} /> : <div className="text-sm text-muted-foreground">No entity B details available.</div>}
+                              </div>
+                            ) : null}
 
                             {detailSections.length > 0 ? detailSections.map((section) => (
                               <div key={section.title} className="space-y-2 pb-4 last:pb-0">
