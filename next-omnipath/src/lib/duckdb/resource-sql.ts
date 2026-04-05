@@ -56,8 +56,8 @@ function displayPriority(entityType: unknown, identifierType: unknown): number {
   if (category === "protein") {
     if (type.includes("gene name primary")) return 0;
     if (type.includes("gene name") || type.includes("hgnc symbol")) return 1;
-    if (type === "name" || type.includes("protein name")) return 2;
-    if (type.includes("systematic name")) return 3;
+    if (type.includes("systematic name")) return 2;
+    if (type === "name" || type.includes("protein name")) return 20;
     if (type.includes("uniprot")) return 10;
   }
   if (category === "small_molecule") {
@@ -320,13 +320,19 @@ export async function queryResourceEntitySummaries(
     entityRows.map((row) => {
       const id = String(row.entity_id ?? "");
       const entityType = row.entity_type;
-      const sourceIdentifiers = orderIdentifierRows(sourceByEntity.get(id) || [], entityType);
-      const resolvedIdentifiers = orderIdentifierRows((resolvedByEntity.get(id) || []).map((item) => ({ identifier: item.identifier, identifier_type: item.identifier_type })), entityType);
+      const sourceIdentifiers = sourceByEntity.get(id) || [];
+      const resolvedIdentifiers = (resolvedByEntity.get(id) || []).map((item) => ({ identifier: item.identifier, identifier_type: item.identifier_type }));
+      const allIdentifiers = orderIdentifierRows(
+        [...sourceIdentifiers, ...resolvedIdentifiers].filter((item, index, items) =>
+          items.findIndex((other) => other.identifier === item.identifier && other.identifier_type === item.identifier_type) === index,
+        ),
+        entityType,
+      );
       const canonicalResolved = (resolvedByEntity.get(id) || []).find((item) => item.is_canonical);
-      const secondaryIdentifier = resolvedIdentifiers.sort((a, b) => secondaryPriority(entityType, a.identifier_type) - secondaryPriority(entityType, b.identifier_type))[0]?.identifier;
-      const displayName = sourceIdentifiers.sort((a, b) => displayPriority(entityType, a.identifier_type) - displayPriority(entityType, b.identifier_type))[0]?.identifier
-        || secondaryIdentifier
+      const secondaryIdentifier = [...allIdentifiers].sort((a, b) => secondaryPriority(entityType, a.identifier_type) - secondaryPriority(entityType, b.identifier_type))[0]?.identifier;
+      const displayName = [...allIdentifiers].sort((a, b) => displayPriority(entityType, a.identifier_type) - displayPriority(entityType, b.identifier_type))[0]?.identifier
         || canonicalResolved?.identifier
+        || secondaryIdentifier
         || id;
       const canonicalIdentifier = secondaryIdentifier || canonicalResolved?.identifier || id;
       return [id, {
@@ -405,7 +411,7 @@ export async function queryResourceEntityById(
     id: String(row.entity_id ?? entityId),
     entity_id: String(row.entity_id ?? entityId),
     type: "entity",
-    names: displayName ? [displayName] : [],
+    names: [],
     gene_symbols: [],
     descriptions: [],
     references: [],

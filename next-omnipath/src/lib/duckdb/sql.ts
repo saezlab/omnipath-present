@@ -53,8 +53,8 @@ function displayPriority(entityType: unknown, identifierType: unknown): number {
   if (category === "protein") {
     if (type.includes("gene name primary")) return 0;
     if (type.includes("gene name") || type.includes("hgnc symbol")) return 1;
-    if (type === "name" || type.includes("protein name")) return 2;
-    if (type.includes("systematic name")) return 3;
+    if (type.includes("systematic name")) return 2;
+    if (type === "name" || type.includes("protein name")) return 20;
     if (type.includes("uniprot")) return 10;
   }
   if (category === "small_molecule") {
@@ -148,6 +148,14 @@ function toIdentifierArray(value: unknown): Array<{ key: string; value: string }
   });
 }
 
+function identifierTypeLabel(key: string | undefined): string {
+  const normalized = String(key || "").trim();
+  if (!normalized) return "";
+  const accessionFirst = normalized.match(/^[A-Z]+:\d+:(.+)$/);
+  if (accessionFirst) return accessionFirst[1].toLowerCase();
+  return normalized.toLowerCase();
+}
+
 function isSmallMoleculeType(entityTypeName: string | undefined): boolean {
   if (!entityTypeName) return false;
   const type = entityTypeName.toLowerCase();
@@ -180,7 +188,7 @@ function getIdentifierByType(
   types: string[],
 ): string | undefined {
   for (const id of identifiers) {
-    const idType = id.key?.split(":")[0].toLowerCase();
+    const idType = identifierTypeLabel(id.key);
     if (idType && id.value && types.some((type) => idType.includes(type))) {
       return id.value;
     }
@@ -464,13 +472,19 @@ export async function queryEntitySummaries(
       entityRows.map((row) => {
         const id = String(row.entity_id ?? "");
         const entityType = row.entity_type;
-        const sourceIdentifiers = orderIdentifierRows(sourceByEntity.get(id) || [], entityType);
-        const resolvedIdentifiers = orderIdentifierRows((resolvedByEntity.get(id) || []).map((item) => ({ identifier: item.identifier, identifier_type: item.identifier_type })), entityType);
+        const sourceIdentifiers = sourceByEntity.get(id) || [];
+        const resolvedIdentifiers = (resolvedByEntity.get(id) || []).map((item) => ({ identifier: item.identifier, identifier_type: item.identifier_type }));
+        const allIdentifiers = orderIdentifierRows(
+          [...sourceIdentifiers, ...resolvedIdentifiers].filter((item, index, items) =>
+            items.findIndex((other) => other.identifier === item.identifier && other.identifier_type === item.identifier_type) === index,
+          ),
+          entityType,
+        );
         const canonicalResolved = (resolvedByEntity.get(id) || []).find((item) => item.is_canonical);
-        const secondaryIdentifier = resolvedIdentifiers.sort((a, b) => secondaryPriority(entityType, a.identifier_type) - secondaryPriority(entityType, b.identifier_type))[0]?.identifier;
-        const displayName = sourceIdentifiers.sort((a, b) => displayPriority(entityType, a.identifier_type) - displayPriority(entityType, b.identifier_type))[0]?.identifier
-          || secondaryIdentifier
+        const secondaryIdentifier = [...allIdentifiers].sort((a, b) => secondaryPriority(entityType, a.identifier_type) - secondaryPriority(entityType, b.identifier_type))[0]?.identifier;
+        const displayName = [...allIdentifiers].sort((a, b) => displayPriority(entityType, a.identifier_type) - displayPriority(entityType, b.identifier_type))[0]?.identifier
           || canonicalResolved?.identifier
+          || secondaryIdentifier
           || id;
         const canonicalIdentifier = secondaryIdentifier || canonicalResolved?.identifier || id;
         return [id, {
@@ -566,7 +580,7 @@ export async function queryEntityById(
       id: String(row.entity_id ?? entityId),
       entity_id: String(row.entity_id ?? entityId),
       type: "entity",
-      names: displayName ? [displayName] : [],
+      names: [],
       gene_symbols: [],
       descriptions: [],
       references: [],
@@ -619,9 +633,11 @@ function deriveEntityPresentation(entity: SearchResult): {
 
     canonicalIdentifier = chemblId || pubchemId || names[0] || String(entity.entity_id ?? entity.id);
   } else if (entityTypeName?.toLowerCase() === "protein") {
+    const genePrimary = getIdentifierByType(identifiers, ["gene name primary"]);
+    const geneName = getIdentifierByType(identifiers, ["gene name", "hgnc symbol"]);
     const uniprotId = getIdentifierByType(identifiers, ["uniprot", "uniprotkb"]);
-    displayName = geneSymbols[0] || uniprotId || names[0] || String(entity.entity_id ?? entity.id);
-    canonicalIdentifier = uniprotId || names[0] || String(entity.entity_id ?? entity.id);
+    displayName = genePrimary || geneName || geneSymbols[0] || uniprotId || names[0] || String(entity.entity_id ?? entity.id);
+    canonicalIdentifier = uniprotId || genePrimary || geneName || names[0] || String(entity.entity_id ?? entity.id);
   } else {
     displayName = geneSymbols[0] || names[0] || String(entity.entity_id ?? entity.id);
     canonicalIdentifier = identifiers[0]?.value || names[0] || String(entity.entity_id ?? entity.id);

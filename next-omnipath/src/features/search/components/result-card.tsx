@@ -264,10 +264,11 @@ function identifierPriority(entityType: string | undefined, identifierType: stri
   const normalizedEntityType = normalizeEntityTypeLabel(entityType);
   if (normalizedEntityType === "protein") {
     if (type.includes("gene name primary")) return 0;
-    if (type.includes("uniprot")) return 1;
-    if (type.includes("gene name")) return 2;
+    if (type.includes("gene name")) return 1;
+    if (type.includes("uniprot")) return 2;
     if (type.includes("ensembl")) return 3;
     if (type.includes("entrez")) return 4;
+    if (type === "name") return 10;
   }
   if (["smallmolecule", "compound", "metabolite", "drug", "lipid"].includes(normalizedEntityType)) {
     if (type === "name" || type.includes("common name") || type.includes("preferred name")) return 0;
@@ -281,6 +282,45 @@ function identifierPriority(entityType: string | undefined, identifierType: stri
   if (type.includes("gene name")) return 1;
   if (type.includes("uniprot") || type.includes("chebi")) return 2;
   return 100;
+}
+
+function deriveEntityDisplayFromIdentifiers(entityType: string | undefined, identifiers: Identifier[]): {
+  displayName?: string;
+  secondaryIdentifier?: string;
+} {
+  const normalizedEntityType = normalizeEntityTypeLabel(entityType);
+  const parsed = identifiers
+    .map((id) => ({ type: identifierTypeLabel(id.key), value: id.value }))
+    .filter((id) => id.value)
+    .sort((a, b) => identifierPriority(entityType, a.type) - identifierPriority(entityType, b.type));
+
+  if (normalizedEntityType === "protein") {
+    const genePrimary = parsed.find((id) => id.type.toLowerCase().includes("gene name primary"))?.value;
+    const geneName = parsed.find((id) => id.type.toLowerCase().includes("gene name"))?.value;
+    const uniprot = parsed.find((id) => id.type.toLowerCase().includes("uniprot"))?.value;
+    return {
+      displayName: genePrimary || geneName || uniprot,
+      secondaryIdentifier: uniprot && uniprot !== genePrimary && uniprot !== geneName ? uniprot : undefined,
+    };
+  }
+
+  if (["smallmolecule", "compound", "metabolite", "drug", "lipid"].includes(normalizedEntityType)) {
+    const preferredName = parsed.find((id) => {
+      const type = id.type.toLowerCase();
+      return type === "name" || type.includes("common name") || type.includes("preferred name");
+    })?.value;
+    const preferredId = parsed.find((id) => {
+      const type = id.type.toLowerCase();
+      return type.includes("chebi") || type.includes("hmdb") || type.includes("chembl") || type.includes("pubchem") || type.includes("inchi");
+    })?.value;
+    return {
+      displayName: preferredName || preferredId,
+      secondaryIdentifier: preferredName && preferredId && preferredId !== preferredName ? preferredId : undefined,
+    };
+  }
+
+  const preferred = parsed[0]?.value;
+  return { displayName: preferred };
 }
 
 function objectValuesInKeyOrder(value: Record<string, unknown>): unknown[] {
@@ -759,37 +799,18 @@ export function ResultCard({ result }: { result: SearchResult }) {
   let primaryIdentifier = "";
 
   if (type === 'entity') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
     const firstIdentifier = identifiers.length > 0 ? identifiers[0].value : undefined;
-
-    // For proteins: prefer gene symbol, then UniProt identifier
-    // For other entities: gene_symbols > names > first identifier
-    const isProtein = entityTypeLabel.toLowerCase() === 'protein';
+    const derived = deriveEntityDisplayFromIdentifiers(entityType, identifiers);
 
     let displayName: string;
     let secondaryName: string | undefined;
 
-    if (isProtein) {
-      // Try to find UniProt identifier
-      const uniprotId = identifiers.find(id => {
-        const idType = identifierTypeLabel(id.key).toLowerCase();
-        return idType === 'uniprot' || idType === 'uniprot id' || idType === 'uniprotkb';
-      });
-      const uniprotValue = uniprotId?.value;
-
-      // For proteins: gene symbol first, fallback to UniProt
-      displayName = geneSymbol || uniprotValue || name || firstIdentifier || `Entity ${result.id}`;
-      // Show UniProt as secondary if gene symbol is primary
-      if (geneSymbol && uniprotValue && geneSymbol !== uniprotValue) {
-        secondaryName = uniprotValue;
-      }
+    if (entityTypeLabel.toLowerCase() === 'protein') {
+      displayName = derived.displayName || firstIdentifier || `Entity ${result.id}`;
+      secondaryName = derived.secondaryIdentifier;
     } else {
-      // Original logic for non-proteins
-      displayName = geneSymbol || name || firstIdentifier || `Entity ${result.id}`;
-      if (geneSymbol && name && geneSymbol !== name) {
-        secondaryName = name;
-      }
+      displayName = derived.displayName || firstIdentifier || `Entity ${result.id}`;
+      secondaryName = derived.secondaryIdentifier;
     }
 
     // Truncate the display name to 8 characters
@@ -909,6 +930,7 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const descriptions = toStringArray(result._formatted?.descriptions || result.descriptions);
   const names = toStringArray(result._formatted?.names || result.names);
   const geneSymbols = toStringArray(result._formatted?.gene_symbols || result.gene_symbols);
+  const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;
@@ -921,11 +943,17 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   let subtitle = "";
 
   if (type === 'entity' || type === 'cv_term') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
-    const displayName = result._formatted?.name || result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
-    title = displayName;
-    subtitle = namespaceName || entityTypeLabel;
+    if (type === 'entity') {
+      const derived = deriveEntityDisplayFromIdentifiers(entityType, identifiers);
+      title = derived.displayName || result._formatted?.name || result.name || `Entity ${result.entity_id || result.id}`;
+      subtitle = namespaceName || entityTypeLabel;
+    } else {
+      const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
+      const name = names.length > 0 ? names[0] : undefined;
+      const displayName = result._formatted?.name || result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
+      title = displayName;
+      subtitle = namespaceName || entityTypeLabel;
+    }
   }
 
   return (
