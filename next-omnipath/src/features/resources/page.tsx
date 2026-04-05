@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatNumber } from "@/lib/utils";
 import type { ResourceRecord } from "@/lib/resources";
+import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
 import { downloadResourceSelection, downloadSingleResource } from "@/lib/resource-downloads";
 import { Activity, Check, CirclePlus, Copy, Database, Download, ExternalLink, FlaskConical, Layers3, Network, Search, Shapes, Tags } from "lucide-react";
 import Link from "next/link";
@@ -14,11 +15,13 @@ interface ResourcesSummary {
   totalEntities: number;
   totalInteractions: number;
   totalAssociations: number;
+  totalAnnotations: number;
   totalIdentifiers: number;
   totalOntologyTerms: number;
   totalBytes: number;
   buildStatusCounts: Record<string, number>;
   categoryCounts: Record<string, number>;
+  topLevelCategoryCounts: Record<string, number>;
   modalityCounts: Record<string, number>;
 }
 
@@ -118,6 +121,7 @@ export default function ResourcesPage({
   summary: ResourcesSummary;
 }) {
   const [query, setQuery] = useState("");
+  const [selectedTopLevelCategory, setSelectedTopLevelCategory] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedModality, setSelectedModality] = useState("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -125,6 +129,11 @@ export default function ResourcesPage({
   const [downloadingResourceId, setDownloadingResourceId] = useState<string | null>(null);
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const topLevelCategories = useMemo(
+    () => ["all", ...Object.keys(summary.topLevelCategoryCounts).sort((a, b) => a.localeCompare(b))],
+    [summary.topLevelCategoryCounts],
+  );
 
   const categories = useMemo(
     () => ["all", ...Object.keys(summary.categoryCounts).sort((a, b) => a.localeCompare(b))],
@@ -143,12 +152,13 @@ export default function ResourcesPage({
       const searchableText = resource.resource_name.toLowerCase();
 
       const matchesQuery = normalizedQuery.length === 0 || searchableText.includes(normalizedQuery);
+      const matchesTopLevelCategory = selectedTopLevelCategory === "all" || resource.top_level_category === selectedTopLevelCategory;
       const matchesCategory = selectedCategory === "all" || resource.primary_category === selectedCategory;
       const matchesModality = selectedModality === "all" || resource.data_modalities.includes(selectedModality);
 
-      return matchesQuery && matchesCategory && matchesModality;
+      return matchesQuery && matchesTopLevelCategory && matchesCategory && matchesModality;
     });
-  }, [query, resources, selectedCategory, selectedModality]);
+  }, [query, resources, selectedTopLevelCategory, selectedCategory, selectedModality]);
 
   const selectedResources = useMemo(
     () => resources.filter((resource) => selectedIds.includes(resource.resource_id)),
@@ -160,13 +170,23 @@ export default function ResourcesPage({
     [selectedResources],
   );
 
-  const openInDuckDbHref = useMemo(() => {
+  const openInteractionWorkspaceHref = useMemo(() => {
     const params = new URLSearchParams({ resources: selectedIds.join(",") });
     return `/duckdb/resources/workspace?${params.toString()}`;
   }, [selectedIds]);
 
-  const canOpenInDuckDb = useMemo(
-    () => selectedResources.some((resource) => (resource.interaction_count || 0) > 0),
+  const openAnnotationWorkspaceHref = useMemo(() => {
+    const params = new URLSearchParams({ resources: selectedIds.join(",") });
+    return `/duckdb/annotations/workspace?${params.toString()}`;
+  }, [selectedIds]);
+
+  const canOpenInteractionWorkspace = useMemo(
+    () => selectedResources.some((resource) => resourceSupportsInteractions(resource)),
+    [selectedResources],
+  );
+
+  const canOpenAnnotationWorkspace = useMemo(
+    () => selectedResources.some((resource) => resourceSupportsAnnotations(resource)),
     [selectedResources],
   );
 
@@ -216,8 +236,9 @@ export default function ResourcesPage({
           <div className="space-y-3">
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Resources</h1>
             <p className="max-w-3xl text-base leading-7 text-muted-foreground">
-              Browse the current OmniPath build resources from <code>resources.parquet</code>, including build status,
-              supported modalities, and output counts for entities, interactions, associations, identifiers, and ontology terms.
+              Browse the current OmniPath build resources from <code>resources.parquet</code>, including top-level interaction
+              vs. annotation resource types, supported modalities, and output counts for entities, interactions, associations,
+              annotations, identifiers, and ontology terms.
             </p>
           </div>
 
@@ -230,6 +251,18 @@ export default function ResourcesPage({
                 placeholder="Search resource name…"
                 className="pl-9"
               />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {topLevelCategories.map((category) => (
+                <Pill
+                  key={category}
+                  active={selectedTopLevelCategory === category}
+                  onClick={() => setSelectedTopLevelCategory(category)}
+                >
+                  {category === "all" ? "All resource types" : sentenceCase(category)}
+                </Pill>
+              ))}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -261,7 +294,7 @@ export default function ResourcesPage({
                 </p>
               </div>
               <div className="text-sm text-muted-foreground">
-                {formatNumber(summary.totalEntities)} entities • {formatNumber(summary.totalInteractions)} interactions • {formatNumber(summary.totalOntologyTerms)} ontology terms
+                {formatNumber(summary.totalEntities)} entities • {formatNumber(summary.totalInteractions)} interactions • {formatNumber(summary.totalAnnotations)} annotations • {formatNumber(summary.totalOntologyTerms)} ontology terms
               </div>
             </div>
 
@@ -273,6 +306,7 @@ export default function ResourcesPage({
                   { label: "Entities", value: resource.entity_count },
                   { label: "Interactions", value: resource.interaction_count },
                   { label: "Associations", value: resource.association_count },
+                  { label: "Annotations", value: resource.annotation_count },
                   { label: "Ontology Terms", value: resource.ontology_term_count },
                 ].filter((stat) => stat.value > 0);
 
@@ -306,6 +340,7 @@ export default function ResourcesPage({
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
+                      {resource.top_level_category ? <MiniTag>{sentenceCase(resource.top_level_category)}</MiniTag> : null}
                       {resource.primary_category ? <MiniTag>{sentenceCase(resource.primary_category)}</MiniTag> : null}
                       {resource.data_modalities.map((modality) => (
                         <MiniTag key={`${resource.resource_id}-${modality}`}>{sentenceCase(modality)}</MiniTag>
@@ -454,16 +489,29 @@ export default function ResourcesPage({
                   {downloadingSelection ? "Preparing bundle…" : "Download selection"}
                   <Download className="h-4 w-4" />
                 </Button>
-                {canOpenInDuckDb ? (
+                {canOpenAnnotationWorkspace ? (
+                  <Button asChild variant="outline">
+                    <Link href={openAnnotationWorkspaceHref}>
+                      Open annotation workspace
+                      <Layers3 className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button variant="outline" disabled>
+                    Open annotation workspace
+                    <Layers3 className="h-4 w-4" />
+                  </Button>
+                )}
+                {canOpenInteractionWorkspace ? (
                   <Button asChild>
-                    <Link href={openInDuckDbHref}>
-                      Open in DuckDB
+                    <Link href={openInteractionWorkspaceHref}>
+                      Open interaction workspace
                       <Database className="h-4 w-4" />
                     </Link>
                   </Button>
                 ) : (
                   <Button disabled>
-                    Open in DuckDB
+                    Open interaction workspace
                     <Database className="h-4 w-4" />
                   </Button>
                 )}

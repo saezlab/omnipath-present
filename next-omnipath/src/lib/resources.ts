@@ -9,11 +9,16 @@ export interface ResourceRecord {
   license: string | null;
   pubmed_id: string | null;
   primary_category: string | null;
+  top_level_category: string | null;
+  supports_interactions?: boolean;
+  supports_annotations?: boolean;
+  supports_ontology?: boolean;
   data_modalities: string[];
   interaction_participant_types: string[];
   entity_count: number;
   interaction_count: number;
   association_count: number;
+  annotation_count: number;
   identifier_count: number;
   ontology_term_count: number;
   total_size_bytes: number;
@@ -79,11 +84,13 @@ export async function getResources(): Promise<ResourceRecord[]> {
 export function summarizeResources(resources: ResourceRecord[]) {
   const buildStatusCounts = new Map<string, number>();
   const categoryCounts = new Map<string, number>();
+  const topLevelCategoryCounts = new Map<string, number>();
   const modalityCounts = new Map<string, number>();
 
   let totalEntities = 0;
   let totalInteractions = 0;
   let totalAssociations = 0;
+  let totalAnnotations = 0;
   let totalIdentifiers = 0;
   let totalOntologyTerms = 0;
   let totalBytes = 0;
@@ -96,6 +103,10 @@ export function summarizeResources(resources: ResourceRecord[]) {
       categoryCounts.set(resource.primary_category, (categoryCounts.get(resource.primary_category) || 0) + 1);
     }
 
+    if (resource.top_level_category) {
+      topLevelCategoryCounts.set(resource.top_level_category, (topLevelCategoryCounts.get(resource.top_level_category) || 0) + 1);
+    }
+
     for (const modality of resource.data_modalities || []) {
       modalityCounts.set(modality, (modalityCounts.get(modality) || 0) + 1);
     }
@@ -103,6 +114,7 @@ export function summarizeResources(resources: ResourceRecord[]) {
     totalEntities += resource.entity_count || 0;
     totalInteractions += resource.interaction_count || 0;
     totalAssociations += resource.association_count || 0;
+    totalAnnotations += resource.annotation_count || 0;
     totalIdentifiers += resource.identifier_count || 0;
     totalOntologyTerms += resource.ontology_term_count || 0;
     totalBytes += resource.total_size_bytes || 0;
@@ -113,11 +125,13 @@ export function summarizeResources(resources: ResourceRecord[]) {
     totalEntities,
     totalInteractions,
     totalAssociations,
+    totalAnnotations,
     totalIdentifiers,
     totalOntologyTerms,
     totalBytes,
     buildStatusCounts: Object.fromEntries(buildStatusCounts),
     categoryCounts: Object.fromEntries(categoryCounts),
+    topLevelCategoryCounts: Object.fromEntries(topLevelCategoryCounts),
     modalityCounts: Object.fromEntries(modalityCounts),
   };
 }
