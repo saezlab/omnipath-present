@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,8 +11,27 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
+import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { formatNumber } from "@/lib/utils";
 import { useDuckDbAnnotationWorkspace } from "./context";
+
+interface TreeNode {
+  id: string;
+  name?: string;
+  children?: TreeNode[];
+}
+
+interface AnnotationParentGroup {
+  id: string;
+  name: string;
+  terms: { termId: string; count: number }[];
+}
+
+interface AnnotationBranchGroup {
+  id: string;
+  name: string;
+  parents: AnnotationParentGroup[];
+}
 
 export function DuckDbAnnotationResultsPane() {
   const {
@@ -22,14 +42,18 @@ export function DuckDbAnnotationResultsPane() {
     pageSize,
     resourceIds,
     rows,
+    selectedEntitiesTermCounts,
     selectedRowKeys,
     selectedTerms,
+    selectionEntityIds,
     setFocusedEntityKey,
+    setFocusedTermId,
     setPageIndex,
     toggleSelectedRow,
     totalCount,
   } = useDuckDbAnnotationWorkspace();
   const { addEntity } = useEntitySelection();
+  const [treeRoot, setTreeRoot] = useState<TreeNode | null>(null);
 
   const pageStart = rows.length === 0 ? 0 : pageIndex * pageSize + 1;
   const pageEnd = pageIndex * pageSize + rows.length;
@@ -40,6 +64,98 @@ export function DuckDbAnnotationResultsPane() {
     () => rows.filter((row) => selectedRowKeys.includes(row.key)),
     [rows, selectedRowKeys],
   );
+
+  const selectedTermIdsForEntitiesMode = useMemo(
+    () => selectedEntitiesTermCounts.map((row) => row.cv_term),
+    [selectedEntitiesTermCounts],
+  );
+
+  useEffect(() => {
+    if (mode !== "entities_to_annotations" || selectedTermIdsForEntitiesMode.length === 0) {
+      setTreeRoot(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    void fetch("/api/ontology/tree", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ termIds: selectedTermIdsForEntitiesMode }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Failed to load hierarchy (${response.status})`);
+        return response.json() as Promise<{ root?: TreeNode | null }>;
+      })
+      .then((data) => setTreeRoot(data.root || null))
+      .catch((error) => {
+        if ((error as Error).name === "AbortError") return;
+        setTreeRoot(null);
+      });
+
+    return () => controller.abort();
+  }, [mode, selectedTermIdsForEntitiesMode]);
+
+  const groupedEntityAnnotations = useMemo(() => {
+    if (!treeRoot || selectedEntitiesTermCounts.length === 0) return null;
+
+    const countByTerm = new Map(selectedEntitiesTermCounts.map((row) => [row.cv_term, row.entity_count]));
+    const parentById = new Map<string, TreeNode>();
+    const rootChildById = new Map<string, TreeNode>();
+    const nameById = new Map<string, string>();
+
+    const visit = (node: TreeNode, parent: TreeNode | null, rootChild: TreeNode | null) => {
+      nameById.set(node.id, node.name || node.id);
+      if (parent) parentById.set(node.id, parent);
+      if (rootChild) rootChildById.set(node.id, rootChild);
+      node.children?.forEach((child) => visit(child, node, rootChild ?? child));
+    };
+    visit(treeRoot, null, null);
+
+    const branchMap = new Map<string, AnnotationBranchGroup>();
+    const ensureBranch = (id: string, name: string) => {
+      if (!branchMap.has(id)) branchMap.set(id, { id, name, parents: [] });
+      return branchMap.get(id)!;
+    };
+    const ensureParent = (branch: AnnotationBranchGroup, id: string, name: string) => {
+      const existing = branch.parents.find((parent) => parent.id === id);
+      if (existing) return existing;
+      const next = { id, name, terms: [] as { termId: string; count: number }[] };
+      branch.parents.push(next);
+      return next;
+    };
+
+    for (const termId of selectedTermIdsForEntitiesMode) {
+      const count = countByTerm.get(termId) || 0;
+      const parent = parentById.get(termId);
+      const rootChild = rootChildById.get(termId);
+      const branch = rootChild ? ensureBranch(rootChild.id, nameById.get(rootChild.id) || rootChild.id) : ensureBranch("other", "Other");
+      if (parent) {
+        ensureParent(branch, parent.id, nameById.get(parent.id) || parent.id).terms.push({ termId, count });
+      } else {
+        ensureParent(branch, "other", "Other").terms.push({ termId, count });
+      }
+    }
+
+    const branches = Array.from(branchMap.values());
+    const parentCount = (group: AnnotationParentGroup) => group.terms.reduce((sum, term) => sum + term.count, 0);
+    const branchCount = (branch: AnnotationBranchGroup) => branch.parents.reduce((sum, parent) => sum + parentCount(parent), 0);
+
+    branches.forEach((branch) => {
+      branch.parents.forEach((parent) => parent.terms.sort((a, b) => b.count - a.count || a.termId.localeCompare(b.termId)));
+      branch.parents.sort((a, b) => parentCount(b) - parentCount(a));
+    });
+    branches.sort((a, b) => {
+      if (a.id === "other") return 1;
+      if (b.id === "other") return -1;
+      return branchCount(b) - branchCount(a);
+    });
+
+    return {
+      rootName: treeRoot.name || treeRoot.id,
+      branches,
+    };
+  }, [selectedEntitiesTermCounts, selectedTermIdsForEntitiesMode, treeRoot]);
 
   function saveRows(targetRows: typeof rows) {
     targetRows.forEach((row) => {
@@ -57,13 +173,71 @@ export function DuckDbAnnotationResultsPane() {
   if (mode === "entities_to_annotations") {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden p-4">
-        <Card className="flex-1">
-          <CardHeader>
-            <CardTitle>Entities → Annotations</CardTitle>
+        <Card className="min-h-0 flex-1 overflow-hidden">
+          <CardHeader className="border-b">
+            <CardTitle>Annotations across selected entities</CardTitle>
+            <div className="text-sm text-muted-foreground">
+              {selectionEntityIds.length > 0
+                ? `${formatNumber(selectedEntitiesTermCounts.length)} annotation terms across ${formatNumber(selectionEntityIds.length)} selected entities`
+                : "Add entities to your selection to summarize their annotations."}
+            </div>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>Entity-set enrichment is coming next.</p>
-            <p>For now, switch back to <span className="font-medium text-foreground">Annotations → Entities</span> to search ontology terms and collect matching entities.</p>
+          <CardContent className="min-h-0 flex-1 overflow-auto p-4">
+            {selectionEntityIds.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">No entities are currently saved in selection.</div>
+            ) : selectedEntitiesTermCounts.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">No annotation terms found for the selected entities in the loaded resources.</div>
+            ) : groupedEntityAnnotations ? (
+              <Accordion type="multiple" defaultValue={groupedEntityAnnotations.branches.map((branch) => branch.id)} className="space-y-2">
+                <div className="pb-2 text-lg font-semibold">{groupedEntityAnnotations.rootName}</div>
+                {groupedEntityAnnotations.branches.map((branch) => (
+                  <AccordionItem key={branch.id} value={branch.id} className="rounded-lg border px-4">
+                    <AccordionTrigger className="py-3 hover:no-underline text-base font-medium">{branch.name}</AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <div className="space-y-4 pl-2">
+                        {branch.parents.map((parent) => (
+                          <div key={parent.id} className="space-y-2">
+                            {parent.id !== branch.id ? <div className="pl-2 py-1 text-sm font-medium text-muted-foreground">{parent.name}</div> : null}
+                            <div className="ml-2 space-y-1 border-l-2 border-muted pl-3">
+                              {parent.terms.map((term) => (
+                                <button
+                                  key={term.termId}
+                                  type="button"
+                                  onClick={() => setFocusedTermId(term.termId)}
+                                  className="flex w-full items-center justify-between rounded px-2 py-1 text-left hover:bg-muted/50"
+                                >
+                                  <CvTermHoverCard termId={term.termId}>
+                                    <span className="text-sm cursor-help hover:underline">{term.termId}</span>
+                                  </CvTermHoverCard>
+                                  <Badge variant="outline" className="text-xs">{formatNumber(term.count)}</Badge>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            ) : (
+              <div className="space-y-2">
+                {selectedEntitiesTermCounts.map((term) => (
+                  <button
+                    key={term.cv_term}
+                    type="button"
+                    onClick={() => setFocusedTermId(term.cv_term)}
+                    className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left hover:bg-muted/50"
+                  >
+                    <div>
+                      <div className="text-sm font-medium"><OntologyTermLabel termId={term.cv_term} /></div>
+                      <div className="text-xs text-muted-foreground">{term.cv_term}</div>
+                    </div>
+                    <Badge variant="outline">{formatNumber(term.entity_count)}</Badge>
+                  </button>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

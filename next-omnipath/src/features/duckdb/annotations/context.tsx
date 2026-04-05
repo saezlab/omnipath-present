@@ -11,12 +11,15 @@ import {
   mountResourceAnnotations,
   queryAnnotationEntityPage,
   queryAnnotationEntitySummaries,
+  queryAnnotationEntitySearchKeys,
   queryAnnotationEntityTerms,
   queryAnnotationTermCounts,
   queryAnnotationTermResourceSupport,
+  queryAnnotationTermsForEntities,
 } from "@/lib/duckdb/annotation-resource-sql";
 import { mountResourceEntities, mountResourceIdentifierRows } from "@/lib/duckdb/resource-sql";
 import { fetchResourceWorkspaceArtifact, fetchResourceWorkspaceManifest } from "@/lib/resource-workspace";
+import { useEntitySelection } from "@/contexts/entity-selection-context";
 
 export type AnnotationWorkspaceMode = "annotations_to_entities" | "entities_to_annotations";
 export type AnnotationTermMatchMode = "any" | "all";
@@ -47,6 +50,9 @@ interface DuckDbAnnotationWorkspaceContextValue {
   removeSelectedTerm: (termId: string) => void;
   clearSelectedTerms: () => void;
   availableTerms: AnnotationTermCountRow[];
+  selectedEntitiesTermCounts: AnnotationTermCountRow[];
+  selectionEntityIds: string[];
+  searchEntities: (query: string, limit?: number) => Promise<AnnotationEntitySummary[]>;
   rows: AnnotationEntityPageRow[];
   totalCount: number;
   pageIndex: number;
@@ -73,6 +79,7 @@ function clampProgress(value: number): number {
 
 export function DuckDbAnnotationWorkspaceProvider({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
+  const { entityIds: selectionEntityIds } = useEntitySelection();
   const connectionRef = useRef<AsyncDuckDBConnection | null>(null);
   const currentObjectUrlsRef = useRef<string[]>([]);
 
@@ -86,6 +93,7 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
   const [termMatchMode, setTermMatchMode] = useState<AnnotationTermMatchMode>("any");
   const [selectedTerms, setSelectedTerms] = useState<string[]>([]);
   const [availableTerms, setAvailableTerms] = useState<AnnotationTermCountRow[]>([]);
+  const [selectedEntitiesTermCounts, setSelectedEntitiesTermCounts] = useState<AnnotationTermCountRow[]>([]);
   const [rows, setRows] = useState<AnnotationEntityPageRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [pageIndex, setPageIndex] = useState(0);
@@ -219,6 +227,7 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load selected resources");
       setAvailableTerms([]);
+      setSelectedEntitiesTermCounts([]);
       setEntitySummaries(new Map());
       setRows([]);
       setTotalCount(0);
@@ -244,6 +253,14 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
         setLoadingState("idle", null, null);
       });
   }, [materialized, mode, pageIndex, refreshEntityQuery, selectedTerms, setLoadingState, termMatchMode]);
+
+  useEffect(() => {
+    if (!materialized || mode !== "entities_to_annotations") return;
+    void ensureConnection()
+      .then((connection) => queryAnnotationTermsForEntities(connection, selectionEntityIds))
+      .then(setSelectedEntitiesTermCounts)
+      .catch(() => setSelectedEntitiesTermCounts([]));
+  }, [ensureConnection, materialized, mode, selectionEntityIds]);
 
   useEffect(() => {
     if (!materialized || !focusedTermId) {
@@ -312,6 +329,13 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
 
   const clearSelectedRows = useCallback(() => setSelectedRowKeys([]), []);
 
+  const searchEntities = useCallback(async (query: string, limit = 12) => {
+    if (!materialized) return [];
+    const connection = await ensureConnection();
+    const keys = await queryAnnotationEntitySearchKeys(connection, query, limit);
+    return keys.map((key) => entitySummaries.get(key)).filter((value): value is AnnotationEntitySummary => Boolean(value));
+  }, [ensureConnection, entitySummaries, materialized]);
+
   const value = useMemo<DuckDbAnnotationWorkspaceContextValue>(() => ({
     loading,
     loadingStage,
@@ -329,6 +353,9 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
     removeSelectedTerm,
     clearSelectedTerms,
     availableTerms,
+    selectedEntitiesTermCounts,
+    selectionEntityIds,
+    searchEntities,
     rows,
     totalCount,
     pageIndex,
@@ -368,6 +395,9 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
     removeSelectedTerm,
     resourceIds,
     rows,
+    searchEntities,
+    selectedEntitiesTermCounts,
+    selectionEntityIds,
     selectedRowKeys,
     selectedTerms,
     termMatchMode,

@@ -346,6 +346,43 @@ export async function queryAnnotationEntityPage(
   };
 }
 
+export async function queryAnnotationEntitySearchKeys(
+  connection: AsyncDuckDBConnection,
+  query: string,
+  limit = 20,
+): Promise<string[]> {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  const pattern = `%${normalized.replace(/'/g, "''")}%`;
+
+  const rows = await runRowsQuery(
+    connection,
+    `WITH identifiers AS (
+       SELECT resource_id, entity_id, identifier
+       FROM resource_entity_identifiers_source
+       UNION ALL
+       SELECT resource_id, entity_id, identifier
+       FROM resource_entity_identifiers_resolved
+     )
+     SELECT DISTINCT resource_id, entity_id
+     FROM (
+       SELECT entities.resource_id, entities.entity_id
+       FROM resource_entities AS entities
+       WHERE lower(CAST(entities.entity_id AS VARCHAR)) LIKE ${sqlString(pattern)}
+
+       UNION
+
+       SELECT identifiers.resource_id, identifiers.entity_id
+       FROM identifiers
+       WHERE lower(CAST(identifiers.identifier AS VARCHAR)) LIKE ${sqlString(pattern)}
+     ) AS matches
+     ORDER BY resource_id ASC, entity_id ASC
+     LIMIT ${limit}`,
+  );
+
+  return rows.map((row) => `${String(row.resource_id ?? "")}:${String(row.entity_id ?? "")}`).filter(Boolean);
+}
+
 export async function queryAnnotationEntityTerms(
   connection: AsyncDuckDBConnection,
   resourceId: string,
@@ -363,6 +400,38 @@ export async function queryAnnotationEntityTerms(
      LIMIT 250`,
   );
   return rows.map((row) => String(row.cv_term ?? "")).filter(Boolean);
+}
+
+export async function queryAnnotationTermsForEntities(
+  connection: AsyncDuckDBConnection,
+  entityIds: string[],
+): Promise<AnnotationTermCountRow[]> {
+  const normalizedIds = Array.from(new Set(entityIds.map((value) => value.trim()).filter(Boolean)));
+  if (normalizedIds.length === 0) return [];
+
+  const rows = await runRowsQuery(
+    connection,
+    `SELECT
+       cv_term,
+       COUNT(DISTINCT subject_id) AS entity_count,
+       COUNT(*) AS annotation_count,
+       COUNT(DISTINCT resource_id) AS resource_count
+     FROM resource_annotations
+     WHERE subject_type = 'entity'
+       AND subject_id IN (${normalizedIds.map(sqlString).join(", ")})
+       AND cv_term IS NOT NULL
+       AND cv_term <> ''
+     GROUP BY 1
+     ORDER BY entity_count DESC, annotation_count DESC, cv_term ASC
+     LIMIT 500`,
+  );
+
+  return rows.map((row) => ({
+    cv_term: String(row.cv_term ?? ""),
+    entity_count: Number(row.entity_count ?? 0),
+    annotation_count: Number(row.annotation_count ?? 0),
+    resource_count: Number(row.resource_count ?? 0),
+  }));
 }
 
 export async function queryAnnotationTermResourceSupport(

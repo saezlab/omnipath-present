@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
 import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { RefinePanelLayout, RefineSection } from "@/features/workspace/refine/refine-panel-layout";
@@ -24,6 +25,7 @@ interface TreeNode {
   name?: string;
   children?: TreeNode[];
 }
+
 
 function TreePreview({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
   return (
@@ -65,11 +67,18 @@ export function DuckDbAnnotationRefinePane() {
     setTermMatchMode,
     termMatchMode,
     totalCount,
+    selectedEntitiesTermCounts,
+    selectionEntityIds,
+    searchEntities,
   } = useDuckDbAnnotationWorkspace();
 
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<OntologySearchMatch[]>([]);
   const [treeRoot, setTreeRoot] = useState<TreeNode | null>(null);
+  const [entityQuery, setEntityQuery] = useState("");
+  const [entitySearchResults, setEntitySearchResults] = useState<Array<{ key: string; entity_id: string; resource_id: string; canonical_identifier: string; display_name: string; entity_type_name?: string }>>([]);
+  const [entitySearchLoading, setEntitySearchLoading] = useState(false);
+  const { addEntity, isSelected, removeEntity, selectedEntities } = useEntitySelection();
 
   useEffect(() => {
     const normalized = query.trim();
@@ -133,6 +142,35 @@ export function DuckDbAnnotationRefinePane() {
 
     return () => controller.abort();
   }, [selectedTerms]);
+
+  useEffect(() => {
+    const normalized = entityQuery.trim();
+    if (mode !== "entities_to_annotations" || normalized.length < 2) {
+      setEntitySearchResults([]);
+      setEntitySearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setEntitySearchLoading(true);
+        const results = await searchEntities(normalized, 8);
+        if (!cancelled) {
+          setEntitySearchResults(results);
+        }
+      } catch {
+        if (!cancelled) setEntitySearchResults([]);
+      } finally {
+        if (!cancelled) setEntitySearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [entityQuery, mode, searchEntities]);
 
   const selectedCountLabel = useMemo(() => {
     if (!selectedTerms.length) return "No terms selected";
@@ -315,12 +353,87 @@ export function DuckDbAnnotationRefinePane() {
           </RefineSection>
         </>
       ) : (
-        <RefineSection title="Coming next" defaultOpen>
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Entity-set enrichment is coming next.</p>
-            <p>This mode will start from a saved entity set and surface enriched annotations and ontology branches.</p>
-          </div>
-        </RefineSection>
+        <>
+          <RefineSection title="Entity search" defaultOpen>
+            <div className="space-y-3">
+              <Input
+                value={entityQuery}
+                onChange={(event) => setEntityQuery(event.target.value)}
+                placeholder="Search entities to add to selection…"
+              />
+              {entitySearchLoading ? <div className="text-sm text-muted-foreground">Searching…</div> : null}
+              {entitySearchResults.length > 0 ? (
+                <div className="space-y-2">
+                  {entitySearchResults.map((result) => {
+                    const entityId = String(result.entity_id ?? "").trim();
+                    if (!entityId) return null;
+                    const selected = isSelected(entityId);
+                    return (
+                      <div key={result.key} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{result.display_name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{result.canonical_identifier}</div>
+                          <div className="truncate text-[11px] text-muted-foreground">{result.resource_id}{result.entity_type_name ? ` · ${result.entity_type_name}` : ""}</div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={selected ? "outline" : "default"}
+                          onClick={() => {
+                            if (selected) {
+                              removeEntity(entityId);
+                              return;
+                            }
+                            addEntity({
+                              id: entityId,
+                              entityId: entityId,
+                              name: result.display_name,
+                              type: result.entity_type_name,
+                            });
+                          }}
+                        >
+                          {selected ? "Remove" : "Add"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : entityQuery.trim().length >= 2 && !entitySearchLoading ? (
+                <div className="text-sm text-muted-foreground">No entities matched that query.</div>
+              ) : null}
+            </div>
+          </RefineSection>
+
+          <RefineSection title="Selected entity set" defaultOpen>
+            <div className="space-y-3 text-sm">
+              <div>{formatNumber(selectionEntityIds.length)} entities currently saved in selection.</div>
+              <div className="text-muted-foreground">
+                {selectedEntitiesTermCounts.length > 0
+                  ? `${formatNumber(selectedEntitiesTermCounts.length)} local annotation terms found across the loaded resources.`
+                  : "Load annotation-capable resources and add entities to selection to summarize their annotations."}
+              </div>
+              {selectedEntities.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selectedEntities.slice(0, 20).map((entity) => {
+                    const entityId = String(entity.entityId ?? entity.id);
+                    return (
+                      <button
+                        key={entityId}
+                        type="button"
+                        onClick={() => removeEntity(entityId)}
+                        className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm hover:bg-muted/40"
+                        title="Remove from selection"
+                      >
+                        <span>{entity.name}</span>
+                        <span className="text-muted-foreground">×</span>
+                      </button>
+                    );
+                  })}
+                  {selectedEntities.length > 20 ? <Badge variant="outline">+{selectedEntities.length - 20} more</Badge> : null}
+                </div>
+              ) : null}
+            </div>
+          </RefineSection>
+        </>
       )}
     </RefinePanelLayout>
   );
