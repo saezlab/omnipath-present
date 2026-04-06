@@ -245,8 +245,19 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
     setRows(page.rows);
     setTotalCount(page.totalCount);
     setFacets(nextFacets);
+
+    const pageEntityIds = Array.from(new Set(page.rows.flatMap((row) => [
+      String(row.member_a_id ?? "").trim(),
+      String(row.member_b_id ?? "").trim(),
+    ]).filter(Boolean)));
+    const missingEntityIds = pageEntityIds.filter((entityId) => !entitySummaries.has(entityId));
+    if (missingEntityIds.length > 0) {
+      const summaries = await queryEntitySummaries(connection, "entities_subset", missingEntityIds);
+      setEntitySummaries((current) => new Map([...current, ...summaries]));
+    }
+
     setLoadingState("querying_local", "Running local DuckDB queries…", 100);
-  }, [ensureConnection, pageSize, setLoadingState]);
+  }, [ensureConnection, entitySummaries, pageSize, setLoadingState]);
 
   const loadArtifactsIntoWorkspace = useCallback(async ({
     interactionBlob,
@@ -286,8 +297,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
       setLoadingState("loading_entities", source === "cache" ? "Loading cached entity dataset into DuckDB…" : "Loading entity dataset into DuckDB…", 88);
       await registerParquetFile(entityFileName, entityBlob);
       await mountEntitySubset(connection, entityFileName);
-      const summaries = await queryEntitySummaries(connection);
-      setEntitySummaries(summaries);
+      setEntitySummaries(new Map());
     } else {
       setEntitySummaries(new Map());
     }
@@ -372,8 +382,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
         await mountResourceEntities(connection, entityFiles);
         await mountResourceIdentifierRows(connection, sourceIdentifierFiles, { includeCanonicalFlag: false, viewName: "resource_entity_identifiers_source" });
         await mountResourceIdentifierRows(connection, resolvedIdentifierFiles, { includeCanonicalFlag: true, viewName: "resource_entity_identifiers_resolved" });
-        const summaries = await queryEntitySummaries(connection);
-        setEntitySummaries(summaries);
+        setEntitySummaries(new Map());
       } else {
         setEntitySummaries(new Map());
       }
@@ -473,8 +482,7 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
         setLoadingState("loading_entities", "Loading entity dataset into DuckDB…", 88);
         await registerParquetFile(entityArtifact.fileName, entityArtifact.blob);
         await mountEntitySubset(connection, entityArtifact.fileName);
-        const summaries = await queryEntitySummaries(connection);
-        setEntitySummaries(summaries);
+        setEntitySummaries(new Map());
       } else {
         setEntitySummaries(new Map());
       }
@@ -593,6 +601,21 @@ export function DuckDbWorkspaceProvider({ children }: { children: ReactNode }) {
         setLoadingState("idle", null, null);
       });
   }, [localFilters, materialized, pageIndex, refreshLocalQueries, setLoadingState]);
+
+  useEffect(() => {
+    if (!materialized || serverEntityScope.length === 0) return;
+    const missingEntityIds = serverEntityScope.filter((entityId) => !entitySummaries.has(entityId));
+    if (missingEntityIds.length === 0) return;
+
+    void ensureConnection()
+      .then((connection) => queryEntitySummaries(connection, "entities_subset", missingEntityIds))
+      .then((summaries) => {
+        if (summaries.size > 0) {
+          setEntitySummaries((current) => new Map([...current, ...summaries]));
+        }
+      })
+      .catch(() => undefined);
+  }, [ensureConnection, entitySummaries, materialized, serverEntityScope]);
 
   useEffect(() => {
     return () => {

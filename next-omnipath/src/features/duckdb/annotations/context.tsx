@@ -8,10 +8,11 @@ import {
   type AnnotationEntityPageRow,
   type AnnotationEntitySummary,
   type AnnotationTermCountRow,
+  materializeAnnotationEntityTerms,
   mountResourceAnnotations,
   queryAnnotationEntityPage,
-  queryAnnotationEntitySummaries,
   queryAnnotationEntitySearchKeys,
+  queryAnnotationEntitySummariesForKeys,
   queryAnnotationEntityTerms,
   queryAnnotationTermCounts,
   queryAnnotationTermResourceSupport,
@@ -142,8 +143,18 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
     const page = await queryAnnotationEntityPage(connection, nextSelectedTerms, nextTermMatchMode, nextPageIndex, pageSize);
     setRows(page.rows);
     setTotalCount(page.totalCount);
+
+    const missingKeys = page.rows
+      .map((row) => row.key)
+      .filter((key) => !entitySummaries.has(key));
+
+    if (missingKeys.length > 0) {
+      const summaries = await queryAnnotationEntitySummariesForKeys(connection, missingKeys);
+      setEntitySummaries((current) => new Map([...current, ...summaries]));
+    }
+
     setLoadingState("querying_local", "Running local annotation queries…", 100);
-  }, [ensureConnection, materialized, pageSize, setLoadingState]);
+  }, [ensureConnection, entitySummaries, materialized, pageSize, setLoadingState]);
 
   const refreshSubset = useCallback(async () => {
     setLoading(true);
@@ -210,17 +221,15 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
 
       setLoadingState("loading_tables", "Loading selected resource annotations into DuckDB…", 80);
       await mountResourceAnnotations(connection, annotationFiles);
+      await materializeAnnotationEntityTerms(connection);
       await mountResourceEntities(connection, entityFiles);
       await mountResourceIdentifierRows(connection, sourceIdentifierFiles, { includeCanonicalFlag: false, viewName: "resource_entity_identifiers_source" });
       await mountResourceIdentifierRows(connection, resolvedIdentifierFiles, { includeCanonicalFlag: true, viewName: "resource_entity_identifiers_resolved" });
 
-      const [termCounts, summaries] = await Promise.all([
-        queryAnnotationTermCounts(connection, 150),
-        queryAnnotationEntitySummaries(connection),
-      ]);
+      const termCounts = await queryAnnotationTermCounts(connection, 150);
 
       setAvailableTerms(termCounts);
-      setEntitySummaries(summaries);
+      setEntitySummaries(new Map());
       setMaterialized(true);
       setPageIndex(0);
       await refreshEntityQuery(0, selectedTerms, termMatchMode);
@@ -333,7 +342,17 @@ export function DuckDbAnnotationWorkspaceProvider({ children }: { children: Reac
     if (!materialized) return [];
     const connection = await ensureConnection();
     const keys = await queryAnnotationEntitySearchKeys(connection, query, limit);
-    return keys.map((key) => entitySummaries.get(key)).filter((value): value is AnnotationEntitySummary => Boolean(value));
+    if (keys.length === 0) return [];
+
+    const missingKeys = keys.filter((key) => !entitySummaries.has(key));
+    let merged = entitySummaries;
+    if (missingKeys.length > 0) {
+      const summaries = await queryAnnotationEntitySummariesForKeys(connection, missingKeys);
+      merged = new Map([...entitySummaries, ...summaries]);
+      setEntitySummaries(merged);
+    }
+
+    return keys.map((key) => merged.get(key)).filter((value): value is AnnotationEntitySummary => Boolean(value));
   }, [ensureConnection, entitySummaries, materialized]);
 
   const value = useMemo<DuckDbAnnotationWorkspaceContextValue>(() => ({

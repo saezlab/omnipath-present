@@ -128,7 +128,7 @@ export interface AnnotationEntityPageRow {
   matched_term_count: number;
   annotation_count: number;
   matched_terms: string[];
-  supporting_resources: string[];
+  total_count?: number;
 }
 
 export async function mountResourceAnnotations(
@@ -162,20 +162,39 @@ export async function mountResourceAnnotations(
   await connection.query(`CREATE OR REPLACE VIEW ${viewName} AS ${query}`);
 }
 
+export async function materializeAnnotationEntityTerms(
+  connection: AsyncDuckDBConnection,
+  sourceViewName = "resource_annotations",
+  tableName = "resource_entity_annotation_terms",
+): Promise<void> {
+  await connection.query(`
+    CREATE OR REPLACE TEMP TABLE ${tableName} AS
+    SELECT
+      resource_id,
+      CAST(subject_id AS VARCHAR) AS entity_id,
+      cv_term,
+      COUNT(*) AS annotation_count
+    FROM ${sourceViewName}
+    WHERE subject_type = 'entity'
+      AND cv_term IS NOT NULL
+      AND cv_term <> ''
+    GROUP BY 1, 2, 3
+  `);
+}
+
 export async function queryAnnotationTermCounts(
   connection: AsyncDuckDBConnection,
   limit = 200,
-  viewName = "resource_annotations",
+  tableName = "resource_entity_annotation_terms",
 ): Promise<AnnotationTermCountRow[]> {
   const rows = await runRowsQuery(
     connection,
     `SELECT
       cv_term,
-      COUNT(DISTINCT resource_id || ':' || subject_id) AS entity_count,
-      COUNT(*) AS annotation_count,
+      COUNT(*) AS entity_count,
+      SUM(annotation_count) AS annotation_count,
       COUNT(DISTINCT resource_id) AS resource_count
-     FROM ${viewName}
-     WHERE subject_type = 'entity' AND cv_term IS NOT NULL AND cv_term <> ''
+     FROM ${tableName}
      GROUP BY 1
      ORDER BY entity_count DESC, cv_term ASC
      LIMIT ${limit}`,
@@ -189,14 +208,57 @@ export async function queryAnnotationTermCounts(
   }));
 }
 
-export async function queryAnnotationEntitySummaries(
+function buildEntityKeyFilter(keys: string[]): string {
+  const pairs = keys
+    .map((key) => {
+      const separator = key.indexOf(":");
+      if (separator <= 0) return null;
+      const resourceId = key.slice(0, separator).trim();
+      const entityId = key.slice(separator + 1).trim();
+      if (!resourceId || !entityId) return null;
+      return `SELECT ${sqlString(resourceId)} AS resource_id, ${sqlString(entityId)} AS entity_id`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return pairs.join(" UNION ALL ");
+}
+
+export async function queryAnnotationEntitySummariesForKeys(
   connection: AsyncDuckDBConnection,
+  keys: string[],
   entityViewName = "resource_entities",
 ): Promise<Map<string, AnnotationEntitySummary>> {
+  const filterSql = buildEntityKeyFilter(Array.from(new Set(keys)));
+  if (!filterSql) return new Map();
+
   const [entityRows, sourceRows, resolvedRows] = await Promise.all([
-    runRowsQuery(connection, `SELECT resource_id, entity_id, entity_type FROM ${entityViewName}`),
-    runRowsQuery(connection, "SELECT resource_id, entity_id, identifier, identifier_type FROM resource_entity_identifiers_source"),
-    runRowsQuery(connection, "SELECT resource_id, entity_id, identifier, identifier_type, is_canonical FROM resource_entity_identifiers_resolved"),
+    runRowsQuery(
+      connection,
+      `WITH requested AS (${filterSql})
+       SELECT entities.resource_id, entities.entity_id, entities.entity_type
+       FROM ${entityViewName} AS entities
+       INNER JOIN requested
+         ON entities.resource_id = requested.resource_id
+        AND CAST(entities.entity_id AS VARCHAR) = requested.entity_id`,
+    ),
+    runRowsQuery(
+      connection,
+      `WITH requested AS (${filterSql})
+       SELECT identifiers.resource_id, identifiers.entity_id, identifiers.identifier, identifiers.identifier_type
+       FROM resource_entity_identifiers_source AS identifiers
+       INNER JOIN requested
+         ON identifiers.resource_id = requested.resource_id
+        AND CAST(identifiers.entity_id AS VARCHAR) = requested.entity_id`,
+    ),
+    runRowsQuery(
+      connection,
+      `WITH requested AS (${filterSql})
+       SELECT identifiers.resource_id, identifiers.entity_id, identifiers.identifier, identifiers.identifier_type, identifiers.is_canonical
+       FROM resource_entity_identifiers_resolved AS identifiers
+       INNER JOIN requested
+         ON identifiers.resource_id = requested.resource_id
+        AND CAST(identifiers.entity_id AS VARCHAR) = requested.entity_id`,
+    ),
   ]);
 
   const sourceByEntity = new Map<string, Array<{ identifier: string; identifier_type: string }>>();
@@ -256,6 +318,7 @@ export async function queryAnnotationEntityPage(
   matchMode: "any" | "all",
   pageIndex: number,
   pageSize: number,
+  tableName = "resource_entity_annotation_terms",
 ): Promise<{ rows: AnnotationEntityPageRow[]; totalCount: number }> {
   if (selectedTerms.length === 0) {
     return { rows: [], totalCount: 0 };
@@ -271,19 +334,17 @@ export async function queryAnnotationEntityPage(
   const sql = `
     WITH selected_terms AS (${selectedTermsSql}),
     matches AS (
-      SELECT annotations.resource_id, annotations.subject_id AS entity_id, annotations.cv_term
-      FROM resource_annotations AS annotations
+      SELECT annotations.resource_id, annotations.entity_id, annotations.cv_term, annotations.annotation_count
+      FROM ${tableName} AS annotations
       INNER JOIN selected_terms ON annotations.cv_term = selected_terms.cv_term
-      WHERE annotations.subject_type = 'entity'
     ),
     entity_matches AS (
       SELECT
         matches.resource_id,
         matches.entity_id,
-        COUNT(*) AS annotation_count,
+        SUM(matches.annotation_count) AS annotation_count,
         COUNT(DISTINCT matches.cv_term) AS matched_term_count,
-        list(DISTINCT matches.cv_term) AS matched_terms,
-        list(DISTINCT matches.resource_id) AS supporting_resources
+        list(DISTINCT matches.cv_term) AS matched_terms
       FROM matches
       GROUP BY 1, 2
       ${matchConstraint}
@@ -297,7 +358,7 @@ export async function queryAnnotationEntityPage(
       entity_matches.annotation_count,
       entity_matches.matched_term_count,
       entity_matches.matched_terms,
-      entity_matches.supporting_resources
+      COUNT(*) OVER () AS total_count
     FROM entity_matches
     LEFT JOIN resource_entities AS entities
       ON entity_matches.resource_id = entities.resource_id
@@ -307,23 +368,7 @@ export async function queryAnnotationEntityPage(
   `;
 
   const rows = await runRowsQuery(connection, sql);
-  const countRows = await runRowsQuery(
-    connection,
-    `WITH selected_terms AS (${selectedTermsSql}),
-     matches AS (
-       SELECT annotations.resource_id, annotations.subject_id AS entity_id, annotations.cv_term
-       FROM resource_annotations AS annotations
-       INNER JOIN selected_terms ON annotations.cv_term = selected_terms.cv_term
-       WHERE annotations.subject_type = 'entity'
-     )
-     SELECT COUNT(*) AS total_count
-     FROM (
-       SELECT matches.resource_id, matches.entity_id
-       FROM matches
-       GROUP BY 1, 2
-       ${matchConstraint}
-     )`,
-  );
+  const totalCount = Number(rows[0]?.total_count ?? 0);
 
   return {
     rows: rows.map((row) => {
@@ -339,10 +384,10 @@ export async function queryAnnotationEntityPage(
         matched_term_count: Number(row.matched_term_count ?? 0),
         annotation_count: Number(row.annotation_count ?? 0),
         matched_terms: toStringArray(row.matched_terms).sort(),
-        supporting_resources: toStringArray(row.supporting_resources).sort(),
+        total_count: Number(row.total_count ?? 0),
       } satisfies AnnotationEntityPageRow;
     }),
-    totalCount: Number(countRows[0]?.total_count ?? 0),
+    totalCount,
   };
 }
 
@@ -387,15 +432,14 @@ export async function queryAnnotationEntityTerms(
   connection: AsyncDuckDBConnection,
   resourceId: string,
   entityId: string,
+  tableName = "resource_entity_annotation_terms",
 ): Promise<string[]> {
   const rows = await runRowsQuery(
     connection,
-    `SELECT cv_term, COUNT(*) AS annotation_count
-     FROM resource_annotations
-     WHERE subject_type = 'entity'
-       AND resource_id = ${sqlString(resourceId)}
-       AND subject_id = ${sqlString(entityId)}
-     GROUP BY 1
+    `SELECT cv_term, annotation_count
+     FROM ${tableName}
+     WHERE resource_id = ${sqlString(resourceId)}
+       AND entity_id = ${sqlString(entityId)}
      ORDER BY annotation_count DESC, cv_term ASC
      LIMIT 250`,
   );
@@ -405,6 +449,7 @@ export async function queryAnnotationEntityTerms(
 export async function queryAnnotationTermsForEntities(
   connection: AsyncDuckDBConnection,
   entityIds: string[],
+  tableName = "resource_entity_annotation_terms",
 ): Promise<AnnotationTermCountRow[]> {
   const normalizedIds = Array.from(new Set(entityIds.map((value) => value.trim()).filter(Boolean)));
   if (normalizedIds.length === 0) return [];
@@ -413,14 +458,11 @@ export async function queryAnnotationTermsForEntities(
     connection,
     `SELECT
        cv_term,
-       COUNT(DISTINCT subject_id) AS entity_count,
-       COUNT(*) AS annotation_count,
+       COUNT(DISTINCT entity_id) AS entity_count,
+       SUM(annotation_count) AS annotation_count,
        COUNT(DISTINCT resource_id) AS resource_count
-     FROM resource_annotations
-     WHERE subject_type = 'entity'
-       AND subject_id IN (${normalizedIds.map(sqlString).join(", ")})
-       AND cv_term IS NOT NULL
-       AND cv_term <> ''
+     FROM ${tableName}
+     WHERE entity_id IN (${normalizedIds.map(sqlString).join(", ")})
      GROUP BY 1
      ORDER BY entity_count DESC, annotation_count DESC, cv_term ASC
      LIMIT 500`,
@@ -437,15 +479,16 @@ export async function queryAnnotationTermsForEntities(
 export async function queryAnnotationTermResourceSupport(
   connection: AsyncDuckDBConnection,
   termId: string,
+  tableName = "resource_entity_annotation_terms",
 ): Promise<Array<{ resource_id: string; entity_count: number; annotation_count: number }>> {
   const rows = await runRowsQuery(
     connection,
     `SELECT
        resource_id,
-       COUNT(DISTINCT subject_id) AS entity_count,
-       COUNT(*) AS annotation_count
-     FROM resource_annotations
-     WHERE subject_type = 'entity' AND cv_term = ${sqlString(termId)}
+       COUNT(*) AS entity_count,
+       SUM(annotation_count) AS annotation_count
+     FROM ${tableName}
+     WHERE cv_term = ${sqlString(termId)}
      GROUP BY 1
      ORDER BY entity_count DESC, resource_id ASC`,
   );

@@ -357,13 +357,19 @@ export async function queryInteractionPage(
 
   const rows = await runRowsQuery(
     connection,
-    `SELECT ${DEFAULT_INTERACTION_COLUMNS.join(", ")} FROM ${viewName} ${whereClause} ORDER BY evidence_count DESC NULLS LAST, interaction_key LIMIT ${pageSize} OFFSET ${offset}`,
+    `SELECT ${DEFAULT_INTERACTION_COLUMNS.join(", ")}, COUNT(*) OVER () AS total_count
+     FROM ${viewName}
+     ${whereClause}
+     ORDER BY evidence_count DESC NULLS LAST, interaction_key
+     LIMIT ${pageSize} OFFSET ${offset}`,
   );
 
-  const countRows = await runRowsQuery(connection, `SELECT COUNT(*) AS total_count FROM ${viewName} ${whereClause}`);
-  const totalCount = Number(countRows[0]?.total_count || 0);
+  const totalCount = Number(rows[0]?.total_count || 0);
 
-  return { rows, totalCount };
+  return {
+    rows: rows.map(({ total_count, ...row }) => row),
+    totalCount,
+  };
 }
 
 async function queryScalarFacet(
@@ -445,13 +451,18 @@ export async function queryInteractionEntityIds(
 export async function queryEntitySummaries(
   connection: AsyncDuckDBConnection,
   viewName = "entities_subset",
+  entityIds?: string[],
 ): Promise<Map<string, { id: string; canonical_identifier: string; display_name: string; entity_type_name?: string }>> {
+  const normalizedEntityIds = Array.from(new Set((entityIds || []).map((value) => String(value).trim()).filter(Boolean)));
+  const entityFilter = normalizedEntityIds.length > 0
+    ? `WHERE CAST(entity_id AS VARCHAR) IN (${normalizedEntityIds.map(sqlString).join(", ")})`
+    : "";
   const columns = await getViewColumns(connection, viewName);
   if (!columns.has("names") && !columns.has("display_name")) {
     const [entityRows, sourceRows, resolvedRows] = await Promise.all([
-      runRowsQuery(connection, `SELECT entity_id, entity_type FROM ${viewName}`),
-      runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type FROM resource_entity_identifiers_source`),
-      runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type, is_canonical FROM resource_entity_identifiers_resolved`),
+      runRowsQuery(connection, `SELECT entity_id, entity_type FROM ${viewName} ${entityFilter}`),
+      runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type FROM resource_entity_identifiers_source ${entityFilter}`),
+      runRowsQuery(connection, `SELECT entity_id, identifier, identifier_type, is_canonical FROM resource_entity_identifiers_resolved ${entityFilter}`),
     ]);
 
     const sourceByEntity = new Map<string, Array<{ identifier: string; identifier_type: string }>>();
@@ -506,7 +517,7 @@ export async function queryEntitySummaries(
 
   const rows = await runRowsQuery(
     connection,
-    `SELECT ${selectedColumns.join(", ")} FROM ${viewName}`,
+    `SELECT ${selectedColumns.join(", ")} FROM ${viewName} ${entityFilter}`,
   );
 
   return new Map(
