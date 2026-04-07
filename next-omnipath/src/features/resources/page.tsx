@@ -6,7 +6,7 @@ import { cn, formatNumber } from "@/lib/utils";
 import type { ResourceRecord } from "@/lib/resources";
 import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
 import { downloadResourceSelection, downloadSingleResource } from "@/lib/resource-downloads";
-import { Activity, Check, CirclePlus, Copy, Database, Download, ExternalLink, FlaskConical, Layers3, Network, Search, Shapes, Tags } from "lucide-react";
+import { Check, CirclePlus, Copy, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -21,8 +21,6 @@ interface ResourcesSummary {
   totalBytes: number;
   buildStatusCounts: Record<string, number>;
   categoryCounts: Record<string, number>;
-  topLevelCategoryCounts: Record<string, number>;
-  modalityCounts: Record<string, number>;
 }
 
 function sentenceCase(value: string | null | undefined): string {
@@ -58,24 +56,11 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-function iconForCategory(category: string | null | undefined) {
-  switch (category) {
-    case "interactions":
-      return Network;
-    case "pathways":
-      return Activity;
-    case "small_molecules":
-    case "lipids":
-      return FlaskConical;
-    case "ontologies":
-    case "phenotypes":
-      return Layers3;
-    case "proteins":
-    case "complexes":
-      return Shapes;
-    default:
-      return Database;
-  }
+function iconForCategories(categories: string[]) {
+  if (categories.includes("interaction")) return Network;
+  if (categories.includes("annotation")) return Layers3;
+  if (categories.includes("association")) return Tags;
+  return Database;
 }
 
 function Pill({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick?: () => void }) {
@@ -121,28 +106,16 @@ export default function ResourcesPage({
   summary: ResourcesSummary;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedTopLevelCategory, setSelectedTopLevelCategory] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [selectedModality, setSelectedModality] = useState("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [downloadingResourceId, setDownloadingResourceId] = useState<string | null>(null);
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const topLevelCategories = useMemo(
-    () => ["all", ...Object.keys(summary.topLevelCategoryCounts).sort((a, b) => a.localeCompare(b))],
-    [summary.topLevelCategoryCounts],
-  );
-
   const categories = useMemo(
     () => ["all", ...Object.keys(summary.categoryCounts).sort((a, b) => a.localeCompare(b))],
     [summary.categoryCounts],
-  );
-
-  const modalities = useMemo(
-    () => ["all", ...Object.keys(summary.modalityCounts).sort((a, b) => a.localeCompare(b))],
-    [summary.modalityCounts],
   );
 
   const filteredResources = useMemo(() => {
@@ -152,13 +125,11 @@ export default function ResourcesPage({
       const searchableText = resource.resource_name.toLowerCase();
 
       const matchesQuery = normalizedQuery.length === 0 || searchableText.includes(normalizedQuery);
-      const matchesTopLevelCategory = selectedTopLevelCategory === "all" || resource.top_level_category === selectedTopLevelCategory;
-      const matchesCategory = selectedCategory === "all" || resource.primary_category === selectedCategory;
-      const matchesModality = selectedModality === "all" || resource.data_modalities.includes(selectedModality);
+      const matchesCategory = selectedCategory === "all" || resource.categories.includes(selectedCategory);
 
-      return matchesQuery && matchesTopLevelCategory && matchesCategory && matchesModality;
+      return matchesQuery && matchesCategory;
     });
-  }, [query, resources, selectedTopLevelCategory, selectedCategory, selectedModality]);
+  }, [query, resources, selectedCategory]);
 
   const selectedResources = useMemo(
     () => resources.filter((resource) => selectedIds.includes(resource.resource_id)),
@@ -236,9 +207,8 @@ export default function ResourcesPage({
           <div className="space-y-3">
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Resources</h1>
             <p className="max-w-3xl text-base leading-7 text-muted-foreground">
-              Browse the current OmniPath build resources from <code>resources.parquet</code>, including top-level interaction
-              vs. annotation resource types, supported modalities, and output counts for entities, interactions, associations,
-              annotations, identifiers, and ontology terms.
+              Browse the current OmniPath build resources from <code>resources.parquet</code>, with each resource categorized as
+              annotation, interaction, and/or association based on the artifacts present in the current gold snapshot.
             </p>
           </div>
 
@@ -254,29 +224,9 @@ export default function ResourcesPage({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {topLevelCategories.map((category) => (
-                <Pill
-                  key={category}
-                  active={selectedTopLevelCategory === category}
-                  onClick={() => setSelectedTopLevelCategory(category)}
-                >
-                  {category === "all" ? "All resource types" : sentenceCase(category)}
-                </Pill>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
               {categories.map((category) => (
                 <Pill key={category} active={selectedCategory === category} onClick={() => setSelectedCategory(category)}>
                   {category === "all" ? "All categories" : sentenceCase(category)}
-                </Pill>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {modalities.map((modality) => (
-                <Pill key={modality} active={selectedModality === modality} onClick={() => setSelectedModality(modality)}>
-                  {modality === "all" ? "All modalities" : sentenceCase(modality)}
                 </Pill>
               ))}
             </div>
@@ -300,7 +250,7 @@ export default function ResourcesPage({
 
             <div className="columns-1 gap-4 sm:columns-2 xl:columns-3">
               {filteredResources.map((resource) => {
-                const Icon = iconForCategory(resource.primary_category);
+                const Icon = iconForCategories(resource.categories);
                 const isSelected = selectedIds.includes(resource.resource_id);
                 const stats = [
                   { label: "Entities", value: resource.entity_count },
@@ -340,10 +290,8 @@ export default function ResourcesPage({
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {resource.top_level_category ? <MiniTag>{sentenceCase(resource.top_level_category)}</MiniTag> : null}
-                      {resource.primary_category ? <MiniTag>{sentenceCase(resource.primary_category)}</MiniTag> : null}
-                      {resource.data_modalities.map((modality) => (
-                        <MiniTag key={`${resource.resource_id}-${modality}`}>{sentenceCase(modality)}</MiniTag>
+                      {resource.categories.map((category) => (
+                        <MiniTag key={`${resource.resource_id}-${category}`}>{sentenceCase(category)}</MiniTag>
                       ))}
                     </div>
 
@@ -376,22 +324,6 @@ export default function ResourcesPage({
                         <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
                       </div>
                     </dl>
-
-                    {resource.interaction_participant_types.length > 0 ? (
-                      <div className="mt-4 border-t border-border/50 pt-4">
-                        <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                          Participant Types
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {resource.interaction_participant_types.slice(0, 2).map((pair) => (
-                            <MiniTag key={`${resource.resource_id}-${pair}`}>{pair}</MiniTag>
-                          ))}
-                          {resource.interaction_participant_types.length > 2 ? (
-                            <MiniTag>+{resource.interaction_participant_types.length - 2} more</MiniTag>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
 
                     <div className="mt-4 space-y-3 border-t border-border/50 pt-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">

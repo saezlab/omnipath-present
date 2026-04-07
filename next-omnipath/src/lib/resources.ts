@@ -8,13 +8,7 @@ export interface ResourceRecord {
   homepage_url: string | null;
   license: string | null;
   pubmed_id: string | null;
-  primary_category: string | null;
-  top_level_category: string | null;
-  supports_interactions?: boolean;
-  supports_annotations?: boolean;
-  supports_ontology?: boolean;
-  data_modalities: string[];
-  interaction_participant_types: string[];
+  categories: string[];
   entity_count: number;
   interaction_count: number;
   association_count: number;
@@ -84,8 +78,6 @@ export async function getResources(): Promise<ResourceRecord[]> {
 export function summarizeResources(resources: ResourceRecord[]) {
   const buildStatusCounts = new Map<string, number>();
   const categoryCounts = new Map<string, number>();
-  const topLevelCategoryCounts = new Map<string, number>();
-  const modalityCounts = new Map<string, number>();
 
   let totalEntities = 0;
   let totalInteractions = 0;
@@ -99,16 +91,8 @@ export function summarizeResources(resources: ResourceRecord[]) {
     const status = resource.build_status || "unknown";
     buildStatusCounts.set(status, (buildStatusCounts.get(status) || 0) + 1);
 
-    if (resource.primary_category) {
-      categoryCounts.set(resource.primary_category, (categoryCounts.get(resource.primary_category) || 0) + 1);
-    }
-
-    if (resource.top_level_category) {
-      topLevelCategoryCounts.set(resource.top_level_category, (topLevelCategoryCounts.get(resource.top_level_category) || 0) + 1);
-    }
-
-    for (const modality of resource.data_modalities || []) {
-      modalityCounts.set(modality, (modalityCounts.get(modality) || 0) + 1);
+    for (const category of resource.categories || []) {
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
     }
 
     totalEntities += resource.entity_count || 0;
@@ -131,7 +115,5 @@ export function summarizeResources(resources: ResourceRecord[]) {
     totalBytes,
     buildStatusCounts: Object.fromEntries(buildStatusCounts),
     categoryCounts: Object.fromEntries(categoryCounts),
-    topLevelCategoryCounts: Object.fromEntries(topLevelCategoryCounts),
-    modalityCounts: Object.fromEntries(modalityCounts),
   };
 }
