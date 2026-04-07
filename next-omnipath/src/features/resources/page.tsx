@@ -295,6 +295,14 @@ export default function ResourcesPage({
                       ))}
                     </div>
 
+                    {resource.annotation_ontologies.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {resource.annotation_ontologies.map((ontology) => (
+                          <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
+                        ))}
+                      </div>
+                    ) : null}
+
                     <ScrollableDescription>
                       {resource.description || "No description available."}
                     </ScrollableDescription>

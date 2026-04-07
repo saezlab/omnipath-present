@@ -9,6 +9,7 @@ export interface ResourceRecord {
   license: string | null;
   pubmed_id: string | null;
   categories: string[];
+  annotation_ontologies: string[];
   entity_count: number;
   interaction_count: number;
   association_count: number;
