@@ -46,18 +46,20 @@ Primary purpose: interaction-level retrieval and export.
 
 #### Direction filter
 
-- `is_directed: boolean`
+- `direction: "any" | "directed" | "undirected"`
 
 #### Sign filter
 
-- `signs: (-1 | 0 | 1)[]`
+- `sign: "any" | "positive" | "negative" | "mixed"`
 
 Examples:
 
-- `signs: [1]` -> positive interactions
-- `signs: [-1]` -> negative interactions
-- `signs: [0]` -> unsigned/unknown interactions
-- `signs: [1, -1]` -> positive or negative interactions
+- `direction: "directed"` -> directed interactions only
+- `direction: "undirected"` -> undirected interactions only
+- `sign: "positive"` -> positive interactions
+- `sign: "negative"` -> negative interactions
+- `sign: "mixed"` -> interactions carrying both positive and negative evidence
+- `sign: "any"` -> no sign restriction
 
 ---
 
@@ -270,14 +272,11 @@ To keep the API minimal and explicit:
 - `member_a_id: string`
 - `member_b_id: string`
 - `interaction_types: string[]`
-- `is_directed: boolean`
-- `signs: (-1 | 0 | 1)[]`
+- `direction: "any" | "directed" | "undirected"`
+- `sign: "any" | "positive" | "negative" | "mixed"`
 - `interaction_annotation_terms: string[]`
-- `participant_annotation_terms_go: string[]`
-- `participant_annotation_terms_mi: string[]`
-- `participant_annotation_terms_om: string[]`
-- `participant_annotation_terms_hp: string[]`
-- `participant_annotation_terms_kw: string[]`
+- `participant_annotation_terms: string[]`
+- `ontology_terms: string[]` (alias merged into `interaction_annotation_terms`)
 - `sources: string[]`
 
 ### Entities filters

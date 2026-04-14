@@ -62,9 +62,9 @@ export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
 ### Data Export
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/exports/interactions/parquet` | Export filtered interactions as Parquet subset |
-| POST | `/exports/entities/parquet` | Export filtered entities as Parquet subset |
-| POST | `/exports/associations/parquet` | Export filtered associations as Parquet subset |
+| POST / GET | `/exports/interactions/parquet` | Export filtered interactions as Parquet subset |
+| POST / GET | `/exports/entities/parquet` | Export filtered entities as Parquet subset |
+| POST / GET | `/exports/associations/parquet` | Export filtered associations as Parquet subset |
 | GET | `/resources/{resource_id}/download` | Download the current gold artifact set for one resource |
 | POST | `/resources/download` | Bundle multiple selected resource gold artifact sets into one zip |
 

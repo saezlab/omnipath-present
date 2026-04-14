@@ -1,5 +1,6 @@
 """FastAPI application for API service."""
 
+import json
 import logging
 import os
 import re
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse
 import httpx
 import polars as pl
 from ontograph.queries.introspection import IntrospectionPronto
+from pydantic import ValidationError
 
 from .models import (
     TermInfo,
@@ -539,6 +541,34 @@ def _build_file_response(*, path: Path, media_type: str, filename: str, backgrou
     )
 
 
+def _parse_export_request_from_query(
+    model_class,
+    *,
+    query: str = "",
+    filters: str | None = None,
+    filename: str | None = None,
+):
+    filters_payload: dict = {}
+    if filters:
+        try:
+            parsed = json.loads(filters)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid filters JSON") from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail="filters must decode to a JSON object")
+        filters_payload = parsed
+
+    try:
+        return model_class.model_validate({
+            "query": query or "",
+            "filters": filters_payload,
+            "filename": filename,
+        })
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+
 def _run_export(
     *,
     request: InteractionExportRequest | EntityExportRequest | AssociationExportRequest,
@@ -593,6 +623,22 @@ def export_interactions_parquet(request: InteractionExportRequest, background_ta
     )
 
 
+@app.get("/exports/interactions/parquet")
+def export_interactions_parquet_get(
+    background_tasks: BackgroundTasks,
+    query: str = "",
+    filters: str | None = Query(default=None),
+    filename: str | None = None,
+):
+    request = _parse_export_request_from_query(
+        InteractionExportRequest,
+        query=query,
+        filters=filters,
+        filename=filename,
+    )
+    return export_interactions_parquet(request, background_tasks)
+
+
 @app.post("/exports/entities/parquet")
 def export_entities_parquet(request: EntityExportRequest, background_tasks: BackgroundTasks):
     from .exports import write_entity_subset_parquet_direct
@@ -606,6 +652,22 @@ def export_entities_parquet(request: EntityExportRequest, background_tasks: Back
     )
 
 
+@app.get("/exports/entities/parquet")
+def export_entities_parquet_get(
+    background_tasks: BackgroundTasks,
+    query: str = "",
+    filters: str | None = Query(default=None),
+    filename: str | None = None,
+):
+    request = _parse_export_request_from_query(
+        EntityExportRequest,
+        query=query,
+        filters=filters,
+        filename=filename,
+    )
+    return export_entities_parquet(request, background_tasks)
+
+
 @app.post("/exports/associations/parquet")
 def export_associations_parquet(request: AssociationExportRequest, background_tasks: BackgroundTasks):
     from .exports import write_association_subset_parquet_direct
@@ -617,6 +679,22 @@ def export_associations_parquet(request: AssociationExportRequest, background_ta
         default_filename="associations_subset",
         log_label="Association",
     )
+
+
+@app.get("/exports/associations/parquet")
+def export_associations_parquet_get(
+    background_tasks: BackgroundTasks,
+    query: str = "",
+    filters: str | None = Query(default=None),
+    filename: str | None = None,
+):
+    request = _parse_export_request_from_query(
+        AssociationExportRequest,
+        query=query,
+        filters=filters,
+        filename=filename,
+    )
+    return export_associations_parquet(request, background_tasks)
 
 
 @app.get("/resources")

@@ -62,11 +62,11 @@ const filters: Record<"entities" | "interactions" | "associations", FilterRow[]>
     ["member_a_id", "string", "Matches either member in pair"],
     ["member_b_id", "string", "Matches either member in pair"],
     ["interaction_types", "string[]", "Interaction type terms"],
-    ["is_directed", "boolean", "Exact directed / undirected state"],
-    ["signs", "Array<-1 | 0 | 1>", "-1 = negative, 0 = unsigned, 1 = positive"],
+    ["direction", '"any" | "directed" | "undirected"', "Directedness filter"],
+    ["sign", '"any" | "positive" | "negative" | "mixed"', "Interaction sign filter"],
     ["interaction_annotation_terms", "string[]", "Ontology annotation terms on the interaction itself"],
     ["participant_annotation_terms", "string[]", "Ontology annotation terms aggregated from interaction participants"],
-    ["ontology_terms", "string[]", "Backward-compatible alias merged into interaction_annotation_terms"],
+    ["ontology_terms", "string[]", "Alias merged into interaction_annotation_terms"],
     ["sources", "string[]", "Datasource terms"],
   ],
   associations: [
@@ -144,8 +144,6 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
     interactionSources,
     interactionAnnotationTerms,
     interactionParticipantTerms,
-    interactionIsDirected,
-    interactionSigns,
     associationParentTypes,
     associationMemberTypes,
     associationSources,
@@ -159,8 +157,6 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
     getFacetExamples(INDEXES.INTERACTIONS, "sources"),
     getFacetExamples(INDEXES.INTERACTIONS, "interaction_annotation_terms"),
     getFacetExamples(INDEXES.INTERACTIONS, "participant_annotation_terms"),
-    getFacetExamples(INDEXES.INTERACTIONS, "is_directed"),
-    getFacetExamples(INDEXES.INTERACTIONS, "sign"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "parent_entity_type"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "member_entity_type"),
     getFacetExamples(INDEXES.ASSOCIATIONS, "sources"),
@@ -179,8 +175,17 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
       sources: interactionSources,
       interaction_annotation_terms: interactionAnnotationTerms,
       participant_annotation_terms: interactionParticipantTerms,
-      is_directed: interactionIsDirected,
-      signs: interactionSigns,
+      direction: [
+        { value: "any" },
+        { value: "directed" },
+        { value: "undirected" },
+      ],
+      sign: [
+        { value: "any" },
+        { value: "positive" },
+        { value: "negative" },
+        { value: "mixed" },
+      ],
       ontology_terms: interactionAnnotationTerms,
     },
     associations: {
@@ -290,7 +295,7 @@ export default async function ApiDocsPage() {
   )
   const interactionExampleUrl = buildDownloadUrl(
     "/api/exports/interactions/parquet",
-    { sources: [facetExamples.interactions.sources[0]?.value || "SIGNOR:OM:1152"], is_directed: true },
+    { sources: [facetExamples.interactions.sources[0]?.value || "SIGNOR:OM:1152"], direction: "directed" },
     "directed_interactions_example"
   )
   const associationExampleUrl = buildDownloadUrl(
@@ -312,8 +317,8 @@ export default async function ApiDocsPage() {
     "/api/exports/interactions/parquet",
     {
       entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
-      is_directed: true,
-      signs: [1],
+      direction: "directed",
+      sign: "positive",
       ontology_terms: ["MI:0217"],
     },
     "tutorial_tp53_akt1_phospho_interactions"
@@ -430,8 +435,8 @@ export default async function ApiDocsPage() {
     "filename": "tutorial_tp53_akt1_phospho_interactions",
     "filters": {
       "entity_ids": ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
-      "is_directed": true,
-      "signs": [1],
+      "direction": "directed",
+      "sign": "positive",
       "ontology_terms": ["MI:0217"]
     }
   }'`}</Code>
@@ -523,8 +528,8 @@ export default async function ApiDocsPage() {
     "query": "",
     "filename": "directed_positive_interactions",
     "filters": {
-      "is_directed": true,
-      "signs": [1]
+      "direction": "directed",
+      "sign": "positive"
     }
   }'`}</Code>
             </div>
