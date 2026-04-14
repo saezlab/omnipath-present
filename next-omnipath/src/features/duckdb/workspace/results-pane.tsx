@@ -104,6 +104,7 @@ export function DuckDbResultsPane() {
                           canonicalIdentifier={sourceCanonicalIdentifier}
                           entityId={sourceEntity?.id || sourceId || undefined}
                           entityType={typeof sourceEntity?.entity_type_name === "string" ? sourceEntity.entity_type_name : undefined}
+                          hoverCardVariant="duckdb"
                         />
                       </TableCell>
                       <TableCell className="w-[120px] px-6 text-center">
@@ -115,6 +116,7 @@ export function DuckDbResultsPane() {
                           canonicalIdentifier={targetCanonicalIdentifier}
                           entityId={targetEntity?.id || targetId || undefined}
                           entityType={typeof targetEntity?.entity_type_name === "string" ? targetEntity.entity_type_name : undefined}
+                          hoverCardVariant="duckdb"
                         />
                       </TableCell>
                       <TableCell className="w-[20%] text-center">

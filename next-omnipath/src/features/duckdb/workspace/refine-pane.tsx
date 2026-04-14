@@ -146,6 +146,7 @@ export function DuckDbRefinePane() {
                 canonicalIdentifier={entity?.canonical_identifier || entityId}
                 entityId={entity?.id || entityId}
                 entityType={entity?.entity_type_name}
+                hoverCardVariant="duckdb"
               />
             </div>
           </div>

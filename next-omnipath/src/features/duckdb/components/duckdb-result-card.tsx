@@ -16,8 +16,8 @@ import { useQuery } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
-import { MoleculeStructure } from "./molecule_structure";
-import { EntityDetailsDialog } from "./entity-details-dialog";
+import { MoleculeStructure } from "@/features/search/components/molecule_structure";
+import { EntityDetailsDialog } from "@/features/search/components/entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
 import { useEntity } from "@/hooks/use-entity";
 
@@ -227,21 +227,136 @@ const getDescriptionSections = (definition: string | undefined, descriptions: st
 // Helper to detect if entity is a small molecule or lipid (displayed similarly)
 const isSmallMolecule = (result: SearchResult): boolean => {
   const entityType = result._formatted?.entity_type || result.entity_type || '';
-  // Extract type label from "Label:Accession" format and normalize (remove spaces/underscores)
-  const typeLabel = entityType.split(':')[0].toLowerCase().replace(/[\s_]/g, '');
+  const typeLabel = normalizeEntityTypeLabel(entityType);
   return typeLabel === 'smallmolecule' ||
     typeLabel === 'compound' ||
     typeLabel === 'metabolite' ||
     typeLabel === 'drug' ||
     typeLabel === 'lipid' ||
-    // Also check if we have molecule-specific data
     !!(result.canonical_smiles || result.formula || result.molecular_weight);
 };
 
-// Identifier object structure from search_entities
-// New format: {key: "type:accession", value: "identifier_value"}
-// e.g., {key: "uniprot:OM:0001", value: "P0A6M2"}
+// Identifier object structure from search entities / DuckDB entity payloads.
 export type Identifier = { key: string; value: string };
+
+function identifierTypeLabel(key: string): string {
+  const normalized = String(key || "").trim();
+  if (!normalized) return "identifier";
+  const parts = normalized.split(":");
+  if (parts.length >= 3) return parts.slice(2).join(":");
+  return normalized;
+}
+
+function readableTypeLabel(value: string | undefined): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  const accessionFirst = normalized.match(/^[A-Z]+:\d+:(.+)$/);
+  if (accessionFirst) return accessionFirst[1];
+  return normalized.split(":")[0] || normalized;
+}
+
+function normalizeEntityTypeLabel(entityType: string | undefined): string {
+  return readableTypeLabel(entityType).toLowerCase().replace(/[\s_]/g, "");
+}
+
+function identifierPriority(entityType: string | undefined, identifierType: string): number {
+  const type = identifierType.toLowerCase();
+  const normalizedEntityType = normalizeEntityTypeLabel(entityType);
+  if (normalizedEntityType === "protein") {
+    if (type.includes("gene name primary")) return 0;
+    if (type.includes("gene name")) return 1;
+    if (type.includes("uniprot")) return 2;
+    if (type.includes("ensembl")) return 3;
+    if (type.includes("entrez")) return 4;
+    if (type === "name") return 10;
+  }
+  if (["smallmolecule", "compound", "metabolite", "drug", "lipid"].includes(normalizedEntityType)) {
+    if (type === "name" || type.includes("common name") || type.includes("preferred name")) return 0;
+    if (type.includes("chebi")) return 1;
+    if (type.includes("hmdb")) return 2;
+    if (type.includes("chembl")) return 3;
+    if (type.includes("pubchem")) return 4;
+    if (type.includes("inchi")) return 5;
+  }
+  if (type === "name") return 0;
+  if (type.includes("gene name")) return 1;
+  if (type.includes("uniprot") || type.includes("chebi")) return 2;
+  return 100;
+}
+
+function deriveEntityDisplayFromIdentifiers(entityType: string | undefined, identifiers: Identifier[]): {
+  displayName?: string;
+  secondaryIdentifier?: string;
+} {
+  const normalizedEntityType = normalizeEntityTypeLabel(entityType);
+  const parsed = identifiers
+    .map((id) => ({ type: identifierTypeLabel(id.key), value: id.value }))
+    .filter((id) => id.value)
+    .sort((a, b) => identifierPriority(entityType, a.type) - identifierPriority(entityType, b.type));
+
+  if (normalizedEntityType === "protein") {
+    const genePrimary = parsed.find((id) => id.type.toLowerCase().includes("gene name primary"))?.value;
+    const geneName = parsed.find((id) => id.type.toLowerCase().includes("gene name"))?.value;
+    const uniprot = parsed.find((id) => id.type.toLowerCase().includes("uniprot"))?.value;
+    return {
+      displayName: genePrimary || geneName || uniprot,
+      secondaryIdentifier: uniprot && uniprot !== genePrimary && uniprot !== geneName ? uniprot : undefined,
+    };
+  }
+
+  if (["smallmolecule", "compound", "metabolite", "drug", "lipid"].includes(normalizedEntityType)) {
+    const preferredName = parsed.find((id) => {
+      const type = id.type.toLowerCase();
+      return type === "name" || type.includes("common name") || type.includes("preferred name");
+    })?.value;
+    const preferredId = parsed.find((id) => {
+      const type = id.type.toLowerCase();
+      return type.includes("chebi") || type.includes("hmdb") || type.includes("chembl") || type.includes("pubchem") || type.includes("inchi");
+    })?.value;
+    return {
+      displayName: preferredName || preferredId,
+      secondaryIdentifier: preferredName && preferredId && preferredId !== preferredName ? preferredId : undefined,
+    };
+  }
+
+  const preferred = parsed[0]?.value;
+  return { displayName: preferred };
+}
+
+function objectValuesInKeyOrder(value: Record<string, unknown>): unknown[] {
+  return Object.keys(value)
+    .filter((key) => /^\d+$/.test(key))
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => value[key]);
+}
+
+function toUnknownArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object" && "toJSON" in value && typeof value.toJSON === "function") {
+    return toUnknownArray(value.toJSON());
+  }
+  if (value && typeof value === "object") return objectValuesInKeyOrder(value as Record<string, unknown>);
+  return [];
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.trim() ? [value] : [];
+  }
+  if (value && typeof value === "object") {
+    return toUnknownArray(value).map((item) => String(item)).filter(Boolean);
+  }
+  return [];
+}
+
+function toIdentifierArray(value: unknown): Identifier[] {
+  return toUnknownArray(value).filter((item): item is Identifier => {
+    return typeof item === "object" && item !== null && "key" in item && "value" in item;
+  });
+}
 
 export interface SearchResult {
   id: string;
@@ -340,7 +455,7 @@ function IdentifierBadge({ id, idx }: { id: { type: string; value: string }; idx
 }
 
 // Component to display identifiers in a collapsible section
-function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
+function IdentifiersDisplay({ identifiers, entityType }: { identifiers: Identifier[]; entityType?: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!identifiers || identifiers.length === 0) return null;
@@ -348,11 +463,16 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
   const parsedIdentifiers = identifiers
     .map(id => {
       if (!id?.key || !id?.value) return null;
-      const colonIndex = id.key.indexOf(':');
-      const idType = colonIndex > 0 ? id.key.substring(0, colonIndex) : id.key;
-      return { type: idType, value: id.value };
+      return { type: identifierTypeLabel(id.key), value: id.value };
     })
-    .filter(Boolean) as { type: string; value: string }[];
+    .filter(Boolean)
+    .sort((a, b) => {
+      const priorityDiff = identifierPriority(entityType, a!.type) - identifierPriority(entityType, b!.type);
+      if (priorityDiff !== 0) return priorityDiff;
+      const typeDiff = a!.type.localeCompare(b!.type);
+      if (typeDiff !== 0) return typeDiff;
+      return a!.value.localeCompare(b!.value);
+    }) as { type: string; value: string }[];
 
   if (parsedIdentifiers.length === 0) return null;
 
@@ -396,18 +516,18 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
 // Molecule-specific result card
 function MoleculeResultCard({ result }: { result: SearchResult }) {
   const entityType = result._formatted?.entity_type || result.entity_type;
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Small Molecule";
+  const entityTypeLabel = readableTypeLabel(entityType) || "Small Molecule";
 
   // Memoize identifiers for stable reference in JSX
   const identifiers = useMemo(() =>
-    result._formatted?.identifiers || result.identifiers || [],
+    toIdentifierArray(result._formatted?.identifiers || result.identifiers),
     [result._formatted?.identifiers, result.identifiers]
   );
 
   // Get primary name from names or identifiers, prefer the shortest meaningful name
   const primaryName = useMemo(() => {
-    const names = result._formatted?.names || result.names || [];
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const names = toStringArray(result._formatted?.names || result.names);
+    const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
     const validNames: string[] = [];
 
     // Collect valid names (skip ID-like names)
@@ -419,8 +539,8 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
 
     // Try to find names from identifiers
     for (const id of identifiers) {
-      const idType = id.key?.split(':')[0].toLowerCase();
-      if (idType && ['name', 'common_name', 'preferred_name'].includes(idType) && typeof id.value === 'string') {
+      const idType = identifierTypeLabel(id.key).toLowerCase();
+      if (idType && ['name', 'common name', 'preferred name'].includes(idType) && typeof id.value === 'string') {
         validNames.push(id.value);
       }
     }
@@ -442,15 +562,36 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
 
   // Extract SMILES from identifiers (stored in "biotin tag" identifier type)
   const smiles = useMemo(() => {
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
+    if (typeof window !== 'undefined') {
+      console.log('[ResultCard:MoleculeResultCard] evaluating smiles', {
+        entityId: result.entity_id || result.id,
+        entityType,
+        identifiers: identifiers.map((id) => ({ key: id.key, typeLabel: identifierTypeLabel(id.key), valuePreview: String(id.value).slice(0, 80) })),
+        canonical_smiles: result.canonical_smiles || null,
+      });
+    }
     for (const id of identifiers) {
-      const idType = id.key?.split(':')[0].toLowerCase().trim();
-      if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
+      const idType = identifierTypeLabel(id.key).toLowerCase().trim();
+      if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical smiles') {
+        if (typeof window !== 'undefined') {
+          console.log('[ResultCard:MoleculeResultCard] matched smiles identifier', {
+            entityId: result.entity_id || result.id,
+            idType,
+            smilesPreview: String(id.value).slice(0, 120),
+          });
+        }
         return id.value;
       }
     }
+    if (typeof window !== 'undefined') {
+      console.log('[ResultCard:MoleculeResultCard] no smiles match, falling back', {
+        entityId: result.entity_id || result.id,
+        fallback: result.canonical_smiles || null,
+      });
+    }
     return result.canonical_smiles || null;
-  }, [result._formatted?.identifiers, result.identifiers, result.canonical_smiles]);
+  }, [result._formatted?.identifiers, result.identifiers, result.canonical_smiles, result.entity_id, result.id, entityType]);
 
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const entityId = (result.entity_id ?? result.id)?.toString();
@@ -530,48 +671,8 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       )}
 
       {/* Identifiers section */}
-      <IdentifiersDisplay identifiers={identifiers} />
+      <IdentifiersDisplay identifiers={identifiers} entityType={entityType} />
 
-      <CardFooter className="flex items-center justify-between shrink-0 border-t p-2.5">
-        {/* Stats */}
-        <div className="flex items-center gap-3 text-sm flex-wrap">
-          {result.num_interactions && result.num_interactions > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Network className="h-4 w-4" />
-              <span>{result.num_interactions}</span>
-            </div>
-          )}
-          {result.complexes && result.complexes.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Shapes className="h-4 w-4" />
-              <span>{result.complexes.length}</span>
-            </div>
-          )}
-          {getUnifiedCvTerms(result).length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Tag className="h-4 w-4" />
-              <span>{getUnifiedCvTerms(result).length}</span>
-            </div>
-          )}
-          {result.references && result.references.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <FileText className="h-4 w-4" />
-              <span>{result.references.length}</span>
-            </div>
-          )}
-          {result.sources && result.sources.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Database className="h-4 w-4" />
-              <span>{result.sources.length}</span>
-            </div>
-          )}
-        </div>
-        {/* Badge */}
-        <Badge variant="secondary" className="flex items-center gap-1 text-xs">
-          <FlaskConical className="h-3 w-3" />
-          {entityTypeLabel}
-        </Badge>
-      </CardFooter>
     </Card>
   );
 }
@@ -593,7 +694,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
     };
 
     return (
-      <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card">
+      <Card className="flex flex-col gap-0 hover:shadow-md transition-shadow h-full result-card">
         <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
           <CardTitle className="text-lg line-clamp-2">{result.source_name || result.name || result.source_ref}</CardTitle>
         </CardHeader>
@@ -669,13 +770,13 @@ export function ResultCard({ result }: { result: SearchResult }) {
   };
 
   // Extract data based on type
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
-  const identifiers = result._formatted?.identifiers || result.identifiers || [];
-  const synonyms = result._formatted?.synonyms || result.synonyms || [];
-  const references = result._formatted?.references || result.references || [];
-  const sources = result._formatted?.sources || result.sources || [];
+  const descriptions = toStringArray(result._formatted?.descriptions || result.descriptions);
+  const names = toStringArray(result._formatted?.names || result.names);
+  const geneSymbols = toStringArray(result._formatted?.gene_symbols || result.gene_symbols);
+  const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
+  const synonyms = toStringArray(result._formatted?.synonyms || result.synonyms);
+  const references = toStringArray(result._formatted?.references || result.references);
+  const sources = toStringArray(result._formatted?.sources || result.sources);
   const complexes = result.complexes || [];
   const cvTerms = getUnifiedCvTerms(result);
   const entityType = result._formatted?.entity_type || result.entity_type;
@@ -683,8 +784,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
   const definition = result._formatted?.definition || result.definition;
   const descriptionSections = getDescriptionSections(definition, descriptions);
 
-  // Extract entity type label (e.g., "Protein" from "Protein:385235")
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
+  const entityTypeLabel = readableTypeLabel(entityType) || "Entity";
   const hasMiddleContent = descriptionSections.length > 0;
 
   // Helper function to truncate text to max characters
@@ -699,37 +799,18 @@ export function ResultCard({ result }: { result: SearchResult }) {
   let primaryIdentifier = "";
 
   if (type === 'entity') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
     const firstIdentifier = identifiers.length > 0 ? identifiers[0].value : undefined;
-
-    // For proteins: prefer gene symbol, then UniProt identifier
-    // For other entities: gene_symbols > names > first identifier
-    const isProtein = entityTypeLabel.toLowerCase() === 'protein';
+    const derived = deriveEntityDisplayFromIdentifiers(entityType, identifiers);
 
     let displayName: string;
     let secondaryName: string | undefined;
 
-    if (isProtein) {
-      // Try to find UniProt identifier
-      const uniprotId = identifiers.find(id => {
-        const idType = id.key?.split(':')[0].toLowerCase();
-        return idType === 'uniprot' || idType === 'uniprot_id' || idType === 'uniprotkb';
-      });
-      const uniprotValue = uniprotId?.value;
-
-      // For proteins: gene symbol first, fallback to UniProt
-      displayName = geneSymbol || uniprotValue || name || firstIdentifier || `Entity ${result.id}`;
-      // Show UniProt as secondary if gene symbol is primary
-      if (geneSymbol && uniprotValue && geneSymbol !== uniprotValue) {
-        secondaryName = uniprotValue;
-      }
+    if (entityTypeLabel.toLowerCase() === 'protein') {
+      displayName = derived.displayName || firstIdentifier || `Entity ${result.id}`;
+      secondaryName = derived.secondaryIdentifier;
     } else {
-      // Original logic for non-proteins
-      displayName = geneSymbol || name || firstIdentifier || `Entity ${result.id}`;
-      if (geneSymbol && name && geneSymbol !== name) {
-        secondaryName = name;
-      }
+      displayName = derived.displayName || firstIdentifier || `Entity ${result.id}`;
+      secondaryName = derived.secondaryIdentifier;
     }
 
     // Truncate the display name to 8 characters
@@ -762,7 +843,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
 
 
   return (
-    <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative">
+    <Card className="flex flex-col gap-0 hover:shadow-md transition-shadow h-full result-card group relative">
       {/* Action buttons - positioned at bottom center, visible on hover for entities */}
       {type === 'entity' && entityId && (
         <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -831,90 +912,9 @@ export function ResultCard({ result }: { result: SearchResult }) {
         </CardTitle>
       </CardHeader>
 
-      {/* Show content section only when there is actual content */}
-      {hasMiddleContent && (
-        <div className="flex flex-col min-h-0 flex-grow">
-          <CardContent className="px-4 overflow-hidden flex flex-col flex-grow min-h-0">
-            {/* Description */}
-            {descriptionSections.length > 0 && (
-              <ScrollArea
-                className="flex-1 min-h-0 max-h-56 w-full mb-2 cursor-zoom-in"
-                onClick={() => setDescriptionsOpen(true)}
-              >
-                <div className="space-y-3 text-sm text-muted-foreground pr-1">
-                  {descriptionSections.map((section) => (
-                    <div key={`${result.id}-description-preview-${section.label}`} className="space-y-1">
-                      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
-                        {section.label}
-                      </h4>
-                      {section.items.map((item, index) => (
-                        <p key={`${result.id}-description-preview-item-${section.label}-${index}`}>
-                          <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
-                        </p>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-
-          </CardContent>
-        </div>
-      )}
-
       {/* Identifiers section */}
-      {type === 'entity' && <IdentifiersDisplay identifiers={identifiers} />}
+      {type === 'entity' && <IdentifiersDisplay identifiers={identifiers} entityType={entityType} />}
 
-      <CardFooter className={`flex items-center justify-between shrink-0 p-2.5 ${(descriptionSections.length > 0 || identifiers.length > 0) ? 'border-t' : ''}`}>
-        {/* Stats */}
-        <div className="flex items-center gap-3 text-sm flex-wrap">
-          {type === 'entity' && interactionCount > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Network className="h-4 w-4" />
-              <span>{interactionCount}</span>
-            </div>
-          )}
-          {type === 'entity' && complexes.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Shapes className="h-4 w-4" />
-              <span>{complexes.length}</span>
-            </div>
-          )}
-          {type === 'entity' && cvTerms.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Tag className="h-4 w-4" />
-              <span>{cvTerms.length}</span>
-            </div>
-          )}
-          {type === 'entity' && references.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <FileText className="h-4 w-4" />
-              <span>{references.length}</span>
-            </div>
-          )}
-          {type === 'entity' && sources.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Database className="h-4 w-4" />
-              <span>{sources.length}</span>
-            </div>
-          )}
-          {type === 'cv_term' && entityCount > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Tag className="h-4 w-4" />
-              <span>{entityCount}</span>
-            </div>
-          )}
-          {type === 'cv_term' && synonyms.length > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
-              {synonyms.length} synonym{synonyms.length === 1 ? '' : 's'}
-            </div>
-          )}
-        </div>
-        {/* Badge */}
-        <Badge variant="secondary" className="text-xs">
-          {subtitle}
-        </Badge>
-      </CardFooter>
     </Card>
   );
 }
@@ -927,26 +927,33 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const type = result.type || "entity";
 
   // Extract data
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
+  const descriptions = toStringArray(result._formatted?.descriptions || result.descriptions);
+  const names = toStringArray(result._formatted?.names || result.names);
+  const geneSymbols = toStringArray(result._formatted?.gene_symbols || result.gene_symbols);
+  const identifiers = toIdentifierArray(result._formatted?.identifiers || result.identifiers);
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;
   const descriptionSections = getDescriptionSections(definition, descriptions);
 
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
+  const entityTypeLabel = readableTypeLabel(entityType) || "Entity";
 
   // Determine title
   let title = "";
   let subtitle = "";
 
   if (type === 'entity' || type === 'cv_term') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
-    const displayName = result._formatted?.name || result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
-    title = displayName;
-    subtitle = namespaceName || entityTypeLabel;
+    if (type === 'entity') {
+      const derived = deriveEntityDisplayFromIdentifiers(entityType, identifiers);
+      title = derived.displayName || result._formatted?.name || result.name || `Entity ${result.entity_id || result.id}`;
+      subtitle = namespaceName || entityTypeLabel;
+    } else {
+      const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
+      const name = names.length > 0 ? names[0] : undefined;
+      const displayName = result._formatted?.name || result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
+      title = displayName;
+      subtitle = namespaceName || entityTypeLabel;
+    }
   }
 
   return (
@@ -961,23 +968,6 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
         </Badge>
       </div>
 
-      {/* Definition/Description */}
-      {descriptionSections.length > 0 && (
-        <div className="h-24 overflow-y-auto">
-          <div className="space-y-2 pr-2">
-            {descriptionSections.map((section) => (
-              <div key={`${result.id}-hover-description-section-${section.label}`} className="space-y-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground/70">{section.label}</p>
-                {section.items.slice(0, 1).map((item, index) => (
-                  <p key={`${result.id}-hover-description-${section.label}-${index}`} className="text-xs text-muted-foreground">
-                    {item}
-                  </p>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

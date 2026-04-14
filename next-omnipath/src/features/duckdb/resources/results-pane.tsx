@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { AlertCircle, ArrowRight } from "lucide-react";
 import { EntityBadge } from "@/components/entity-badge";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { OntologyTermLabel } from "@/features/ontology/ontology-term-label";
-import { CvTermHoverCard, ResultCard } from "@/features/search/components/result-card";
-import { cn } from "@/lib/utils";
+import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { useDuckDbResourceWorkspace } from "./context";
 
 function safeText(value: unknown, fallback: string): string {
@@ -49,21 +48,6 @@ function renderCvValue(value: unknown, fallback = "—"): ReactNode {
   );
 }
 
-function renderInteractionType(value: unknown): ReactNode {
-  if (typeof value !== "string" || value.trim().length === 0) return "—";
-  const parts = value.split("|").map((part) => part.trim()).filter(Boolean);
-  return (
-    <span>
-      {parts.map((part, index) => (
-        <span key={`${part}-${index}`}>
-          {index > 0 ? " · " : null}
-          {renderCvValue(part)}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 function toAttributeRow(value: unknown): { term?: unknown; value?: unknown; unit?: unknown } {
   if (!value || typeof value !== "object") return { value };
   const entry = value as Record<string, unknown>;
@@ -96,7 +80,6 @@ export function DuckDbResourceResultsPane() {
   const {
     entitySummaries,
     error,
-    getEntityById,
     loading,
     materialized,
     pageIndex,
@@ -107,25 +90,6 @@ export function DuckDbResourceResultsPane() {
   } = useDuckDbResourceWorkspace();
 
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
-  const [selectedEntityA, setSelectedEntityA] = useState<any | null>(null);
-  const [selectedEntityB, setSelectedEntityB] = useState<any | null>(null);
-
-  useEffect(() => {
-    if (!selectedRow) {
-      setSelectedEntityA(null);
-      setSelectedEntityB(null);
-      return;
-    }
-    const entityAId = String(selectedRow.entity_a_id ?? "");
-    const entityBId = String(selectedRow.entity_b_id ?? "");
-    void Promise.all([
-      entityAId ? getEntityById(entityAId) : Promise.resolve(null),
-      entityBId ? getEntityById(entityBId) : Promise.resolve(null),
-    ]).then(([entityA, entityB]) => {
-      setSelectedEntityA(entityA);
-      setSelectedEntityB(entityB);
-    });
-  }, [getEntityById, selectedRow]);
 
   const pageStart = rows.length === 0 ? 0 : pageIndex * pageSize + 1;
   const pageEnd = pageIndex * pageSize + rows.length;
@@ -196,6 +160,7 @@ export function DuckDbResourceResultsPane() {
                               canonicalIdentifier={safeText(sourceEntity?.canonical_identifier, sourceId || "—")}
                               entityId={sourceEntity?.id || sourceId || undefined}
                               entityType={typeof sourceEntity?.entity_type_name === "string" ? sourceEntity.entity_type_name : undefined}
+                              hoverCardVariant="duckdb"
                             />
                           </div>
                         </TableCell>
@@ -209,6 +174,7 @@ export function DuckDbResourceResultsPane() {
                               canonicalIdentifier={safeText(targetEntity?.canonical_identifier, targetId || "—")}
                               entityId={targetEntity?.id || targetId || undefined}
                               entityType={typeof targetEntity?.entity_type_name === "string" ? targetEntity.entity_type_name : undefined}
+                              hoverCardVariant="duckdb"
                             />
                           </div>
                         </TableCell>
@@ -226,22 +192,16 @@ export function DuckDbResourceResultsPane() {
                               </p>
                             </div>
 
-                            {(selectedEntityA || selectedEntityB) ? (
-                              <div className="grid gap-4 pb-4 md:grid-cols-2">
-                                {selectedEntityA ? <ResultCard result={selectedEntityA} /> : <div className="text-sm text-muted-foreground">No entity A details available.</div>}
-                                {selectedEntityB ? <ResultCard result={selectedEntityB} /> : <div className="text-sm text-muted-foreground">No entity B details available.</div>}
-                              </div>
-                            ) : null}
 
                             {detailSections.length > 0 ? detailSections.map((section) => (
-                              <div key={section.title} className="space-y-2 pb-4 last:pb-0">
+                              <div key={section.title} className="max-w-full space-y-2 pb-4 last:pb-0">
                                 <h3 className="text-sm font-semibold">{section.title}</h3>
-                                <div className="overflow-hidden rounded-lg border bg-background">
-                                  <Table>
+                                <div className="max-w-full overflow-hidden rounded-lg border bg-background">
+                                  <Table className="w-full table-fixed">
                                     <TableHeader>
                                       <TableRow>
-                                        <TableHead className="w-[34%]">Term</TableHead>
-                                        <TableHead>Value</TableHead>
+                                        <TableHead className="w-[28%]">Term</TableHead>
+                                        <TableHead className="w-[52%]">Value</TableHead>
                                         <TableHead className="w-[20%]">Unit</TableHead>
                                       </TableRow>
                                     </TableHeader>
@@ -250,9 +210,9 @@ export function DuckDbResourceResultsPane() {
                                         const detailRow = toAttributeRow(item);
                                         return (
                                           <TableRow key={`${section.title}-${index}`}>
-                                            <TableCell>{renderCvValue(detailRow.term)}</TableCell>
-                                            <TableCell>{renderCvValue(detailRow.value)}</TableCell>
-                                            <TableCell>{renderCvValue(detailRow.unit)}</TableCell>
+                                            <TableCell className="max-w-0 break-words whitespace-normal">{renderCvValue(detailRow.term)}</TableCell>
+                                            <TableCell className="max-w-0 break-all whitespace-normal">{renderCvValue(detailRow.value)}</TableCell>
+                                            <TableCell className="max-w-0 break-words whitespace-normal">{renderCvValue(detailRow.unit)}</TableCell>
                                           </TableRow>
                                         );
                                       })}
