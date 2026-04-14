@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChatMessage, chatMessagesToUIMessages, uiMessagesToChatMessages } from "../types";
@@ -49,6 +50,7 @@ export function Chat({
     regenerate,
     sendMessage,
   } = useChat({
+    transport: new DefaultChatTransport({ api: "/app-api/chat" }),
     id,
     messages: chatMessagesToUIMessages(initialMessages),
   });

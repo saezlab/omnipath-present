@@ -4,13 +4,12 @@ import type { UIMessage } from "ai";
 import { z } from "zod";
 import {
   searchMeilisearch,
-  fetchMeilisearchDocuments,
   searchInteractionsMeilisearch,
   searchAssociationsMeilisearch
 } from "@/lib/meilisearch/search";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { INDEXES } from "@/lib/meilisearch/client";
-import { getApiServiceUrl, getEntityServiceUrl } from "@/lib/api/config";
+import { getApiServiceUrl } from "@/lib/api/config";
 
 
 // Define types for Meilisearch hits
@@ -29,10 +28,6 @@ interface EntityHit {
   interaction_ids?: unknown[];
   num_interactions?: number;
   [key: string]: unknown;
-}
-
-interface LookupServiceResponse {
-  results: Record<string, string[]>;
 }
 
 interface TermInfo {
@@ -311,7 +306,7 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
       console.log(`Resolving ${identifiers.length} identifiers.`);
       try {
         const normalizedIdentifiers = identifiers.map((identifier) => identifier.trim()).filter((identifier) => identifier.length > 0);
-        const response = await fetch(`${getEntityServiceUrl()}/lookup`, {
+        const response = await fetch(`${getApiServiceUrl()}/entity-lookup`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ identifiers: normalizedIdentifiers }),
@@ -319,20 +314,15 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(`Entity service error: ${response.status} ${text}`);
+          throw new Error(`Entity lookup error: ${response.status} ${text}`);
         }
 
-        const data = (await response.json()) as LookupServiceResponse;
-        const matches = Object.entries(data.results || {}).map(([identifier, entityIds]) => ({
-          identifier,
-          entityIds: entityIds || [],
-        }));
-
-        const allEntityIds = Array.from(new Set(matches.flatMap((match) => match.entityIds)));
-        const documents = allEntityIds.length
-          ? await fetchMeilisearchDocuments(INDEXES.ENTITIES, allEntityIds, "entity_id")
-          : { documents: [] };
-        const entities = (documents.documents || []) as EntityHit[];
+        const responseData = (await response.json()) as {
+          matches?: Array<{ identifier: string; entityIds: string[] }>;
+          entities?: EntityHit[];
+        };
+        const matches = responseData.matches || [];
+        const entities = (responseData.entities || []) as EntityHit[];
         const entityMap = new Map<string, EntityHit>();
         for (const entity of entities) {
           const entityId = getEntityDbId(entity);
@@ -360,7 +350,7 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
             identifiers: normalizedIdentifiers,
           },
           matches,
-          entities: documents.documents,
+          entities,
           preview,
           results: preview,
           totalCount: matches.length,

@@ -71,6 +71,7 @@ services:
             OMNIPATH_GOLD_ROOT: /gold
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
+            ENTITY_SERVICE_URL: http://entity-resolver-service:8080
         volumes:
             - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
             - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
@@ -97,7 +98,6 @@ services:
             # These are used at runtime for server-side requests
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
-            ENTITY_SERVICE_URL: http://entity-resolver-service:8080
             API_SERVICE_URL: http://api-service:8081
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}

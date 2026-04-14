@@ -77,10 +77,10 @@ export function DuckDbAnnotationResultsPane() {
     }
 
     const controller = new AbortController();
-    void fetch("/api/ontology/tree", {
+    void fetch("/api/tree", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ termIds: selectedTermIdsForEntitiesMode }),
+      body: JSON.stringify({ term_ids: selectedTermIdsForEntitiesMode }),
       signal: controller.signal,
     })
       .then(async (response) => {

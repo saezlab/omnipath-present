@@ -51,11 +51,11 @@ export function AnnotationsExploreTab() {
         enabled: cvTermIds.length > 0,
         staleTime: 5 * 60 * 1000,
         queryFn: async () => {
-            const response = await fetch("/api/ontology/tree", {
+            const response = await fetch("/api/tree", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    termIds: cvTermIds
+                    term_ids: cvTermIds
                 }),
             });
 

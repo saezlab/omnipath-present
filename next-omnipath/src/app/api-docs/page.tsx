@@ -345,14 +345,14 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div>
-              <div className="font-medium">POST /api/ontology/terms</div>
+              <div className="font-medium">POST /api/terms</div>
               <p className="text-xs text-muted-foreground">Resolve ontology term IDs to metadata (name/definition/namespace).</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST ${baseUrl}/api/ontology/terms \\
+            <Code>{`curl -X POST ${baseUrl}/api/terms \\
   -H "Content-Type: application/json" \\
-  -d '{ "termIds": ["GO:0006915", "MI:0624", "OM:0001"] }'`}</Code>
-            <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0006915", "MI:0624", "OM:0001"] }} />
+  -d '{ "term_ids": ["GO:0006915", "MI:0624", "OM:0001"] }'`}</Code>
+            <JsonTryNow endpoint="/api/terms" initialBody={{ term_ids: ["GO:0006915", "MI:0624", "OM:0001"] }} />
             <Code>{`{
   "terms": {
     "GO:0006915": { "id": "GO:0006915", "name": "apoptotic process" },
@@ -364,22 +364,22 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div>
-              <div className="font-medium">POST /api/ontology/tree</div>
+              <div className="font-medium">POST /api/tree</div>
               <p className="text-xs text-muted-foreground">Build a merged hierarchy tree for selected terms to decide whether to broaden (ancestors) or narrow (descendants) filter choices.</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST ${baseUrl}/api/ontology/tree \\
+            <Code>{`curl -X POST ${baseUrl}/api/tree \\
   -H "Content-Type: application/json" \\
-  -d '{ "termIds": ["GO:0006915", "GO:0008219"] }'`}</Code>
-            <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0006915", "GO:0008219"] }} />
+  -d '{ "term_ids": ["GO:0006915", "GO:0008219"] }'`}</Code>
+            <JsonTryNow endpoint="/api/tree" initialBody={{ term_ids: ["GO:0006915", "GO:0008219"] }} />
           </div>
 
           <div className="rounded-lg border p-4 space-y-2 text-xs text-muted-foreground">
             <div className="font-medium text-foreground">How to use this before export</div>
             <ul className="list-disc pl-5 space-y-1">
               <li>Start with candidate terms from domain knowledge.</li>
-              <li>Resolve labels via <span className="font-mono">/api/ontology/terms</span>.</li>
-              <li>Inspect hierarchy via <span className="font-mono">/api/ontology/tree</span> and pick broader or narrower terms.</li>
+              <li>Resolve labels via <span className="font-mono">/api/terms</span>.</li>
+              <li>Inspect hierarchy via <span className="font-mono">/api/tree</span> and pick broader or narrower terms.</li>
               <li>Use those IDs in export filters (<span className="font-mono">ontology_terms</span> / annotation-term fields).</li>
             </ul>
           </div>
@@ -388,7 +388,7 @@ export default async function ApiDocsPage() {
         <TabsContent value="quickstart-tutorial" className="space-y-4">
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 1 — Resolve identifiers to canonical entity IDs</div>
-            <p className="text-xs text-muted-foreground">Requires the entity-service backend to be reachable from the frontend API.</p>
+            <p className="text-xs text-muted-foreground">Uses the main FastAPI service so the endpoint is part of the public API and OpenAPI schema.</p>
             <Code>{`curl -X POST ${baseUrl}/api/entity-lookup \\
   -H "Content-Type: application/json" \\
   -d '{ "identifiers": ["TP53", "AKT1", "P31749"] }'`}</Code>
@@ -397,14 +397,14 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 2 — Resolve ontology terms and inspect hierarchy</div>
-            <Code>{`curl -X POST ${baseUrl}/api/ontology/terms \\
+            <Code>{`curl -X POST ${baseUrl}/api/terms \\
   -H "Content-Type: application/json" \\
-  -d '{ "termIds": ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }'`}</Code>
-            <JsonTryNow endpoint="/api/ontology/terms" initialBody={{ termIds: ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }} />
-            <Code>{`curl -X POST ${baseUrl}/api/ontology/tree \\
+  -d '{ "term_ids": ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }'`}</Code>
+            <JsonTryNow endpoint="/api/terms" initialBody={{ term_ids: ["GO:0005634", "HP:0001250", "MI:0217", "OM:0310"] }} />
+            <Code>{`curl -X POST ${baseUrl}/api/tree \\
   -H "Content-Type: application/json" \\
-  -d '{ "termIds": ["GO:0005634", "HP:0001250"] }'`}</Code>
-            <JsonTryNow endpoint="/api/ontology/tree" initialBody={{ termIds: ["GO:0005634", "HP:0001250"] }} />
+  -d '{ "term_ids": ["GO:0005634", "HP:0001250"] }'`}</Code>
+            <JsonTryNow endpoint="/api/tree" initialBody={{ term_ids: ["GO:0005634", "HP:0001250"] }} />
           </div>
 
           <div className="rounded-lg border p-4 space-y-3">
@@ -583,7 +583,7 @@ export default async function ApiDocsPage() {
 
         <TabsContent value="entity-lookup" className="space-y-4">
           <h2 className="text-xl font-semibold">Entity resolving service</h2>
-          <p className="text-xs text-muted-foreground">This endpoint proxies to entity-service; if that service is down/unreachable you will see a fetch error.</p>
+          <p className="text-xs text-muted-foreground">This endpoint is served by the main FastAPI app and internally resolves identifiers via the entity resolver service.</p>
 
           <div className="rounded-lg border p-4 space-y-3">
             <div>

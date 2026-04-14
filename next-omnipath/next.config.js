@@ -5,12 +5,27 @@ const path = require('path');
 // Load parent directory .env file
 config({ path: path.resolve(__dirname, '../.env') });
 
+const API_SERVICE_URL = process.env.API_SERVICE_URL || 'http://localhost:8081';
+
 const nextConfig = {
   output: 'standalone',
   
   // Disable telemetry in production
   env: {
     NEXT_TELEMETRY_DISABLED: '1',
+  },
+
+  // Local/dev fallback proxy so `/api/*` hits FastAPI even without Traefik.
+  // In production Dokploy/Traefik should route `/api/*` directly to api-service.
+  async rewrites() {
+    return {
+      fallback: [
+        {
+          source: '/api/:path*',
+          destination: `${API_SERVICE_URL}/:path*`,
+        },
+      ],
+    };
   },
 
   // Headers for security

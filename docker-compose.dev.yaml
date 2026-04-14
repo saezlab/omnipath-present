@@ -66,6 +66,7 @@ services:
             OMNIPATH_GOLD_ROOT: /gold
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY:-devkey123}
+            ENTITY_SERVICE_URL: http://entity-resolver-service:8080
         ports:
             - "8081:8081"
         volumes:

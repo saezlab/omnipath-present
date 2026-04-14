@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -213,6 +213,26 @@ class EvidenceLookupResponse(BaseModel):
     id: int
     key: str
     evidence: list[dict]
+
+
+class EntityLookupRequest(BaseModel):
+    """Request payload for identifier-to-entity resolution."""
+
+    identifiers: list[str] = Field(default_factory=list)
+
+
+class EntityLookupMatch(BaseModel):
+    """Resolved entity IDs for one queried identifier."""
+
+    identifier: str
+    entityIds: list[str] = Field(default_factory=list)
+
+
+class EntityLookupResponse(BaseModel):
+    """Identifier lookup response including matched entity documents."""
+
+    matches: list[EntityLookupMatch] = Field(default_factory=list)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):

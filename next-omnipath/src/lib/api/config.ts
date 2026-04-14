@@ -24,10 +24,6 @@ const API_CONFIG = {
   meilisearchUrl: process.env.MEILISEARCH_HOST
     || (IS_DOCKERIZED ? 'http://omnipath-meilisearch:7700' : 'http://localhost:7700'),
 
-  // Entity resolver service URL (identifier lookup)
-  entityServiceUrl: process.env.ENTITY_SERVICE_URL
-    || (IS_DOCKERIZED ? 'http://entity-resolver-service:8080' : 'http://localhost:8080'),
-
   // API service URL
   apiServiceUrl: process.env.API_SERVICE_URL
     || (IS_DOCKERIZED ? 'http://api-service:8081' : 'http://localhost:8081'),
@@ -50,13 +46,6 @@ export const getSiteUrl = (): string => {
  */
 export const getMeilisearchUrl = (): string => {
   return API_CONFIG.meilisearchUrl;
-};
-
-/**
- * Get the entity service URL (identifier lookup backend)
- */
-export const getEntityServiceUrl = (): string => {
-  return API_CONFIG.entityServiceUrl;
 };
 
 /**

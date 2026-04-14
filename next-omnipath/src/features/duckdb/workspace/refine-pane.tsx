@@ -98,7 +98,7 @@ export function DuckDbRefinePane() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
       try {
-        const response = await fetch("/api/ontology/search", {
+        const response = await fetch("/api/terms/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ queries: [query], limit: 25 }),

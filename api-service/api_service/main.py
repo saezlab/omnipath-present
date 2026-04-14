@@ -1,6 +1,7 @@
 """FastAPI application for API service."""
 
 import logging
+import os
 import re
 import tempfile
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from time import perf_counter
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+import httpx
 import polars as pl
 from ontograph.queries.introspection import IntrospectionPronto
 
@@ -32,15 +34,20 @@ from .models import (
     ResourceDownloadRequest,
     ResourceWorkspaceRequest,
     EvidenceLookupResponse,
+    EntityLookupRequest,
+    EntityLookupMatch,
+    EntityLookupResponse,
 )
 from .registry import registry
-from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET
+from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET, ENTITIES_PARQUET
 from .resource_catalog import list_resources
 from .resource_downloads import build_multi_resource_download, build_single_resource_download
 from .resource_workspace import build_workspace_manifest, resolve_workspace_artifact
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+ENTITY_SERVICE_URL = os.getenv("ENTITY_SERVICE_URL", "http://localhost:8080")
 
 
 @asynccontextmanager
@@ -285,6 +292,57 @@ async def list_ontologies():
         for ont_id, desc in registry.list_available().items()
     ]
     return OntologiesResponse(ontologies=ontologies)
+
+
+def _load_entity_documents(entity_ids: list[str]) -> list[dict]:
+    """Load entity search documents for resolved entity IDs."""
+    if not entity_ids:
+        return []
+
+    if not ENTITIES_PARQUET.exists():
+        raise HTTPException(status_code=500, detail=f"Missing parquet file: {ENTITIES_PARQUET}")
+
+    df = (
+        pl.scan_parquet(str(ENTITIES_PARQUET))
+        .filter(pl.col("entity_id").is_in(entity_ids))
+        .collect(streaming=True)
+    )
+
+    if df.is_empty():
+        return []
+
+    docs = df.to_dicts()
+    order = {entity_id: idx for idx, entity_id in enumerate(entity_ids)}
+    docs.sort(key=lambda row: order.get(str(row.get("entity_id")), len(order)))
+    return docs
+
+
+@app.post("/entity-lookup", response_model=EntityLookupResponse)
+async def entity_lookup(request: EntityLookupRequest):
+    """Resolve raw identifiers to candidate OmniPath entity IDs and attach entity documents."""
+    identifiers = [identifier.strip() for identifier in request.identifiers if identifier.strip()]
+    if not identifiers:
+        raise HTTPException(status_code=400, detail="No identifiers provided")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{ENTITY_SERVICE_URL}/lookup", json={"identifiers": identifiers})
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text
+        raise HTTPException(status_code=502, detail=f"Entity service error: {exc.response.status_code} {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Entity service unavailable: {exc}") from exc
+
+    payload = response.json()
+    results = payload.get("results") or {}
+    matches = [
+        EntityLookupMatch(identifier=identifier, entityIds=list(results.get(identifier) or []))
+        for identifier in identifiers
+    ]
+    all_entity_ids = list(dict.fromkeys(entity_id for match in matches for entity_id in match.entityIds))
+    entities = _load_entity_documents(all_entity_ids)
+    return EntityLookupResponse(matches=matches, entities=entities)
 
 
 # --- Term lookup ---

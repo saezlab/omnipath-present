@@ -21,10 +21,10 @@ export function useOntologyTerms(termIds: string[]) {
     enabled: normalizedIds.length > 0,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const response = await fetch("/api/ontology/terms", {
+      const response = await fetch("/api/terms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ termIds: normalizedIds }),
+        body: JSON.stringify({ term_ids: normalizedIds }),
       });
 
       if (!response.ok) {

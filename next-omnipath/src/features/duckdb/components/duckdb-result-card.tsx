@@ -69,10 +69,10 @@ export function CvTermHoverCard({
     enabled: isOpen && termId.trim().length > 0,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const response = await fetch("/api/ontology/terms", {
+      const response = await fetch("/api/terms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ termIds: [termId] }),
+        body: JSON.stringify({ term_ids: [termId] }),
       });
 
       if (!response.ok) {

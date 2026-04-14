@@ -41,7 +41,9 @@ export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/{ontology}/term/{id}` | Get term info (name, definition) |
-| POST | `/{ontology}/terms` | Batch term lookup |
+| POST | `/terms` | Batch term lookup |
+| POST | `/terms/search` | Search ontology terms by label or synonym |
+| POST | `/entity-lookup` | Resolve raw identifiers to candidate entity IDs and attached entity documents |
 
 ### Navigation
 | Method | Path | Description |
@@ -55,7 +57,7 @@ export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/{ontology}/term/{id}/trajectories` | All paths from root to term |
-| POST | `/{ontology}/tree` | Merged tree for multiple terms |
+| POST | `/tree` | Merged tree for multiple terms |
 
 ### Data Export
 | Method | Path | Description |
