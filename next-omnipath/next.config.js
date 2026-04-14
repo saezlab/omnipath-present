@@ -5,7 +5,7 @@ const path = require('path');
 // Load parent directory .env file
 config({ path: path.resolve(__dirname, '../.env') });
 
-const API_SERVICE_URL = process.env.API_SERVICE_URL || 'http://localhost:8081';
+const API_SERVICE_URL = process.env.API_SERVICE_URL || (process.env.DOCKERIZED === 'true' ? 'http://api-service:8081' : 'http://localhost:8081');
 
 const nextConfig = {
   output: 'standalone',

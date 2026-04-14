@@ -93,12 +93,15 @@ services:
             args:
                 NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-production}
                 NEXT_PUBLIC_DOMAIN: ${NEXT_PUBLIC_DOMAIN:-localhost}
+                API_SERVICE_URL: http://api-service:8081
+                DOCKERIZED: "true"
         restart: unless-stopped
         environment:
             # These are used at runtime for server-side requests
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
             API_SERVICE_URL: http://api-service:8081
+            DOCKERIZED: "true"
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
             OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
