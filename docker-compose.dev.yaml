@@ -3,7 +3,7 @@
 #
 # Services read from DATA_DIR (defaults to omnipath_build latest output):
 #   DATA_DIR=../omnipath_build/data/output/latest
-#   - entity_identifier.parquet  (entity-service)
+#   - entity_identifier.parquet  (entity-resolver-service)
 #   - omnipath_mi.obo            (api-service)
 #   - search_*.parquet           (api-service export endpoints)
 #   - .data_version              (optional version marker)
@@ -33,8 +33,8 @@ services:
             retries: 20
             start_period: 15m
 
-    # Entity Service - Parquet-based entity lookup
-    entity-service:
+    # Entity Resolver Service - Parquet-based entity lookup
+    entity-resolver-service:
         build:
             context: ./entity-service
             dockerfile: Dockerfile

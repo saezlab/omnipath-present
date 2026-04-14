@@ -38,8 +38,8 @@ services:
             retries: 20
             start_period: 15m
 
-    # Entity Service - Parquet-based entity lookup
-    entity-service:
+    # Entity Resolver Service - Parquet-based entity lookup
+    entity-resolver-service:
         build:
             context: ./entity-service
             dockerfile: Dockerfile
@@ -97,7 +97,7 @@ services:
             # These are used at runtime for server-side requests
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
-            ENTITY_SERVICE_URL: http://entity-service:8080
+            ENTITY_SERVICE_URL: http://entity-resolver-service:8080
             API_SERVICE_URL: http://api-service:8081
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
@@ -109,7 +109,7 @@ services:
         depends_on:
             omnipath-meilisearch:
                 condition: service_healthy
-            entity-service:
+            entity-resolver-service:
                 condition: service_healthy
             api-service:
                 condition: service_healthy
