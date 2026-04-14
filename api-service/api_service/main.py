@@ -35,6 +35,7 @@ from .models import (
 )
 from .registry import registry
 from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET
+from .resource_catalog import list_resources
 from .resource_downloads import build_multi_resource_download, build_single_resource_download
 from .resource_workspace import build_workspace_manifest, resolve_workspace_artifact
 
@@ -558,6 +559,11 @@ def export_associations_parquet(request: AssociationExportRequest, background_ta
         default_filename="associations_subset",
         log_label="Association",
     )
+
+
+@app.get("/resources")
+def get_resources_catalog():
+    return list_resources()
 
 
 @app.get("/resources/{resource_id}/download")

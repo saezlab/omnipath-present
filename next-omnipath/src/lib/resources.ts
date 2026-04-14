@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import path from "node:path";
+import { getApiServiceUrl } from "@/lib/api/config";
 
 export interface ResourceRecord {
   resource_id: string;
@@ -22,57 +21,18 @@ export interface ResourceRecord {
   build_status: string | null;
 }
 
-const OMNIPATH_BUILD_ROOT = path.resolve(process.cwd(), "../../omnipath_build");
-
-const DEFAULT_RESOURCES_PARQUET_PATH = path.join(
-  OMNIPATH_BUILD_ROOT,
-  "data_v2/gold/resources.parquet",
-);
-
-function getResourcesParquetPath(): string {
-  return process.env.OMNIPATH_RESOURCES_PARQUET_PATH || DEFAULT_RESOURCES_PARQUET_PATH;
-}
-
-function runPythonReader(parquetPath: string): ResourceRecord[] {
-  const script = String.raw`
-from pathlib import Path
-import json
-import sys
-
-import polars as pl
-
-parquet_path = Path(sys.argv[1])
-if not parquet_path.exists():
-    raise FileNotFoundError(f"Resources parquet not found: {parquet_path}")
-
-df = pl.read_parquet(parquet_path)
-rows = []
-for row in df.to_dicts():
-    normalized = {}
-    for key, value in row.items():
-        if isinstance(value, list):
-            normalized[key] = value
-        elif value is None:
-            normalized[key] = None
-        else:
-            normalized[key] = value
-    rows.append(normalized)
-
-print(json.dumps(rows))
-`;
-
-  const stdout = execFileSync("uv", ["run", "--project", OMNIPATH_BUILD_ROOT, "python", "-c", script, parquetPath], {
-    encoding: "utf-8",
-    maxBuffer: 10 * 1024 * 1024,
+export async function getResources(): Promise<ResourceRecord[]> {
+  const apiServiceUrl = getApiServiceUrl();
+  const response = await fetch(`${apiServiceUrl}/resources`, {
+    cache: "no-store",
   });
 
-  return JSON.parse(stdout) as ResourceRecord[];
-}
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API resources error: ${response.status} ${text}`);
+  }
 
-export async function getResources(): Promise<ResourceRecord[]> {
-  const parquetPath = getResourcesParquetPath();
-  const rows = runPythonReader(parquetPath);
-
+  const rows = await response.json() as ResourceRecord[];
   return rows.sort((a, b) => a.resource_name.localeCompare(b.resource_name));
 }
 
