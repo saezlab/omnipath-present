@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { DuckDbAnnotationWorkspaceShell } from "@/features/duckdb/annotations/workspace-shell";
 
 export default function DuckDbAnnotationsWorkspacePage() {
-  return <DuckDbAnnotationWorkspaceShell />;
+  return (
+    <Suspense fallback={<div className="flex h-svh flex-1" />}>
+      <DuckDbAnnotationWorkspaceShell />
+    </Suspense>
+  );
 }
