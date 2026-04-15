@@ -67,6 +67,7 @@ app = FastAPI(
     description="REST API for querying biological ontologies",
     version="0.1.0",
     lifespan=lifespan,
+    root_path="/api",
 )
 
 
