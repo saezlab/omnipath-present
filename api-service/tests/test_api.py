@@ -182,26 +182,26 @@ def test_ontology_not_found(client, mock_registry):
 
 
 def test_download_single_resource(client):
-    """Single-resource downloads proxy a file response."""
+    """Single-resource downloads serve the prebuilt archive."""
     from api_service.resource_downloads import DownloadArtifact
 
     with tempfile.TemporaryDirectory() as tmp:
-        artifact_path = Path(tmp) / "entities.parquet"
-        artifact_path.write_bytes(b"parquet-bytes")
+        artifact_path = Path(tmp) / "signor.zip"
+        artifact_path.write_bytes(b"zip-bytes")
 
         with patch("api_service.main.build_single_resource_download") as mock_download:
             mock_download.return_value = DownloadArtifact(
                 path=artifact_path,
-                media_type="application/x-parquet",
-                filename="signor_entities.parquet",
+                media_type="application/zip",
+                filename="signor.zip",
                 is_temporary=False,
             )
             response = client.get("/resources/signor/download")
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/x-parquet"
-    assert "signor_entities.parquet" in response.headers["content-disposition"]
-    assert response.content == b"parquet-bytes"
+    assert response.headers["content-type"] == "application/zip"
+    assert "signor.zip" in response.headers["content-disposition"]
+    assert response.content == b"zip-bytes"
 
 
 

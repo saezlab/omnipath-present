@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatNumber } from "@/lib/utils";
 import type { ResourceRecord } from "@/lib/resources";
 import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
-import { downloadResourceSelection, downloadSingleResource } from "@/lib/resource-downloads";
+import { downloadResourceSelection } from "@/lib/resource-downloads";
 import { Check, CirclePlus, Copy, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -109,7 +109,6 @@ export default function ResourcesPage({
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const [downloadingResourceId, setDownloadingResourceId] = useState<string | null>(null);
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -172,18 +171,6 @@ export default function ResourcesPage({
     await navigator.clipboard.writeText(selectedIds.join(","));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
-  }
-
-  async function handleSingleResourceDownload(resourceId: string) {
-    try {
-      setDownloadError(null);
-      setDownloadingResourceId(resourceId);
-      await downloadSingleResource(resourceId);
-    } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : "Download failed.");
-    } finally {
-      setDownloadingResourceId(null);
-    }
   }
 
   async function handleSelectionDownload() {
@@ -259,6 +246,7 @@ export default function ResourcesPage({
                   { label: "Annotations", value: resource.annotation_count },
                   { label: "Ontology Terms", value: resource.ontology_term_count },
                 ].filter((stat) => stat.value > 0);
+                const canDownloadArchive = resource.build_status === "success" && resource.download_archive_exists;
 
                 return (
                   <article
@@ -331,6 +319,10 @@ export default function ResourcesPage({
                         <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
                         <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
                       </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
+                        <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
+                      </div>
                     </dl>
 
                     <div className="mt-4 space-y-3 border-t border-border/50 pt-4">
@@ -360,15 +352,19 @@ export default function ResourcesPage({
                           ) : null}
                         </div>
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleSingleResourceDownload(resource.resource_id)}
-                          disabled={resource.build_status !== "success" || downloadingResourceId === resource.resource_id || downloadingSelection}
-                        >
-                          {downloadingResourceId === resource.resource_id ? "Preparing…" : "Download"}
-                          <Download className="h-4 w-4" />
-                        </Button>
+                        {canDownloadArchive ? (
+                          <Button asChild variant="outline" size="sm" disabled={downloadingSelection}>
+                            <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
+                              Download
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        ) : (
+                          <Button variant="outline" size="sm" disabled>
+                            Download
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
 
                       <button
@@ -425,7 +421,7 @@ export default function ResourcesPage({
                   {copied ? "Copied IDs" : "Copy selected IDs"}
                   <Copy className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" onClick={handleSelectionDownload} disabled={downloadingSelection || downloadingResourceId !== null}>
+                <Button variant="outline" onClick={handleSelectionDownload} disabled={downloadingSelection}>
                   {downloadingSelection ? "Preparing bundle…" : "Download selection"}
                   <Download className="h-4 w-4" />
                 </Button>

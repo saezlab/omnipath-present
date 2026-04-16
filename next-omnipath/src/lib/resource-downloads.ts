@@ -26,15 +26,6 @@ async function triggerBrowserDownload(response: Response, fallbackName: string) 
   window.URL.revokeObjectURL(downloadUrl);
 }
 
-export async function downloadSingleResource(resourceId: string) {
-  const response = await fetch(`/api/resources/${encodeURIComponent(resourceId)}/download`, {
-    method: "GET",
-    cache: "no-store",
-  });
-
-  await triggerBrowserDownload(response, `${resourceId}.zip`);
-}
-
 export async function downloadResourceSelection(resourceIds: string[]) {
   const response = await fetch("/api/resources/download", {
     method: "POST",

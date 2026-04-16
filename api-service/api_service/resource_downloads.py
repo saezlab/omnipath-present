@@ -19,12 +19,6 @@ class DownloadArtifact:
     is_temporary: bool = False
 
 
-SUPPORTED_DIRECT_FILE_EXTENSIONS = {
-    ".parquet": "application/x-parquet",
-    ".obo": "text/plain; charset=utf-8",
-}
-
-
 def _default_gold_root() -> Path:
     here = Path(__file__).resolve()
     candidates: list[Path] = []
@@ -83,24 +77,20 @@ def resolve_resource_version_dir(resource_id: str, gold_root: Path | None = None
     return version_dir
 
 
+def _resource_archive_path(version_dir: Path, resource_id: str) -> Path:
+    return version_dir / f"{resource_id}.zip"
+
+
+
 def list_resource_artifacts(resource_id: str, gold_root: Path | None = None) -> list[Path]:
     version_dir = resolve_resource_version_dir(resource_id, gold_root)
-    return sorted(path for path in version_dir.iterdir() if path.is_file())
+    archive_path = _resource_archive_path(version_dir, resource_id)
+    return sorted(path for path in version_dir.iterdir() if path.is_file() and path != archive_path)
 
 
 def _sanitize_download_name(name: str) -> str:
     text = (name or "").strip().replace("/", "_")
     return text or "resources"
-
-
-def _single_artifact_download(resource_id: str, path: Path) -> DownloadArtifact:
-    media_type = SUPPORTED_DIRECT_FILE_EXTENSIONS.get(path.suffix.lower(), "application/octet-stream")
-    return DownloadArtifact(
-        path=path,
-        media_type=media_type,
-        filename=f"{resource_id}_{path.name}",
-        is_temporary=False,
-    )
 
 
 def _write_zip_bundle(entries: Iterable[tuple[Path, str]], prefix: str) -> DownloadArtifact:
@@ -121,16 +111,16 @@ def _write_zip_bundle(entries: Iterable[tuple[Path, str]], prefix: str) -> Downl
 
 
 def build_single_resource_download(resource_id: str, gold_root: Path | None = None) -> DownloadArtifact:
-    artifacts = list_resource_artifacts(resource_id, gold_root)
-    if not artifacts:
-        raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' has no downloadable artifacts")
+    version_dir = resolve_resource_version_dir(resource_id, gold_root)
+    archive_path = _resource_archive_path(version_dir, resource_id)
+    if not archive_path.exists() or not archive_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' has no prebuilt download archive")
 
-    if len(artifacts) == 1:
-        return _single_artifact_download(resource_id, artifacts[0])
-
-    return _write_zip_bundle(
-        ((artifact, f"{resource_id}/{artifact.name}") for artifact in artifacts),
-        prefix=_sanitize_download_name(resource_id),
+    return DownloadArtifact(
+        path=archive_path,
+        media_type="application/zip",
+        filename=archive_path.name,
+        is_temporary=False,
     )
 
 

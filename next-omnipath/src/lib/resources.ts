@@ -16,6 +16,9 @@ export interface ResourceRecord {
   identifier_count: number;
   ontology_term_count: number;
   total_size_bytes: number;
+  download_archive_exists: boolean;
+  download_archive_name: string | null;
+  download_archive_size_bytes: number | null;
   last_downloaded_at: string | null;
   last_built_at: string | null;
   build_status: string | null;
