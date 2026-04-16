@@ -93,12 +93,14 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
         offset: 0,
         filters,
       });
-      const facetDistribution = ("facetDistribution" in response ? response.facetDistribution : null) || {};
+      const facetDistribution = response.facetDistribution || {};
+
       setFilterCounts({
         entity_type: facetDistribution.entity_type || {},
         sources: facetDistribution.sources || {},
         ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
       });
+
       const allOntologyCounts = facetDistribution.ontology_terms || {};
       const groupedCounts: Record<string, Record<string, number>> = {};
       Object.entries(allOntologyCounts).forEach(([value, count]) => {

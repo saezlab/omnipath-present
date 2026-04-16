@@ -67,30 +67,16 @@ export function InteractionsExploreTab({
     fetchData: useCallback(async (offset: number, limit: number) => {
       const response = await searchInteractions("", filters, limit, offset);
 
-      // Update filter counts from facet distribution if available
-      if (response.facetDistribution && offset === 0) {
-        const facetDist = response.facetDistribution;
-        const counts: Record<string, Record<string, number>> = {};
-
-        // Process facets matching new schema
-        if (facetDist.interaction_type) {
-          counts.interaction_type = facetDist.interaction_type;
-        }
-        if (facetDist.is_directed) {
-          counts.is_directed = facetDist.is_directed;
-        }
-        if (facetDist.sign) {
-          counts.sign = facetDist.sign;
-        }
-        if (facetDist.interaction_annotation_terms) {
-          counts.interaction_annotation_terms = facetDist.interaction_annotation_terms;
-        }
-        if (facetDist.participant_annotation_terms) {
-          counts.participant_annotation_terms = facetDist.participant_annotation_terms;
-        }
-        if (facetDist.sources) {
-          counts.sources = facetDist.sources;
-        }
+      if (offset === 0) {
+        const facetDist = response.facetDistribution || {};
+        const counts: Record<string, Record<string, number>> = {
+          interaction_type: facetDist.interaction_type || {},
+          is_directed: facetDist.is_directed || {},
+          sign: facetDist.sign || {},
+          interaction_annotation_terms: facetDist.interaction_annotation_terms || {},
+          participant_annotation_terms: facetDist.participant_annotation_terms || {},
+          sources: facetDist.sources || {},
+        };
 
         setFilterCounts(counts);
         onFilterCountsUpdate(counts);

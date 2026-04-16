@@ -1009,11 +1009,11 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
             </section>
           ))}
         </div>
-      ) : (
+      ) : normalizedQuery ? (
         <div className="text-sm text-muted-foreground">
-          {normalizedQuery ? "No ontology terms match your search." : "No ontology terms available."}
+          No ontology terms match your search.
         </div>
-      )}
+      ) : null}
     </div>
   );
 

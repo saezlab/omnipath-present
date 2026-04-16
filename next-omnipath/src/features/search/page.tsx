@@ -184,26 +184,27 @@ export default function SearchPage({
         filters
       });
 
-      // Update filter counts from facet distribution (only on first page)
-      if (offset === 0 && 'facetDistribution' in response && response.facetDistribution && initialSearchType === "search_entities") {
+      const hits = response.hits as SearchResult[] || [];
+
+      // Update filter counts from backend-provided facet distribution (only on first page)
+      if (offset === 0 && initialSearchType === "search_entities") {
         const facetDistribution = response.facetDistribution || {};
-        const allOntologyCounts = facetDistribution.ontology_terms || {};
+        const ontologyCounts = facetDistribution.ontology_terms || {};
         const perOntologyCounts: Record<string, Record<string, number>> = {};
-        Object.entries(allOntologyCounts).forEach(([value, count]) => {
+        Object.entries(ontologyCounts).forEach(([value, count]) => {
           const match = value.match(/^([A-Z][A-Z0-9_-]*):/);
           const prefix = match ? match[1] : 'OTHER';
           (perOntologyCounts[prefix] ||= {})[value] = count as number;
         });
         setOntologyFacetCountsByPrefix(perOntologyCounts);
         setFilterCounts({
-          entity_type: response.facetDistribution.entity_type || {},
-          sources: response.facetDistribution.sources || {},
-          ncbi_tax_id: response.facetDistribution.ncbi_tax_id || {},
+          entity_type: facetDistribution.entity_type || {},
+          sources: facetDistribution.sources || {},
+          ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
         });
       }
 
       // The API returns estimatedTotalHits for the total count
-      const hits = response.hits as SearchResult[] || [];
       const estimatedTotalHits = ('estimatedTotalHits' in response ? response.estimatedTotalHits as number : 0) || hits.length || 0;
 
       return {

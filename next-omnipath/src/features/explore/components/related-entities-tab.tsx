@@ -144,11 +144,12 @@ export function RelatedEntitiesTab({
         });
 
         // Update filter counts on first page
-        if (offset === 0 && response.facetDistribution && onFilterCountsUpdate) {
+        if (offset === 0 && onFilterCountsUpdate) {
+          const facetDistribution = response.facetDistribution || {};
           onFilterCountsUpdate({
-            entity_type: response.facetDistribution.entity_type || {},
-            sources: response.facetDistribution.sources || {},
-            ncbi_tax_id: response.facetDistribution.ncbi_tax_id || {},
+            entity_type: facetDistribution.entity_type || {},
+            sources: facetDistribution.sources || {},
+            ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
           });
         }
 

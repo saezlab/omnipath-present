@@ -3,6 +3,14 @@
 import { meilisearchClient, INDEXES, type IndexName } from './client';
 import type { MeilisearchFilters } from '@/types/meilisearch';
 import { buildEntityFilterString, buildInteractionFilterString, buildSourceFilterString } from './filters';
+import {
+  fetchDocumentsPostgres,
+  getInteractionStatsPostgres,
+  searchAssociationsPostgres,
+  searchEntitiesPostgres,
+  searchInteractionsPostgres,
+  shouldUsePostgresSearch,
+} from '@/lib/postgres-search/search';
 
 // Re-export INDEXES for other modules
 //export { INDEXES } from './client';
@@ -36,6 +44,14 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
     offset = 0,
     filters = {},
   } = params;
+
+  if (shouldUsePostgresSearch() && index === INDEXES.ENTITIES) {
+    try {
+      return await searchEntitiesPostgres({ query, limit, offset, filters });
+    } catch (error) {
+      console.error('Postgres entity search error, falling back to Meilisearch:', error);
+    }
+  }
 
   try {
     const indexClient = meilisearchClient.index(index);
@@ -116,6 +132,14 @@ export async function searchInteractionsMeilisearch(
     filters = {},
   } = params;
 
+  if (shouldUsePostgresSearch()) {
+    try {
+      return await searchInteractionsPostgres({ query, limit, offset, filters });
+    } catch (error) {
+      console.error('Postgres interaction search error, falling back to Meilisearch:', error);
+    }
+  }
+
   try {
     const indexClient = meilisearchClient.index(INDEXES.INTERACTIONS);
     const filterString = buildInteractionFilterString(filters);
@@ -169,6 +193,14 @@ export async function fetchMeilisearchDocuments(
   documentIds: string[],
   filterField: string = 'id',
 ): Promise<{ documents: Record<string, unknown>[] }> {
+  if (shouldUsePostgresSearch() && indexName === INDEXES.ENTITIES) {
+    try {
+      return await fetchDocumentsPostgres(indexName, documentIds);
+    } catch (error) {
+      console.error('Postgres fetch documents error, falling back to Meilisearch:', error);
+    }
+  }
+
   try {
     const indexClient = meilisearchClient.index(indexName);
     const documents = await indexClient.getDocuments({
@@ -192,6 +224,14 @@ export async function fetchMeilisearchDocuments(
  * Get interaction statistics
  */
 export async function getInteractionStats(): Promise<Record<string, unknown>> {
+  if (shouldUsePostgresSearch()) {
+    try {
+      return await getInteractionStatsPostgres();
+    } catch (error) {
+      console.error('Postgres interaction stats error, falling back to Meilisearch:', error);
+    }
+  }
+
   try {
     const indexClient = meilisearchClient.index(INDEXES.INTERACTIONS);
     const stats = await indexClient.getStats();
@@ -259,6 +299,14 @@ export async function searchAssociationsMeilisearch(
     offset = 0,
     filters = {},
   } = params;
+
+  if (shouldUsePostgresSearch()) {
+    try {
+      return await searchAssociationsPostgres({ query, limit, offset, filters });
+    } catch (error) {
+      console.error('Postgres associations search error, falling back to Meilisearch:', error);
+    }
+  }
 
   try {
     const indexClient = meilisearchClient.index(INDEXES.ASSOCIATIONS);

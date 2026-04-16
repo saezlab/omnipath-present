@@ -167,7 +167,7 @@ export function EntityFilterSidebar({
           displayName = organismName ? `${organismName} (${value})` : value;
           // We don't have hover cards for taxonomy IDs yet, and they aren't strictly CV terms or entities in the search index
           // id = value; 
-        } else {
+        } else if (filterKey === 'entity_type') {
           // For entity_type and sources, extract display name from "Label:Accession" format
           // Format is "label:PREFIX:NUMBER" (e.g., "small molecule:MI:0328")
           // We want to extract just the label part
@@ -216,6 +216,9 @@ export function EntityFilterSidebar({
               displayName = value;
             }
           }
+        } else {
+          displayName = value;
+          id = null;
         }
 
         let icon: string | undefined;

@@ -1,6 +1,6 @@
 "use server";
 
-import { searchMeilisearch as meilisearchDirectSearch } from '@/lib/meilisearch/search';
+import { searchMeilisearch as meilisearchDirectSearch, type SearchResponse } from '@/lib/meilisearch/search';
 import type { IndexName } from '@/lib/meilisearch/client';
 import type { MeilisearchFilters } from '@/types/meilisearch';
 
@@ -16,12 +16,21 @@ export async function searchMeilisearch({
   limit?: number;
   offset?: number;
   filters?: MeilisearchFilters;
-}) {
+}): Promise<SearchResponse> {
   // Allow empty query to show all results with facets (for initial load and filtering)
   try {
     return await meilisearchDirectSearch({ index, query, limit, offset, filters });
   } catch (e) {
-    return { hits: [], error: e instanceof Error ? e.message : "Unknown error" };
+    console.error("Error searching entities:", e);
+    return {
+      hits: [],
+      estimatedTotalHits: 0,
+      limit,
+      offset,
+      processingTimeMs: 0,
+      query,
+      facetDistribution: {},
+    };
   }
 }
 
