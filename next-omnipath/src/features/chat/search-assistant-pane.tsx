@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { MessageSquare } from "lucide-react";
 import { ChatPanel } from "./components/chat-panel";
 import { chatMessagesToUIMessages, uiMessagesToChatMessages } from "./types";
@@ -30,6 +30,7 @@ export function SearchAssistantPane() {
   const { messages, sendMessage, status, stop, setMessages, regenerate } = useChat<UIMessage>({
     id: "search-assistant-pane",
     messages: initialMessages,
+    transport: new DefaultChatTransport({ api: "/app-api/chat" }),
   });
 
   const chatMessages = useMemo(() => uiMessagesToChatMessages(messages), [messages]);

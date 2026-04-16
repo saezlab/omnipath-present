@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { Minimize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
@@ -34,6 +34,7 @@ export function FloatingChatWindow() {
   const { messages, sendMessage, status, stop, setMessages, regenerate } = useChat<UIMessage>({
     id: "floating-chat",
     messages: initialMessages,
+    transport: new DefaultChatTransport({ api: "/app-api/chat" }),
   });
 
   const chatMessages = useMemo(() => uiMessagesToChatMessages(messages), [messages]);

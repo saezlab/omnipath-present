@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { SiteLayout } from "@/components/layout/main-layout";
 import { DualModeInterface } from "./components/dual-mode-interface";
 import { chatMessagesToUIMessages, uiMessagesToChatMessages } from "./types";
@@ -26,6 +26,7 @@ export default function ChatPage() {
   const { messages, sendMessage, status, stop, setMessages, regenerate } = useChat<UIMessage>({
     id: "main-chat",
     messages: initialMessages,
+    transport: new DefaultChatTransport({ api: "/app-api/chat" }),
   });
 
   const chatMessages = uiMessagesToChatMessages(messages);
