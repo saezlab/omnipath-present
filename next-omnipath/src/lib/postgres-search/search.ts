@@ -370,7 +370,7 @@ function buildEntityWhere(filters: MeilisearchFilters, query: string, params: Sq
 
   if (filters.ncbi_tax_id?.length) {
     const placeholder = addParam(params, filters.ncbi_tax_id.map(String));
-    where.push(`(e.taxonomy_id = ANY(${placeholder}::text[]) OR e.taxonomy_id IS NULL)`);
+    where.push(`e.taxonomy_id = ANY(${placeholder}::text[])`);
   }
 
   if (filters.ontology_terms?.length) {
@@ -409,8 +409,20 @@ export async function searchEntitiesPostgres(params: {
   offset?: number;
   filters?: MeilisearchFilters;
   facets?: string[];
+  trackTotalHits?: boolean;
+  includeIdentifiers?: boolean;
+  includeOntologyTerms?: boolean;
 }): Promise<SearchResponse> {
-  const { query, limit = 20, offset = 0, filters = {}, facets } = params;
+  const {
+    query,
+    limit = 20,
+    offset = 0,
+    filters = {},
+    facets,
+    trackTotalHits = true,
+    includeIdentifiers = true,
+    includeOntologyTerms = true,
+  } = params;
   const client = await getPool().connect();
 
   try {
@@ -418,7 +430,7 @@ export async function searchEntitiesPostgres(params: {
     const where = buildEntityWhere(filters, query, whereParams);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const total = offset === 0
+    const total = trackTotalHits && offset === 0
       ? Number((await client.query(
           `SELECT COUNT(*)::bigint AS total
            FROM ${SEARCH_SCHEMA}.entity e
@@ -426,6 +438,19 @@ export async function searchEntitiesPostgres(params: {
           whereParams,
         )).rows[0]?.total || 0)
       : null;
+
+    if (limit === 0) {
+      const facetDistribution = await getEntityFilterFacetDistributionPostgres({ query, filters, facets });
+      return {
+        hits: [],
+        estimatedTotalHits: total ?? 0,
+        limit,
+        offset,
+        processingTimeMs: 0,
+        query,
+        facetDistribution,
+      };
+    }
 
     const queryParams = [...whereParams];
     const limitPlaceholder = addParam(queryParams, limit);
@@ -460,24 +485,18 @@ export async function searchEntitiesPostgres(params: {
          e.entity_attributes,
          e.sources,
          COALESCE(es.interaction_count, 0) AS num_interactions,
-         COALESCE(ids.identifiers, '[]'::jsonb) AS identifiers,
+         COALESCE(${includeIdentifiers ? 'e.identifiers' : `'[]'::jsonb`}, '[]'::jsonb) AS identifiers,
          COALESCE(ann.ontology_terms, ARRAY[]::text[]) AS ontology_terms
        FROM paged p
        JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_pk = p.entity_pk
        LEFT JOIN ${SEARCH_SCHEMA}.entity_summary es ON es.entity_pk = e.entity_pk
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(
-           jsonb_build_object('key', ei.identifier_type, 'value', ei.identifier)
-           ORDER BY ei.identifier_type, ei.identifier
-         ) AS identifiers
-         FROM ${SEARCH_SCHEMA}.entity_identifier ei
-         WHERE ei.entity_pk = e.entity_pk
-       ) ids ON true
-       LEFT JOIN LATERAL (
+       ${includeOntologyTerms ? `LEFT JOIN LATERAL (
          SELECT array_agg(ea.cv_term ORDER BY ea.cv_term) AS ontology_terms
          FROM ${SEARCH_SCHEMA}.entity_annotation ea
          WHERE ea.entity_pk = e.entity_pk
-       ) ann ON true
+       ) ann ON true` : `LEFT JOIN LATERAL (
+         SELECT ARRAY[]::text[] AS ontology_terms
+       ) ann ON true`}
        ORDER BY e.entity_pk`,
       queryParams,
     );
@@ -515,18 +534,10 @@ async function fetchEntityRowsByPublicIds(publicIds: string[]): Promise<SearchRe
          e.entity_attributes,
          e.sources,
          COALESCE(es.interaction_count, 0) AS num_interactions,
-         COALESCE(ids.identifiers, '[]'::jsonb) AS identifiers,
+         COALESCE(e.identifiers, '[]'::jsonb) AS identifiers,
          COALESCE(ann.ontology_terms, ARRAY[]::text[]) AS ontology_terms
        FROM ${SEARCH_SCHEMA}.entity e
        LEFT JOIN ${SEARCH_SCHEMA}.entity_summary es ON es.entity_pk = e.entity_pk
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(
-           jsonb_build_object('key', ei.identifier_type, 'value', ei.identifier)
-           ORDER BY ei.identifier_type, ei.identifier
-         ) AS identifiers
-         FROM ${SEARCH_SCHEMA}.entity_identifier ei
-         WHERE ei.entity_pk = e.entity_pk
-       ) ids ON true
        LEFT JOIN LATERAL (
          SELECT array_agg(ea.cv_term ORDER BY ea.cv_term) AS ontology_terms
          FROM ${SEARCH_SCHEMA}.entity_annotation ea

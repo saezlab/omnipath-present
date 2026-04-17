@@ -100,12 +100,16 @@ export function EntitiesRefinePanel({
 
   useEffect(() => {
     async function loadFacets() {
+      const facetFilters = { ...filters };
+      delete facetFilters.ncbi_tax_id;
+
       const response = await searchMeilisearch({
         query: effectiveQuery || "",
         index: "search_entities",
-        limit: 1,
+        limit: 0,
         offset: 0,
-        filters,
+        filters: facetFilters,
+        facets: ["entity_type", "sources", "ontology_terms"],
       });
       const facetDistribution = response.facetDistribution || {};
 

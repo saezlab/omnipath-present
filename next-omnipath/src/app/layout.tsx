@@ -5,9 +5,11 @@ import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import { SidebarContentProvider } from "@/contexts/sidebar-content-context"
-import { FloatingNavProvider } from "@/contexts/floating-nav-context"
+import { ChatLayoutProvider } from "@/contexts/chat-layout-context"
+import { SidebarProvider } from "@/components/ui/sidebar"
 import { Providers } from "@/components/providers"
-import { OmniPathFloatingMenu } from "@/components/layout/omnipath-floating-menu"
+import { AppSidebar } from "@/components/layout/app-sidebar"
+import { GlobalChatLayout } from "@/components/layout/global-chat-layout"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -24,19 +26,21 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} flex min-h-screen flex-col overflow-hidden`}>
+      <body className={`${inter.className} flex min-h-screen flex-col overflow-hidden bg-background`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Providers>
             <NuqsAdapter>
               <SidebarContentProvider>
-                <FloatingNavProvider>
-                  <Suspense fallback={null}>
-                    <OmniPathFloatingMenu />
-                  </Suspense>
-                  <main className="flex min-h-0 flex-1 w-full overflow-hidden">
-                    {children}
-                  </main>
-                </FloatingNavProvider>
+                <ChatLayoutProvider>
+                  <SidebarProvider defaultOpen>
+                    <AppSidebar />
+                    <main className="flex min-h-0 flex-1 w-full overflow-hidden">
+                      <GlobalChatLayout>
+                        {children}
+                      </GlobalChatLayout>
+                    </main>
+                  </SidebarProvider>
+                </ChatLayoutProvider>
               </SidebarContentProvider>
             </NuqsAdapter>
           </Providers>

@@ -57,8 +57,8 @@ export function EntitiesExploreTab({
   const [filterCounts, setFilterCounts] = useState<{
     entity_type?: Record<string, number>;
     sources?: Record<string, number>;
-    ncbi_tax_id?: Record<string, number>;
   }>({});
+  const [isLoadingFacets, setIsLoadingFacets] = useState(false);
 
   const effectiveFilters = useMemo(() => ({
     ...filters,
@@ -72,7 +72,7 @@ export function EntitiesExploreTab({
     onFiltersChange({ ...filters, ncbi_tax_id: [species] });
   }, [filters, onFiltersChange, scopedEntityIds, species]);
 
-  const handleFilterChange = useCallback((next: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) => {
+  const handleFilterChange = useCallback((next: { entity_types?: string[]; sources?: string[] }) => {
     const merged: MeilisearchFilters = {
       ...filters,
       ...next,
@@ -103,17 +103,11 @@ export function EntitiesExploreTab({
         limit,
         offset,
         filters: effectiveFilters,
-        facets: ["entity_type", "sources", "ncbi_tax_id"],
+        facets: [],
+        trackTotalHits: false,
+        includeIdentifiers: false,
+        includeOntologyTerms: false,
       });
-
-      if (offset === 0) {
-        const facetDistribution = response.facetDistribution || {};
-        setFilterCounts({
-          entity_type: facetDistribution.entity_type || {},
-          sources: facetDistribution.sources || {},
-          ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
-        });
-      }
 
       return {
         results: (response.hits as SearchResult[]) || [],
@@ -124,18 +118,59 @@ export function EntitiesExploreTab({
     dependencies: [query, effectiveFilters],
   });
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFacets = async () => {
+      setIsLoadingFacets(true);
+      try {
+        const facetFilters = { ...effectiveFilters };
+        delete facetFilters.ncbi_tax_id;
+
+        const response = await searchMeilisearch({
+          query: query || "",
+          index: "search_entities",
+          limit: 0,
+          offset: 0,
+          filters: facetFilters,
+          facets: ["entity_type", "sources"],
+          trackTotalHits: false,
+        });
+
+        if (cancelled) return;
+
+        const facetDistribution = response.facetDistribution || {};
+        setFilterCounts({
+          entity_type: facetDistribution.entity_type || {},
+          sources: facetDistribution.sources || {},
+        });
+      } finally {
+        if (!cancelled) {
+          setIsLoadingFacets(false);
+        }
+      }
+    };
+
+    void loadFacets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveFilters, query]);
+
   const filterPane = (
-    <EntityFilterSidebar
+    <div className={isLoadingFacets ? "opacity-70 transition-opacity" : undefined}>
+      <EntityFilterSidebar
       filters={{
         entity_types: filters.entity_types,
         sources: filters.sources,
-        ncbi_tax_id: filters.ncbi_tax_id,
       }}
       filterCounts={filterCounts}
       onFilterChange={handleFilterChange}
       onClearFilters={handleClearFilters}
-      isMobile={isMobile}
-    />
+        isMobile={isMobile}
+      />
+    </div>
   );
 
   const resultsPane = (

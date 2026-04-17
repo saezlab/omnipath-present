@@ -22,14 +22,12 @@ interface EntityFilterSidebarProps {
   filters: {
     entity_types?: string[];
     sources?: string[];
-    ncbi_tax_id?: string[];
   };
   filterCounts: {
     entity_type?: Record<string, number>;
     sources?: Record<string, number>;
-    ncbi_tax_id?: Record<string, number>;
   };
-  onFilterChange: (filters: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) => void;
+  onFilterChange: (filters: { entity_types?: string[]; sources?: string[] }) => void;
   onClearFilters: () => void;
   isMobile?: boolean;
 }
@@ -37,7 +35,7 @@ interface EntityFilterSidebarProps {
 // Helper component for filter sections
 interface FilterSectionProps {
   title: string;
-  filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id';
+  filterKey: 'entity_types' | 'sources';
   options: FilterOption[];
   selectedValues: string[];
   onToggle: (value: string) => void;
@@ -128,7 +126,7 @@ export function EntityFilterSidebar({
   }, 0);
 
   // Handler for toggling filters
-  const handleToggle = (filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id', value: string) => {
+  const handleToggle = (filterKey: 'entity_types' | 'sources', value: string) => {
     const currentValues = (filters[filterKey] as string[]) || [];
     const newValues = currentValues.includes(value)
       ? currentValues.filter(v => v !== value)
@@ -140,20 +138,6 @@ export function EntityFilterSidebar({
     });
   };
 
-  // Map common NCBI taxonomy IDs to organism names
-  const taxonomyIdToName: Record<string, string> = {
-    '9606': 'Human',
-    '10090': 'Mouse',
-    '10116': 'Rat',
-    '7227': 'Fruit fly',
-    '6239': 'C. elegans',
-    '7955': 'Zebrafish',
-    '559292': 'S. cerevisiae',
-    '284812': 'S. pombe',
-    '83333': 'E. coli',
-    '224308': 'B. subtilis',
-  };
-
   // Transform filter counts into FilterOption[] format
   const transformFilterCounts = (counts: Record<string, number>, filterKey: string): FilterOption[] => {
     return Object.entries(counts)
@@ -161,13 +145,7 @@ export function EntityFilterSidebar({
         let displayName: string;
         let id: string | null = null;
 
-        if (filterKey === 'ncbi_tax_id') {
-          // For NCBI taxonomy IDs, show "Organism Name (ID)" if known, otherwise just the ID
-          const organismName = taxonomyIdToName[value];
-          displayName = organismName ? `${organismName} (${value})` : value;
-          // We don't have hover cards for taxonomy IDs yet, and they aren't strictly CV terms or entities in the search index
-          // id = value; 
-        } else if (filterKey === 'entity_type') {
+        if (filterKey === 'entity_type') {
           // For entity_type and sources, extract display name from "Label:Accession" format
           // Format is "label:PREFIX:NUMBER" (e.g., "small molecule:MI:0328")
           // We want to extract just the label part

@@ -1,9 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { EntityDataSourceProvider } from "@/contexts/entity-data-source-context";
-import { useFloatingNav } from "@/contexts/floating-nav-context";
 import { DuckDbChatPane } from "./chat-pane";
 import { DuckDbWorkspaceProvider, useDuckDbWorkspace } from "./context";
 import { DuckDbRefinePane } from "./refine-pane";
@@ -21,7 +20,6 @@ function DuckDbWorkspacePanels() {
     setMobileActivePane,
     setPaneWidths,
   } = useWorkspaceUiState();
-  const { setWorkspaceControls } = useFloatingNav();
   const { getEntityById } = useDuckDbWorkspace();
 
   const desktopPaneContent: Record<WorkspacePane, ReactNode> = {
@@ -31,28 +29,6 @@ function DuckDbWorkspacePanels() {
   };
 
   const mobileContent = desktopPaneContent[mobileActivePane];
-
-  useEffect(() => {
-    if (!hydrated) return;
-
-    setWorkspaceControls({
-      isMobile,
-      desktopVisiblePanes,
-      mobileActivePane,
-      onDesktopToggle: toggleDesktopPane,
-      onMobileSelect: setMobileActivePane,
-    });
-
-    return () => setWorkspaceControls(null);
-  }, [
-    desktopVisiblePanes,
-    hydrated,
-    isMobile,
-    mobileActivePane,
-    setMobileActivePane,
-    setWorkspaceControls,
-    toggleDesktopPane,
-  ]);
 
   if (!hydrated) {
     return <div className="flex h-svh flex-1" />;

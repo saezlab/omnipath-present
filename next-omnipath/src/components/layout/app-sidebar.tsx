@@ -23,29 +23,27 @@ import {
   Sun,
   Moon,
   ListChecks,
-  GitBranch,
   Database,
   BookOpen,
+  MessageSquare,
 } from "lucide-react"
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import Image from "next/image"
-import { useSidebarContent } from "@/contexts/sidebar-content-context"
-import { useEntitySelection } from "@/contexts/entity-selection-context"
-import { Badge } from "@/components/ui/badge"
-import { appendSelectionToUrl, buildSelectionUrl } from "@/lib/navigation/url-codecs"
+import { SidebarContentProvider, useSidebarContent } from "@/contexts/sidebar-content-context"
+import { useChatLayout } from "@/contexts/chat-layout-context"
 
 const navigationItems = [
   {
-    title: "Search",
-    url: "/workspace?view=entities",
+    title: "Explore",
+    url: "/explore",
     icon: Search,
   },
   {
-    title: "Interactions",
-    url: "/workspace?view=interactions",
-    icon: GitBranch,
+    title: "Selection",
+    url: "/selection",
+    icon: ListChecks,
   },
   {
     title: "Resources",
@@ -61,11 +59,9 @@ const navigationItems = [
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const workspaceView = searchParams.get("view")
   const { setTheme, resolvedTheme } = useTheme()
   const { sidebarContent } = useSidebarContent()
-  const { totalSelectionCount, entityIds, annotationIds } = useEntitySelection()
+  const { isChatOpen, toggleChat } = useChatLayout()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -73,13 +69,7 @@ export function AppSidebar() {
   }, [])
 
   const isPathActive = (url: string) => {
-    if (url.startsWith("/workspace?view=entities")) {
-      return pathname === "/workspace" && workspaceView === "entities"
-    }
-    if (url.startsWith("/workspace?view=interactions")) {
-      return pathname === "/workspace" && workspaceView === "interactions"
-    }
-    return pathname === url
+    return pathname === url || pathname.startsWith(`${url}/`)
   }
 
   return (
@@ -110,42 +100,27 @@ export function AppSidebar() {
         <SidebarGroup className="px-2">
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => {
-                const href = appendSelectionToUrl(item.url, entityIds)
-
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isPathActive(item.url) || (item.url.startsWith("/workspace?view=entities") && pathname === "/workspace" && workspaceView === "selection")}>
-                      <Link href={href}>
-                        <item.icon className="h-5 w-5" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                    {item.url.startsWith("/workspace?view=entities") && totalSelectionCount > 0 && (
-                      <SidebarMenuSub>
-                        <SidebarMenuSubItem>
-                          <SidebarMenuSubButton asChild isActive={pathname === "/workspace" && workspaceView === "selection"}>
-                            <Link href={buildSelectionUrl({ entityIds, annotationIds })} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <ListChecks className="h-4 w-4" />
-                                <span>Selection</span>
-                              </div>
-                              <Badge variant="secondary" className="ml-auto text-xs">
-                                {totalSelectionCount}
-                              </Badge>
-                            </Link>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      </SidebarMenuSub>
-                    )}
-                  </SidebarMenuItem>
-                )
-              })}
+              {navigationItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isPathActive(item.url)}>
+                    <Link href={item.url}>
+                      <item.icon className="h-5 w-5" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={toggleChat} isActive={isChatOpen}>
+                  <MessageSquare className="h-5 w-5" />
+                  <span>AI Assistant</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore/') || pathname === '/sources' || pathname === '/resources') && sidebarContent && (
+        {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore') || pathname === '/sources' || pathname === '/resources') && sidebarContent && (
           <>
             <div className="px-3">
               <SidebarSeparator />

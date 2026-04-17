@@ -55,7 +55,7 @@ export function SearchAssistantPane() {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col border-t bg-background lg:border-l lg:border-t-0">
+    <div className="h-full min-h-0 flex flex-col bg-background">
       <div className="flex-1 min-h-0">
         <ChatPanel
           messages={chatMessages}

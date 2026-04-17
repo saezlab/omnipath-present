@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, type ReactNode } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { useFloatingNav } from "@/contexts/floating-nav-context";
 import { ChatPane } from "./chat-pane";
 import { RefinePane } from "./refine-pane";
 import { ResultsPane } from "./results-pane";
@@ -19,7 +18,6 @@ export function WorkspaceShell() {
     setMobileActivePane,
     setPaneWidths,
   } = useWorkspaceUiState();
-  const { setWorkspaceControls } = useFloatingNav();
 
   const desktopPaneContent: Record<WorkspacePane, ReactNode> = {
     results: <ResultsPane />,
@@ -30,24 +28,13 @@ export function WorkspaceShell() {
   const mobileContent = desktopPaneContent[mobileActivePane];
 
   useEffect(() => {
-    if (!hydrated) return;
-
-    setWorkspaceControls({
-      isMobile,
-      desktopVisiblePanes,
-      mobileActivePane,
-      onDesktopToggle: toggleDesktopPane,
-      onMobileSelect: setMobileActivePane,
-    });
-
-    return () => setWorkspaceControls(null);
+    // Floating nav controls removed
   }, [
     desktopVisiblePanes,
     hydrated,
     isMobile,
     mobileActivePane,
     setMobileActivePane,
-    setWorkspaceControls,
     toggleDesktopPane,
   ]);
 

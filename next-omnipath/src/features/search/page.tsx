@@ -176,19 +176,31 @@ export default function SearchPage({
         return { results: [], totalResults: 0 };
       }
 
-      const response = await searchMeilisearch({
-        query: query || "", // Allow empty query to fetch all results
-        index: "search_entities",
-        limit,
-        offset,
-        filters
-      });
+      const [response, facetResponse] = await Promise.all([
+        searchMeilisearch({
+          query: query || "", // Allow empty query to fetch all results
+          index: "search_entities",
+          limit,
+          offset,
+          filters,
+          facets: [] // Do not compute facets for the main search hits query
+        }),
+        offset === 0 && initialSearchType === "search_entities"
+          ? searchMeilisearch({
+              query: query || "", // Allow empty query to fetch all results
+              index: "search_entities",
+              limit: 0,
+              filters: { ...filters, ncbi_tax_id: undefined },
+              facets: ["entity_type", "sources", "ontology_terms"]
+            })
+          : Promise.resolve(null)
+      ]);
 
       const hits = response.hits as SearchResult[] || [];
 
       // Update filter counts from backend-provided facet distribution (only on first page)
-      if (offset === 0 && initialSearchType === "search_entities") {
-        const facetDistribution = response.facetDistribution || {};
+      if (facetResponse && initialSearchType === "search_entities") {
+        const facetDistribution = facetResponse.facetDistribution || {};
         const ontologyCounts = facetDistribution.ontology_terms || {};
         const perOntologyCounts: Record<string, Record<string, number>> = {};
         Object.entries(ontologyCounts).forEach(([value, count]) => {

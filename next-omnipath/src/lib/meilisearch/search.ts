@@ -22,6 +22,9 @@ export interface SearchParams {
   offset?: number;
   filters?: MeilisearchFilters;
   facets?: string[];
+  trackTotalHits?: boolean;
+  includeIdentifiers?: boolean;
+  includeOntologyTerms?: boolean;
 }
 
 export interface SearchResponse {
@@ -45,11 +48,14 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
     offset = 0,
     filters = {},
     facets,
+    trackTotalHits = true,
+    includeIdentifiers = true,
+    includeOntologyTerms = true,
   } = params;
 
   if (shouldUsePostgresSearch() && index === INDEXES.ENTITIES) {
     try {
-      return await searchEntitiesPostgres({ query, limit, offset, filters, facets });
+      return await searchEntitiesPostgres({ query, limit, offset, filters, facets, trackTotalHits, includeIdentifiers, includeOntologyTerms });
     } catch (error) {
       console.error('Postgres entity search error, falling back to Meilisearch:', error);
     }
@@ -100,10 +106,13 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
     }
 
     const result = await indexClient.search(query, searchOptions);
+    const estimatedTotalHits = trackTotalHits
+      ? (result.estimatedTotalHits || 0)
+      : (offset + result.hits.length + (result.hits.length === limit ? 1 : 0));
 
     return {
       hits: result.hits,
-      estimatedTotalHits: result.estimatedTotalHits || 0,
+      estimatedTotalHits,
       limit,
       offset,
       processingTimeMs: result.processingTimeMs,

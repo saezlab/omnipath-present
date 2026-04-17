@@ -11,6 +11,9 @@ export async function searchMeilisearch({
   offset = 0,
   filters = {},
   facets,
+  trackTotalHits,
+  includeIdentifiers,
+  includeOntologyTerms,
 }: {
   query: string;
   index?: IndexName;
@@ -18,10 +21,13 @@ export async function searchMeilisearch({
   offset?: number;
   filters?: MeilisearchFilters;
   facets?: string[];
+  trackTotalHits?: boolean;
+  includeIdentifiers?: boolean;
+  includeOntologyTerms?: boolean;
 }): Promise<SearchResponse> {
   // Allow empty query to show all results with facets (for initial load and filtering)
   try {
-    return await meilisearchDirectSearch({ index, query, limit, offset, filters, facets });
+    return await meilisearchDirectSearch({ index, query, limit, offset, filters, facets, trackTotalHits, includeIdentifiers, includeOntologyTerms });
   } catch (e) {
     console.error("Error searching entities:", e);
     return {
