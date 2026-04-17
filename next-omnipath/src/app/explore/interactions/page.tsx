@@ -16,6 +16,6 @@ export default async function Page({
     }
   }
 
-  params.set("view", "interactions");
-  redirect(`/workspace?${params.toString()}`);
+  params.set("tab", "interactions");
+  redirect(`/explore?${params.toString()}`);
 }

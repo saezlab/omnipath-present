@@ -9,17 +9,19 @@ export async function searchMeilisearch({
   index = "search_entities",
   limit = 20,
   offset = 0,
-  filters = {}
+  filters = {},
+  facets,
 }: {
   query: string;
   index?: IndexName;
   limit?: number;
   offset?: number;
   filters?: MeilisearchFilters;
+  facets?: string[];
 }): Promise<SearchResponse> {
   // Allow empty query to show all results with facets (for initial load and filtering)
   try {
-    return await meilisearchDirectSearch({ index, query, limit, offset, filters });
+    return await meilisearchDirectSearch({ index, query, limit, offset, filters, facets });
   } catch (e) {
     console.error("Error searching entities:", e);
     return {

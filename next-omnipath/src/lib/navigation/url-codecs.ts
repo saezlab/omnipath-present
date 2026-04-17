@@ -1,13 +1,13 @@
 import type { MeilisearchFilters } from "@/types/meilisearch";
 
 export type ResultsView = "entities" | "interactions" | "selection";
-export type SelectionTab = "selection" | "interactions";
+export type SelectionTab = "entities" | "interactions" | "annotations";
 export type SearchMode = "full-text" | "identifier" | "batch";
 export type SearchType = "search_entities" | "cv_terms";
 export type EntityWorkflow = "direct_lookup" | "annotations_to_entities" | "entities_to_annotations";
 
 const SEARCH_MODES = new Set<SearchMode>(["full-text", "identifier", "batch"]);
-const SELECTION_TABS = new Set<SelectionTab>(["selection", "interactions"]);
+const SELECTION_TABS = new Set<SelectionTab>(["entities", "interactions", "annotations"]);
 const SEARCH_TYPES = new Set<SearchType>(["search_entities", "cv_terms"]);
 const ENTITY_WORKFLOWS = new Set<EntityWorkflow>(["direct_lookup", "annotations_to_entities", "entities_to_annotations"]);
 
@@ -53,13 +53,16 @@ export function serializeFiltersParam(value: MeilisearchFilters | undefined | nu
 }
 
 export function parseSelectionTab(value: string | null | undefined): SelectionTab {
+  if (value === "selection") {
+    return "entities";
+  }
   if (value === "associations") {
     return "interactions";
   }
   if (value && SELECTION_TABS.has(value as SelectionTab)) {
     return value as SelectionTab;
   }
-  return "selection";
+  return "entities";
 }
 
 export function parseSearchMode(value: string | null | undefined): SearchMode {
@@ -91,6 +94,7 @@ export function buildWorkspaceUrl(params: {
   species?: string | null;
   entityWorkflow?: EntityWorkflow;
   entityIds?: Array<string | number>;
+  annotationIds?: Array<string | number>;
   tab?: SelectionTab;
   filters?: MeilisearchFilters;
 }): string {
@@ -111,7 +115,10 @@ export function buildWorkspaceUrl(params: {
     if (entityIds) searchParams.set("entities", entityIds);
   }
 
-  if (params.tab && params.tab !== "selection") searchParams.set("tab", params.tab);
+  const annotationIds = serializeEntityIdsParam(params.annotationIds);
+  if (annotationIds) searchParams.set("annotations", annotationIds);
+
+  if (params.tab && params.tab !== "entities") searchParams.set("tab", params.tab);
 
   const filters = serializeFiltersParam(params.filters);
   if (filters) searchParams.set("filters", filters);
@@ -153,12 +160,14 @@ export function buildInteractionsUrl(params: {
 
 export function buildSelectionUrl(params: {
   entityIds?: Array<string | number>;
+  annotationIds?: Array<string | number>;
   tab?: SelectionTab;
   filters?: MeilisearchFilters;
 }): string {
   return buildWorkspaceUrl({
     view: "selection",
     entityIds: params.entityIds,
+    annotationIds: params.annotationIds,
     tab: params.tab,
     filters: params.filters,
   });

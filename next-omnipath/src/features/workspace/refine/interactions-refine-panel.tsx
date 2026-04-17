@@ -16,6 +16,8 @@ interface InteractionsRefinePanelProps {
   useEntityFilters?: boolean;
   lockedEntityIds?: Array<string | number>;
   onLockedEntityIdsChange?: (entityIds: string[]) => void;
+  filtersOverride?: MeilisearchFilters;
+  setFiltersOverride?: (filters: MeilisearchFilters) => void;
 }
 
 const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
@@ -57,6 +59,8 @@ export function InteractionsRefinePanel({
   useEntityFilters = true,
   lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS,
   onLockedEntityIdsChange,
+  filtersOverride,
+  setFiltersOverride,
 }: InteractionsRefinePanelProps) {
   const { entityIds: urlEntityIds, filters: urlFilters, setFilters: setUrlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds, selectedEntities } = useEntitySelection();
@@ -85,7 +89,11 @@ export function InteractionsRefinePanel({
     };
   }, [scopedEntityIds, useEntityFilters]);
 
-  const filters = useMemo(() => enforceEntityScope(urlFilters), [enforceEntityScope, urlFilters]);
+  const setFilters = setFiltersOverride ?? setUrlFilters;
+  const filters = useMemo(
+    () => enforceEntityScope(filtersOverride || urlFilters),
+    [enforceEntityScope, filtersOverride, urlFilters],
+  );
 
   useEffect(() => {
     if (scopedEntityIds.length === 0) {
@@ -137,8 +145,8 @@ export function InteractionsRefinePanel({
     if (onLockedEntityIdsChange) {
       onLockedEntityIdsChange([]);
     }
-    setUrlFilters(onLockedEntityIdsChange ? {} : enforceEntityScope({ include_associated_entities: undefined }));
-  }, [enforceEntityScope, onLockedEntityIdsChange, setUrlFilters]);
+    setFilters(onLockedEntityIdsChange ? {} : enforceEntityScope({ include_associated_entities: undefined }));
+  }, [enforceEntityScope, onLockedEntityIdsChange, setFilters]);
 
   const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
     const items: SelectedFilterItem[] = [];
@@ -162,7 +170,7 @@ export function InteractionsRefinePanel({
 
     const removeValue = (filterKey: keyof MeilisearchFilters, value: string) => {
       const nextValues = ((filters[filterKey] as string[] | undefined) || []).filter((item) => item !== value);
-      setUrlFilters(enforceEntityScope({
+      setFilters(enforceEntityScope({
         ...filters,
         [filterKey]: nextValues.length > 0 ? nextValues : undefined,
       }));
@@ -192,7 +200,7 @@ export function InteractionsRefinePanel({
           ),
           onRemove: () => {
             const nextValues = values.filter((value) => !groupValues.includes(value));
-            setUrlFilters(enforceEntityScope({
+            setFilters(enforceEntityScope({
               ...filters,
               [filterKey]: nextValues.length > 0 ? nextValues : undefined,
             }));
@@ -208,7 +216,7 @@ export function InteractionsRefinePanel({
           label: associatedEntityCount && associatedEntityCount > 0
             ? `Including associated entities (+${associatedEntityCount})`
             : "Including associated entities",
-          onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, include_associated_entities: undefined })),
+          onRemove: () => setFilters(enforceEntityScope({ ...filters, include_associated_entities: undefined })),
         });
       }
 
@@ -248,14 +256,13 @@ export function InteractionsRefinePanel({
     });
 
     pushOntologyItems("interaction_annotation_terms", "Interaction annotation");
-
     pushOntologyItems("participant_annotation_terms", "Participant annotation");
 
     if (filters.is_directed === true) {
       items.push({
         id: "is_directed:true",
         label: "Directed",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
+        onRemove: () => setFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
       });
     }
 
@@ -263,7 +270,7 @@ export function InteractionsRefinePanel({
       items.push({
         id: "is_directed:false",
         label: "Undirected",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
+        onRemove: () => setFilters(enforceEntityScope({ ...filters, is_directed: undefined })),
       });
     }
 
@@ -271,12 +278,12 @@ export function InteractionsRefinePanel({
       items.push({
         id: `signs:${value}`,
         label: value === 1 ? "Activation" : value === -1 ? "Inhibition" : "Unsigned",
-        onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, signs: filters.signs?.filter((item) => item !== value) || undefined })),
+        onRemove: () => setFilters(enforceEntityScope({ ...filters, signs: filters.signs?.filter((item) => item !== value) || undefined })),
       });
     });
 
     return items;
-  }, [associatedEntityCount, enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);
+  }, [associatedEntityCount, enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setFilters, useEntityFilters]);
 
   return (
     <RefinePanelLayout title="Interaction filters">
@@ -293,7 +300,7 @@ export function InteractionsRefinePanel({
             </div>
             <button
               type="button"
-              onClick={() => setUrlFilters(enforceEntityScope({
+              onClick={() => setFilters(enforceEntityScope({
                 ...filters,
                 include_associated_entities: filters.include_associated_entities ? undefined : true,
               }))}
@@ -312,7 +319,7 @@ export function InteractionsRefinePanel({
         <FilterSidebar
           filters={filters}
           filterCounts={filterCounts}
-          onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
+          onFilterChange={(next) => setFilters(enforceEntityScope(next))}
           onClearFilters={handleClearFilters}
           isMobile
         />
@@ -322,7 +329,7 @@ export function InteractionsRefinePanel({
           mode="interactions"
           filters={filters}
           filterCounts={filterCounts}
-          onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
+          onFilterChange={(next) => setFilters(enforceEntityScope(next))}
           isMobile
         />
       </RefineSection>

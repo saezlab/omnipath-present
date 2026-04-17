@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import ExplorePage from "@/features/explore/page";
 
 export default function Page() {
-  redirect("/explore/entities");
+  return <ExplorePage />;
 }

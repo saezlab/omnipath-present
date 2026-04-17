@@ -9,6 +9,8 @@ import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/ur
 interface InteractionsResultsViewProps {
   useEntityFilters?: boolean;
   lockedEntityIds?: Array<string | number>;
+  filtersOverride?: MeilisearchFilters;
+  setFiltersOverride?: (filters: MeilisearchFilters) => void;
 }
 
 const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
@@ -16,6 +18,8 @@ const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
 export function InteractionsResultsView({
   useEntityFilters = true,
   lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS,
+  filtersOverride,
+  setFiltersOverride,
 }: InteractionsResultsViewProps) {
   const { entityIds: urlEntityIds, filters: urlFilters, setFilters: setUrlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds } = useEntitySelection();
@@ -43,7 +47,10 @@ export function InteractionsResultsView({
     };
   }, [scopedEntityIds, useEntityFilters]);
 
-  const filters = useMemo(() => enforceEntityScope(urlFilters), [enforceEntityScope, urlFilters]);
+  const filters = useMemo(
+    () => enforceEntityScope(filtersOverride || urlFilters),
+    [enforceEntityScope, filtersOverride, urlFilters],
+  );
 
   useEffect(() => {
     if (!filters.include_associated_entities || scopedEntityIds.length === 0) {
@@ -88,7 +95,14 @@ export function InteractionsResultsView({
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
         <InteractionsExploreTab
           filters={effectiveFilters}
-          onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
+          onFilterChange={(next) => {
+            const scoped = enforceEntityScope(next);
+            if (setFiltersOverride) {
+              setFiltersOverride(scoped);
+              return;
+            }
+            setUrlFilters(scoped);
+          }}
           onFilterCountsUpdate={() => {}}
           useInternalRefineLayout={false}
         />

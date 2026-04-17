@@ -15,6 +15,10 @@ import { SelectedFiltersSection, type SelectedFilterItem } from "./selected-filt
 interface EntitiesRefinePanelProps {
   lockedEntityIds?: Array<string | number>;
   onLockedEntityIdsChange?: (entityIds: string[]) => void;
+  queryOverride?: string;
+  speciesOverride?: string;
+  filtersOverride?: MeilisearchFilters;
+  setFiltersOverride?: (filters: MeilisearchFilters) => void;
 }
 
 const TAXONOMY_ID_TO_NAME: Record<string, string> = {
@@ -56,8 +60,15 @@ function extractReadableLabel(value: string): string {
   return value;
 }
 
-export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsChange }: EntitiesRefinePanelProps) {
-  const { query, species, filters: urlFilters, setFilters } = useSearchUrlState();
+export function EntitiesRefinePanel({
+  lockedEntityIds = [],
+  onLockedEntityIdsChange,
+  queryOverride,
+  speciesOverride,
+  filtersOverride,
+  setFiltersOverride,
+}: EntitiesRefinePanelProps) {
+  const { query, species, filters: urlFilters, setFilters: setUrlFilters } = useSearchUrlState();
   const { selectedEntities } = useEntitySelection();
   const [filterCounts, setFilterCounts] = useState<{
     entity_type?: Record<string, number>;
@@ -70,14 +81,17 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
     () => lockedEntityIds.map((id) => String(id).trim()).filter(Boolean),
     [lockedEntityIds],
   );
+  const effectiveSpecies = speciesOverride ?? species;
+  const effectiveQuery = queryOverride ?? query;
+  const setFilters = setFiltersOverride ?? setUrlFilters;
   const defaultFilters = useMemo<MeilisearchFilters>(
-    () => ({ ncbi_tax_id: [species || "9606"] }),
-    [species],
+    () => ({ ncbi_tax_id: [effectiveSpecies || "9606"] }),
+    [effectiveSpecies],
   );
   const filters = useMemo<MeilisearchFilters>(() => {
-    const base = Object.keys(urlFilters).length > 0 ? urlFilters : defaultFilters;
+    const base = filtersOverride || (Object.keys(urlFilters).length > 0 ? urlFilters : defaultFilters);
     return normalizedLockedEntityIds.length > 0 ? { ...base, entity_ids: normalizedLockedEntityIds } : base;
-  }, [defaultFilters, normalizedLockedEntityIds, urlFilters]);
+  }, [defaultFilters, filtersOverride, normalizedLockedEntityIds, urlFilters]);
 
   const selectedEntityById = useMemo(
     () => new Map(selectedEntities.map((entity) => [String(entity.entityId ?? entity.id), entity])),
@@ -87,7 +101,7 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
   useEffect(() => {
     async function loadFacets() {
       const response = await searchMeilisearch({
-        query: query || "",
+        query: effectiveQuery || "",
         index: "search_entities",
         limit: 1,
         offset: 0,
@@ -112,7 +126,7 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
     }
 
     void loadFacets();
-  }, [filters, query]);
+  }, [effectiveQuery, filters]);
 
   const handleFilterChange = useCallback((next: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) => {
     setFilters({
@@ -127,11 +141,11 @@ export function EntitiesRefinePanel({ lockedEntityIds = [], onLockedEntityIdsCha
       onLockedEntityIdsChange([]);
     }
     setFilters(onLockedEntityIdsChange
-      ? { ncbi_tax_id: [species || "9606"] }
+      ? { ncbi_tax_id: [effectiveSpecies || "9606"] }
       : normalizedLockedEntityIds.length > 0
         ? { entity_ids: normalizedLockedEntityIds }
-        : { ncbi_tax_id: [species || "9606"] });
-  }, [normalizedLockedEntityIds, onLockedEntityIdsChange, setFilters, species]);
+        : { ncbi_tax_id: [effectiveSpecies || "9606"] });
+  }, [effectiveSpecies, normalizedLockedEntityIds, onLockedEntityIdsChange, setFilters]);
 
   const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
     const items: SelectedFilterItem[] = [];

@@ -24,7 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={`${inter.className} flex min-h-screen flex-col overflow-hidden`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Providers>
             <NuqsAdapter>
@@ -33,7 +33,7 @@ export default function RootLayout({
                   <Suspense fallback={null}>
                     <OmniPathFloatingMenu />
                   </Suspense>
-                  <main className="flex-1 w-full">
+                  <main className="flex min-h-0 flex-1 w-full overflow-hidden">
                     {children}
                   </main>
                 </FloatingNavProvider>

@@ -1,21 +1,43 @@
 "use client";
 
-import { useMemo } from "react";
-import { useSelectionUrlState } from "@/lib/navigation/url-state";
+import { useEntitySelection, useSelectionUrlState } from "@/lib/navigation/url-state";
 import { EntitiesRefinePanel } from "./entities-refine-panel";
 import { InteractionsRefinePanel } from "./interactions-refine-panel";
+import { SelectionAnnotationsRefinePanel } from "./selection-annotations-refine-panel";
+import { useSelectionScope } from "@/features/selection/selection-scope";
 
 export function SelectionRefinePanel() {
-  const { entityIds, setEntityIds, tab } = useSelectionUrlState();
-
-  const selectedEntityIds = useMemo(
-    () => entityIds.map((id) => String(id).trim()).filter(Boolean),
-    [entityIds],
-  );
+  const { query, filters, setFilters, tab } = useSelectionUrlState();
+  const { entityIds, annotationIds } = useEntitySelection();
+  const { scopedEntityIds } = useSelectionScope(entityIds, annotationIds);
 
   if (tab === "interactions") {
-    return <InteractionsRefinePanel lockedEntityIds={selectedEntityIds} onLockedEntityIdsChange={setEntityIds} />;
+    return (
+      <InteractionsRefinePanel
+        lockedEntityIds={scopedEntityIds}
+        filtersOverride={filters}
+        setFiltersOverride={setFilters}
+      />
+    );
   }
 
-  return <EntitiesRefinePanel lockedEntityIds={selectedEntityIds} onLockedEntityIdsChange={setEntityIds} />;
+  if (tab === "annotations") {
+    return (
+      <SelectionAnnotationsRefinePanel
+        scopedEntityIds={scopedEntityIds}
+        query={query}
+        filters={filters}
+        setFilters={setFilters}
+      />
+    );
+  }
+
+  return (
+    <EntitiesRefinePanel
+      lockedEntityIds={scopedEntityIds}
+      queryOverride={query}
+      filtersOverride={filters}
+      setFiltersOverride={setFilters}
+    />
+  );
 }

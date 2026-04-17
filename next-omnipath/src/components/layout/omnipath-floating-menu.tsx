@@ -66,7 +66,7 @@ export function OmniPathFloatingMenu() {
   const router = useRouter();
   const { width } = useWindowSize();
   const { workspaceControls } = useFloatingNav();
-  const { entityIds, selectionCount } = useEntitySelection();
+  const { entityIds, annotationIds, totalSelectionCount } = useEntitySelection();
   const { view, entitiesView, interactionsView, selectionView } = useWorkspaceUrlState();
   const { resolvedTheme, setTheme } = useTheme();
   const pillRef = useRef<HTMLDivElement | null>(null);
@@ -103,6 +103,7 @@ export function OmniPathFloatingMenu() {
 
     router.push(buildSelectionUrl({
       entityIds,
+      annotationIds,
       tab: selectionView.tab,
       filters: selectionView.filters,
     }));
@@ -340,7 +341,7 @@ export function OmniPathFloatingMenu() {
                 </Button>
               );
             })}
-            {selectionCount > 0 ? (
+            {totalSelectionCount > 0 ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -353,7 +354,7 @@ export function OmniPathFloatingMenu() {
               >
                 <span className="flex items-center gap-2">
                   <span>{VIEW_LABELS.selection}</span>
-                  <Badge variant="secondary">{selectionCount}</Badge>
+                  <Badge variant="secondary">{totalSelectionCount}</Badge>
                 </span>
               </Button>
             ) : null}

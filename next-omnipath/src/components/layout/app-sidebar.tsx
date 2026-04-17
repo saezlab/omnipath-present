@@ -65,7 +65,7 @@ export function AppSidebar() {
   const workspaceView = searchParams.get("view")
   const { setTheme, resolvedTheme } = useTheme()
   const { sidebarContent } = useSidebarContent()
-  const { selectionCount, entityIds } = useEntitySelection()
+  const { totalSelectionCount, entityIds, annotationIds } = useEntitySelection()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -121,17 +121,17 @@ export function AppSidebar() {
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
-                    {item.url.startsWith("/workspace?view=entities") && selectionCount > 0 && (
+                    {item.url.startsWith("/workspace?view=entities") && totalSelectionCount > 0 && (
                       <SidebarMenuSub>
                         <SidebarMenuSubItem>
                           <SidebarMenuSubButton asChild isActive={pathname === "/workspace" && workspaceView === "selection"}>
-                            <Link href={buildSelectionUrl({ entityIds })} className="flex items-center justify-between">
+                            <Link href={buildSelectionUrl({ entityIds, annotationIds })} className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <ListChecks className="h-4 w-4" />
                                 <span>Selection</span>
                               </div>
                               <Badge variant="secondary" className="ml-auto text-xs">
-                                {selectionCount}
+                                {totalSelectionCount}
                               </Badge>
                             </Link>
                           </SidebarMenuSubButton>

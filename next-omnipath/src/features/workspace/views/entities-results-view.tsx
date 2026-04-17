@@ -20,11 +20,18 @@ import { cn } from "@/lib/utils";
 interface EntitiesResultsViewProps {
   lockedEntityIds?: Array<string | number>;
   hideSearchArea?: boolean;
+  queryOverride?: string;
+  filtersOverride?: MeilisearchFilters;
 }
 
 type SearchMode = "full-text" | "identifier" | "batch";
 
-export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = false }: EntitiesResultsViewProps) {
+export function EntitiesResultsView({
+  lockedEntityIds = [],
+  hideSearchArea = false,
+  queryOverride,
+  filtersOverride,
+}: EntitiesResultsViewProps) {
   const {
     query,
     setQuery,
@@ -45,16 +52,16 @@ export function EntitiesResultsView({ lockedEntityIds = [], hideSearchArea = fal
     [species],
   );
   const effectiveMode: SearchMode = hideSearchArea ? "full-text" : mode;
-  const effectiveQuery = hideSearchArea ? "" : query;
+  const effectiveQuery = queryOverride ?? (hideSearchArea ? "" : query);
   const filters = useMemo<MeilisearchFilters>(() => {
-    const base = Object.keys(urlFilters).length > 0
+    const base = filtersOverride || (Object.keys(urlFilters).length > 0
       ? urlFilters
       : hideSearchArea
         ? {}
-        : defaultFilters;
+        : defaultFilters);
 
     return normalizedLockedEntityIds.length > 0 ? { ...base, entity_ids: normalizedLockedEntityIds } : base;
-  }, [defaultFilters, hideSearchArea, normalizedLockedEntityIds, urlFilters]);
+  }, [defaultFilters, filtersOverride, hideSearchArea, normalizedLockedEntityIds, urlFilters]);
 
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
   const [lookupEntities, setLookupEntities] = useState<SearchResult[]>([]);

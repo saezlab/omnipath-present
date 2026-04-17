@@ -21,6 +21,7 @@ export interface SearchParams {
   limit?: number;
   offset?: number;
   filters?: MeilisearchFilters;
+  facets?: string[];
 }
 
 export interface SearchResponse {
@@ -43,11 +44,12 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
     limit = 20,
     offset = 0,
     filters = {},
+    facets,
   } = params;
 
   if (shouldUsePostgresSearch() && index === INDEXES.ENTITIES) {
     try {
-      return await searchEntitiesPostgres({ query, limit, offset, filters });
+      return await searchEntitiesPostgres({ query, limit, offset, filters, facets });
     } catch (error) {
       console.error('Postgres entity search error, falling back to Meilisearch:', error);
     }
@@ -63,12 +65,14 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
 
     // Add filters and facets for entity search
     if (index === INDEXES.ENTITIES) {
-      searchOptions.facets = [
-        'entity_type',
-        'sources',
-        'ncbi_tax_id',
-        'ontology_terms',
-      ];
+      searchOptions.facets = facets && facets.length > 0
+        ? facets
+        : [
+            'entity_type',
+            'sources',
+            'ncbi_tax_id',
+            'ontology_terms',
+          ];
 
       if (Object.keys(filters).length > 0) {
         const filterString = buildEntityFilterString(filters);
