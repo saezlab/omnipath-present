@@ -65,7 +65,7 @@ export async function searchMeilisearch(params: SearchParams): Promise<SearchRes
 
     // Add filters and facets for entity search
     if (index === INDEXES.ENTITIES) {
-      searchOptions.facets = facets && facets.length > 0
+      searchOptions.facets = facets !== undefined
         ? facets
         : [
             'entity_type',

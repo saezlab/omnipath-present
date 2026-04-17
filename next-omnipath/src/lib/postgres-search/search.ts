@@ -253,7 +253,7 @@ export async function getEntityFilterFacetDistributionPostgres(params?: {
 }): Promise<FacetDistribution> {
   const query = params?.query || '';
   const filters = params?.filters || {};
-  const requestedFacets = new Set((params?.facets && params.facets.length > 0
+  const requestedFacets = new Set((params?.facets !== undefined
     ? params.facets
     : ['entity_type', 'sources', 'ncbi_tax_id', 'ontology_terms']) as string[]);
 
@@ -418,13 +418,14 @@ export async function searchEntitiesPostgres(params: {
     const where = buildEntityWhere(filters, query, whereParams);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const countResult = await client.query(
-      `SELECT COUNT(*)::bigint AS total
-       FROM ${SEARCH_SCHEMA}.entity e
-       ${whereSql}`,
-      whereParams,
-    );
-    const total = Number(countResult.rows[0]?.total || 0);
+    const total = offset === 0
+      ? Number((await client.query(
+          `SELECT COUNT(*)::bigint AS total
+           FROM ${SEARCH_SCHEMA}.entity e
+           ${whereSql}`,
+          whereParams,
+        )).rows[0]?.total || 0)
+      : null;
 
     const queryParams = [...whereParams];
     const limitPlaceholder = addParam(queryParams, limit);
@@ -485,9 +486,10 @@ export async function searchEntitiesPostgres(params: {
     const facetDistribution = offset === 0
       ? await getEntityFilterFacetDistributionPostgres({ query, filters, facets })
       : undefined;
+    const estimatedTotalHits = total ?? (offset + hits.length + (hits.length === limit ? 1 : 0));
     return {
       hits,
-      estimatedTotalHits: total,
+      estimatedTotalHits,
       limit,
       offset,
       processingTimeMs: 0,

@@ -91,6 +91,7 @@ async function browseOntologyTermsFromEntityHits(species: string | undefined, li
     limit: Math.max(limit * 10, 250),
     offset: 0,
     filters,
+    facets: [],
   });
 
   const counts = new Map<string, number>();

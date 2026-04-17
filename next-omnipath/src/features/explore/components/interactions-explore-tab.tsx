@@ -13,10 +13,11 @@ import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-
 import GraphView from "@/features/interactions-search/components/graph-view";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatNumber } from "@/lib/utils";
 import { MeilisearchFilters, MeilisearchInteraction } from "@/types/meilisearch";
 import { ArrowRight, Filter, Minus, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const RESULTS_PER_PAGE = 20;
 const MAX_GRAPH_INTERACTIONS = 1000;
@@ -29,6 +30,7 @@ interface InteractionsExploreTabProps {
   onFilterChange: (filters: MeilisearchFilters) => void;
   onFilterCountsUpdate: (counts: Record<string, Record<string, number>>) => void;
   useInternalRefineLayout?: boolean;
+  scopedEntityIds?: string[];
 }
 
 // Helper function to extract type label from "TypeLabel:ID" format
@@ -48,11 +50,23 @@ export function InteractionsExploreTab({
   onFilterChange,
   onFilterCountsUpdate,
   useInternalRefineLayout = true,
+  scopedEntityIds,
 }: InteractionsExploreTabProps) {
   const mainContentRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
   const [filterCounts, setFilterCounts] = useState<Record<string, Record<string, number>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const effectiveFilters = useMemo<MeilisearchFilters>(() => ({
+    ...filters,
+    ...(scopedEntityIds && scopedEntityIds.length > 0
+      ? {
+          entity_ids: scopedEntityIds,
+          member_a_id: undefined,
+          member_b_id: undefined,
+        }
+      : {}),
+  }), [filters, scopedEntityIds]);
 
   // Infinite scroll hook
   const {
@@ -65,7 +79,7 @@ export function InteractionsExploreTab({
     sentinelRef
   } = useInfiniteScroll<MeilisearchInteraction>({
     fetchData: useCallback(async (offset: number, limit: number) => {
-      const response = await searchInteractions("", filters, limit, offset);
+      const response = await searchInteractions("", effectiveFilters, limit, offset);
 
       if (offset === 0) {
         const facetDist = response.facetDistribution || {};
@@ -86,9 +100,9 @@ export function InteractionsExploreTab({
         results: response.hits,
         totalResults: response.estimatedTotalHits || 0
       };
-    }, [filters, onFilterCountsUpdate]),
+    }, [effectiveFilters, onFilterCountsUpdate]),
     pageSize: RESULTS_PER_PAGE,
-    dependencies: [filters],
+    dependencies: [effectiveFilters],
     root: rootElement
   });
 
@@ -147,14 +161,14 @@ export function InteractionsExploreTab({
     setError(null);
 
     try {
-      const response = await searchInteractions("", filters, MAX_GRAPH_INTERACTIONS, 0);
+      const response = await searchInteractions("", effectiveFilters, MAX_GRAPH_INTERACTIONS, 0);
       setAllInteractions(response.hits);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load all interactions");
     } finally {
       setIsLoadingAll(false);
     }
-  }, [filters, isLoadingAll]);
+  }, [effectiveFilters, isLoadingAll]);
 
   // Auto-load graph data when switching to network view
   useEffect(() => {
@@ -168,11 +182,11 @@ export function InteractionsExploreTab({
   useEffect(() => {
     setHasLoadedGraphData(false);
     setAllInteractions([]);
-  }, [filters]);
+  }, [effectiveFilters]);
 
   // Handler for clear filters
   const handleClearFilters = () => {
-    onFilterChange({});
+    onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {});
   };
 
   const handleRowClick = (row: MeilisearchInteraction) => {
@@ -217,7 +231,7 @@ export function InteractionsExploreTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: '',
-          filters,
+          filters: effectiveFilters,
           filename: `interactions_subset_${date}`,
         }),
       });
@@ -243,7 +257,7 @@ export function InteractionsExploreTab({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to export interactions');
     }
-  }, [filters]);
+  }, [effectiveFilters]);
 
   // Helper to render sign indicator
   const renderSignIndicator = (interaction: MeilisearchInteraction) => {
@@ -313,7 +327,7 @@ export function InteractionsExploreTab({
               <div className="h-[calc(100%-4rem)] overflow-y-auto">
                 {filterCounts && (
                   <FilterSidebar
-                    filters={filters}
+                    filters={effectiveFilters}
                     filterCounts={filterCounts}
                     onFilterChange={onFilterChange}
                     onClearFilters={handleClearFilters}
@@ -488,7 +502,7 @@ export function InteractionsExploreTab({
       <div className="h-full overflow-y-auto">
         <AnnotationFilterSidebar
           mode="interactions"
-          filters={filters}
+          filters={effectiveFilters}
           filterCounts={filterCounts ?? {}}
           onFilterChange={onFilterChange}
         />
@@ -497,10 +511,38 @@ export function InteractionsExploreTab({
   );
 
   return (
-    <div className="relative flex flex-col h-svh overflow-hidden">
+    <div
+      className={cn(
+        "relative flex flex-col overflow-hidden",
+        useInternalRefineLayout ? "h-svh" : "h-full min-h-0",
+      )}
+    >
       <div className="flex-1 min-h-0">
         {!useInternalRefineLayout ? (
-          searchPanel
+          isMobile ? (
+            searchPanel
+          ) : (
+            <div className="h-full min-h-[60vh] overflow-hidden rounded-2xl border bg-background/30">
+              <ResizablePanelGroup direction="horizontal" className="h-full">
+                <ResizablePanel defaultSize={72} minSize={45} className="min-h-0 overflow-hidden">
+                  {searchPanel}
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={28} minSize={22} className="min-h-0 border-l bg-background/40">
+                  <div className="h-full overflow-y-auto p-4">
+                    {filterCounts ? (
+                      <FilterSidebar
+                        filters={effectiveFilters}
+                        filterCounts={filterCounts}
+                        onFilterChange={onFilterChange}
+                        onClearFilters={handleClearFilters}
+                      />
+                    ) : null}
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </div>
+          )
         ) : layoutMode === "split" && hasOntologyTerms ? (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={68} minSize={50} className="min-h-0">
