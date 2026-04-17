@@ -5,6 +5,7 @@ import { EntityBadge } from "@/components/entity-badge";
 import { FilterSidebar, AnnotationFilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { CvTermHoverCard } from "@/features/search/components/result-card";
 import { searchInteractions } from "@/features/interactions-search/api/queries";
+import { getAssociatedEntityScope } from "@/lib/associations/associated-entities";
 import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 import type { MeilisearchFilters } from "@/types/meilisearch";
 import { RefinePanelLayout, RefineSection } from "./refine-panel-layout";
@@ -60,6 +61,7 @@ export function InteractionsRefinePanel({
   const { entityIds: urlEntityIds, filters: urlFilters, setFilters: setUrlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds, selectedEntities } = useEntitySelection();
   const [filterCounts, setFilterCounts] = useState<Record<string, Record<string, number>>>({});
+  const [associatedEntityCount, setAssociatedEntityCount] = useState<number | null>(null);
 
   const normalizedLockedEntityIds = useMemo(
     () => lockedEntityIds.map((id) => String(id).trim()).filter(Boolean),
@@ -84,6 +86,30 @@ export function InteractionsRefinePanel({
   }, [scopedEntityIds, useEntityFilters]);
 
   const filters = useMemo(() => enforceEntityScope(urlFilters), [enforceEntityScope, urlFilters]);
+
+  useEffect(() => {
+    if (scopedEntityIds.length === 0) {
+      setAssociatedEntityCount(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getAssociatedEntityScope(scopedEntityIds)
+      .then((scope) => {
+        if (!cancelled) {
+          setAssociatedEntityCount(scope.associatedEntityIds.length);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAssociatedEntityCount(0);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scopedEntityIds]);
 
   const selectedEntityById = useMemo(
     () => new Map(selectedEntities.map((entity) => [String(entity.entityId ?? entity.id), entity])),
@@ -111,7 +137,7 @@ export function InteractionsRefinePanel({
     if (onLockedEntityIdsChange) {
       onLockedEntityIdsChange([]);
     }
-    setUrlFilters(onLockedEntityIdsChange ? {} : enforceEntityScope({}));
+    setUrlFilters(onLockedEntityIdsChange ? {} : enforceEntityScope({ include_associated_entities: undefined }));
   }, [enforceEntityScope, onLockedEntityIdsChange, setUrlFilters]);
 
   const selectedFilterItems = useMemo<SelectedFilterItem[]>(() => {
@@ -176,6 +202,16 @@ export function InteractionsRefinePanel({
     };
 
     if (useEntityFilters && scopedEntityIds.length > 0) {
+      if (filters.include_associated_entities) {
+        items.push({
+          id: "include_associated_entities:true",
+          label: associatedEntityCount && associatedEntityCount > 0
+            ? `Including associated entities (+${associatedEntityCount})`
+            : "Including associated entities",
+          onRemove: () => setUrlFilters(enforceEntityScope({ ...filters, include_associated_entities: undefined })),
+        });
+      }
+
       scopedEntityIds.forEach((value) => {
         items.push({
           id: `entity_scope:${value}`,
@@ -240,13 +276,36 @@ export function InteractionsRefinePanel({
     });
 
     return items;
-  }, [enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);
+  }, [associatedEntityCount, enforceEntityScope, filters, onLockedEntityIdsChange, scopedEntityIds, selectedEntityById, setUrlFilters, useEntityFilters]);
 
   return (
     <RefinePanelLayout title="Interaction filters">
       {selectedFilterItems.length > 0 ? (
         <RefineSection title="Selected filters" defaultOpen={false}>
           <SelectedFiltersSection items={selectedFilterItems} onClearAll={handleClearFilters} />
+        </RefineSection>
+      ) : null}
+      {useEntityFilters && scopedEntityIds.length > 0 ? (
+        <RefineSection title="Entity scope" defaultOpen>
+          <div className="space-y-3 text-sm">
+            <div className="text-muted-foreground">
+              Search interactions for the selected entities only, or expand to containing complexes and reactions.
+            </div>
+            <button
+              type="button"
+              onClick={() => setUrlFilters(enforceEntityScope({
+                ...filters,
+                include_associated_entities: filters.include_associated_entities ? undefined : true,
+              }))}
+              className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${filters.include_associated_entities ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}
+            >
+              <div className="font-medium">Include associated entities</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Also include complexes and reactions containing the selected entities.
+                {associatedEntityCount !== null ? ` ${associatedEntityCount.toLocaleString()} associated entities found.` : ""}
+              </div>
+            </button>
+          </div>
         </RefineSection>
       ) : null}
       <RefineSection title="Interaction properties">

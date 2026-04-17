@@ -143,6 +143,9 @@ export interface MeilisearchFilters {
   parent_entity_types?: string[];
   member_entity_types?: string[];
   association_annotation_terms?: string[];
+
+  // UI-only interaction scope expansion
+  include_associated_entities?: boolean;
 }
 
 export interface MeilisearchSearchParams {

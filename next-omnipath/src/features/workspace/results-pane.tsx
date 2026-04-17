@@ -1,9 +1,9 @@
 "use client";
 
 import { useWorkspaceUrlState } from "@/lib/navigation/workspace-url-state";
-import { EntitiesResultsView } from "./views/entities-results-view";
 import { InteractionsResultsView } from "./views/interactions-results-view";
 import { SelectionResultsView } from "./views/selection-results-view";
+import { EntityWorkflowResultsView } from "./views/entity-workflow-results-view";
 
 export function ResultsPane() {
   const { view } = useWorkspaceUrlState();
@@ -16,5 +16,5 @@ export function ResultsPane() {
     return <SelectionResultsView />;
   }
 
-  return <EntitiesResultsView />;
+  return <EntityWorkflowResultsView />;
 }

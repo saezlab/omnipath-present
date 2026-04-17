@@ -7,10 +7,12 @@ import type { SearchResult } from "@/features/search/components/result-card";
 import {
   normalizeStringArray,
   parseEntityIdsParam,
+  parseEntityWorkflow,
   parseFiltersParam,
   parseSelectionTab,
   serializeEntityIdsParam,
   serializeFiltersParam,
+  type EntityWorkflow,
   type SearchMode,
   type SearchType,
   type SelectionTab,
@@ -78,6 +80,7 @@ export function useSearchUrlState() {
   const [mode, setMode] = useQueryState("mode", searchModeParser);
   const [type, setType] = useQueryState("type", searchTypeParser);
   const [species, setSpecies] = useQueryState("species", parseAsString.withDefault("9606"));
+  const [entityWorkflow, setEntityWorkflowState] = useQueryState("entity_workflow", parseAsString);
   const [rawFilters, setRawFilters] = useQueryState("filters", parseAsString);
 
   const filters = useMemo(() => parseFiltersParam(rawFilters), [rawFilters]);
@@ -95,6 +98,8 @@ export function useSearchUrlState() {
     setType: (next: SearchType) => void setType(next),
     species,
     setSpecies: (next: string) => void setSpecies(next || null),
+    entityWorkflow: parseEntityWorkflow(entityWorkflow),
+    setEntityWorkflow: (next: EntityWorkflow) => void setEntityWorkflowState(next === "direct_lookup" ? null : next),
     filters,
     setFilters,
   };

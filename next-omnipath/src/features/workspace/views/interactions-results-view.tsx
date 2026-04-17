@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MeilisearchFilters } from "@/types/meilisearch";
-import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
+import { getAssociatedEntityScope } from "@/lib/associations/associated-entities";
+import { useEntitySelection, useInteractionsUrlState } from "@/lib/navigation/url-state";
 
 interface InteractionsResultsViewProps {
   useEntityFilters?: boolean;
@@ -18,6 +19,7 @@ export function InteractionsResultsView({
 }: InteractionsResultsViewProps) {
   const { entityIds: urlEntityIds, filters: urlFilters, setFilters: setUrlFilters } = useInteractionsUrlState();
   const { entityIds: selectedEntityIds } = useEntitySelection();
+  const [expandedEntityIds, setExpandedEntityIds] = useState<string[]>([]);
 
   const normalizedLockedEntityIds = useMemo(
     () => lockedEntityIds.map((id) => String(id).trim()).filter(Boolean),
@@ -43,11 +45,49 @@ export function InteractionsResultsView({
 
   const filters = useMemo(() => enforceEntityScope(urlFilters), [enforceEntityScope, urlFilters]);
 
+  useEffect(() => {
+    if (!filters.include_associated_entities || scopedEntityIds.length === 0) {
+      setExpandedEntityIds(scopedEntityIds);
+      return;
+    }
+
+    let cancelled = false;
+    void getAssociatedEntityScope(scopedEntityIds)
+      .then((scope) => {
+        if (!cancelled) {
+          setExpandedEntityIds(scope.expandedEntityIds);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExpandedEntityIds(scopedEntityIds);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.include_associated_entities, scopedEntityIds]);
+
+  const effectiveFilters = useMemo<MeilisearchFilters>(() => {
+    const { include_associated_entities: _includeAssociatedEntities, ...rest } = filters;
+    if (!filters.include_associated_entities || scopedEntityIds.length === 0) {
+      return rest;
+    }
+
+    return {
+      ...rest,
+      entity_ids: expandedEntityIds.length > 0 ? expandedEntityIds : scopedEntityIds,
+      member_a_id: undefined,
+      member_b_id: undefined,
+    };
+  }, [expandedEntityIds, filters, scopedEntityIds]);
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
         <InteractionsExploreTab
-          filters={filters}
+          filters={effectiveFilters}
           onFilterChange={(next) => setUrlFilters(enforceEntityScope(next))}
           onFilterCountsUpdate={() => {}}
           useInternalRefineLayout={false}

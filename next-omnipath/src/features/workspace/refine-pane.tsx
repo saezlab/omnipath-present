@@ -1,7 +1,7 @@
 "use client";
 
 import { useWorkspaceUrlState } from "@/lib/navigation/workspace-url-state";
-import { EntitiesRefinePanel } from "./refine/entities-refine-panel";
+import { EntityWorkflowRefinePanel } from "./refine/entity-workflow-refine-panel";
 import { InteractionsRefinePanel } from "./refine/interactions-refine-panel";
 import { SelectionRefinePanel } from "./refine/selection-refine-panel";
 
@@ -16,5 +16,5 @@ export function RefinePane() {
     return <SelectionRefinePanel />;
   }
 
-  return <EntitiesRefinePanel />;
+  return <EntityWorkflowRefinePanel />;
 }

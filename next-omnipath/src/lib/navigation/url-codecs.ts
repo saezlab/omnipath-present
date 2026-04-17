@@ -1,13 +1,15 @@
 import type { MeilisearchFilters } from "@/types/meilisearch";
 
 export type ResultsView = "entities" | "interactions" | "selection";
-export type SelectionTab = "selection" | "interactions" | "associations";
+export type SelectionTab = "selection" | "interactions";
 export type SearchMode = "full-text" | "identifier" | "batch";
 export type SearchType = "search_entities" | "cv_terms";
+export type EntityWorkflow = "direct_lookup" | "annotations_to_entities" | "entities_to_annotations";
 
 const SEARCH_MODES = new Set<SearchMode>(["full-text", "identifier", "batch"]);
-const SELECTION_TABS = new Set<SelectionTab>(["selection", "interactions", "associations"]);
+const SELECTION_TABS = new Set<SelectionTab>(["selection", "interactions"]);
 const SEARCH_TYPES = new Set<SearchType>(["search_entities", "cv_terms"]);
+const ENTITY_WORKFLOWS = new Set<EntityWorkflow>(["direct_lookup", "annotations_to_entities", "entities_to_annotations"]);
 
 export function normalizeStringArray(value: Array<string | number> | undefined | null): string[] {
   if (!value) return [];
@@ -51,6 +53,9 @@ export function serializeFiltersParam(value: MeilisearchFilters | undefined | nu
 }
 
 export function parseSelectionTab(value: string | null | undefined): SelectionTab {
+  if (value === "associations") {
+    return "interactions";
+  }
   if (value && SELECTION_TABS.has(value as SelectionTab)) {
     return value as SelectionTab;
   }
@@ -71,12 +76,20 @@ export function parseSearchType(value: string | null | undefined): SearchType {
   return "search_entities";
 }
 
+export function parseEntityWorkflow(value: string | null | undefined): EntityWorkflow {
+  if (value && ENTITY_WORKFLOWS.has(value as EntityWorkflow)) {
+    return value as EntityWorkflow;
+  }
+  return "direct_lookup";
+}
+
 export function buildWorkspaceUrl(params: {
   view?: ResultsView;
   query?: string;
   mode?: SearchMode;
   type?: SearchType;
   species?: string | null;
+  entityWorkflow?: EntityWorkflow;
   entityIds?: Array<string | number>;
   tab?: SelectionTab;
   filters?: MeilisearchFilters;
@@ -88,6 +101,7 @@ export function buildWorkspaceUrl(params: {
   if (params.mode && params.mode !== "full-text") searchParams.set("mode", params.mode);
   if (params.type && params.type !== "search_entities") searchParams.set("type", params.type);
   if (params.species?.trim()) searchParams.set("species", params.species.trim());
+  if (params.entityWorkflow && params.entityWorkflow !== "direct_lookup") searchParams.set("entity_workflow", params.entityWorkflow);
 
   const normalizedEntityIds = normalizeStringArray(params.entityIds);
   if ((params.view || "entities") === "interactions" && normalizedEntityIds.length === 1) {
@@ -110,6 +124,7 @@ export function buildSearchUrl(params: {
   mode?: SearchMode;
   type?: SearchType;
   species?: string | null;
+  entityWorkflow?: EntityWorkflow;
   filters?: MeilisearchFilters;
   entityIds?: Array<string | number>;
 }): string {
@@ -119,6 +134,7 @@ export function buildSearchUrl(params: {
     mode: params.mode,
     type: params.type,
     species: params.species,
+    entityWorkflow: params.entityWorkflow,
     entityIds: params.entityIds,
     filters: params.filters,
   });
