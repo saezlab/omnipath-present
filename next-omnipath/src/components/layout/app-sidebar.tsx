@@ -32,7 +32,7 @@ import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import Image from "next/image"
 import { SidebarContentProvider, useSidebarContent } from "@/contexts/sidebar-content-context"
-import { useChatLayout } from "@/contexts/chat-layout-context"
+
 
 const navigationItems = [
   {
@@ -61,7 +61,6 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { setTheme, resolvedTheme } = useTheme()
   const { sidebarContent } = useSidebarContent()
-  const { isChatOpen, toggleChat } = useChatLayout()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -111,9 +110,11 @@ export function AppSidebar() {
                 </SidebarMenuItem>
               ))}
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={toggleChat} isActive={isChatOpen}>
-                  <MessageSquare className="h-5 w-5" />
-                  <span>AI Assistant</span>
+                <SidebarMenuButton asChild isActive={isPathActive('/chat')}>
+                  <Link href="/chat">
+                    <MessageSquare className="h-5 w-5" />
+                    <span>AI Assistant</span>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

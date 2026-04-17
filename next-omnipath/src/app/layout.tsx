@@ -5,11 +5,11 @@ import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import { SidebarContentProvider } from "@/contexts/sidebar-content-context"
-import { ChatLayoutProvider } from "@/contexts/chat-layout-context"
+
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { Providers } from "@/components/providers"
 import { AppSidebar } from "@/components/layout/app-sidebar"
-import { GlobalChatLayout } from "@/components/layout/global-chat-layout"
+
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -31,16 +31,12 @@ export default function RootLayout({
           <Providers>
             <NuqsAdapter>
               <SidebarContentProvider>
-                <ChatLayoutProvider>
-                  <SidebarProvider defaultOpen>
+                <SidebarProvider defaultOpen>
                     <AppSidebar />
                     <main className="flex min-h-0 flex-1 w-full overflow-hidden">
-                      <GlobalChatLayout>
-                        {children}
-                      </GlobalChatLayout>
+                      {children}
                     </main>
                   </SidebarProvider>
-                </ChatLayoutProvider>
               </SidebarContentProvider>
             </NuqsAdapter>
           </Providers>

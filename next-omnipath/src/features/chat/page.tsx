@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { SiteLayout } from "@/components/layout/main-layout";
+
 import { DualModeInterface } from "./components/dual-mode-interface";
 import { chatMessagesToUIMessages, uiMessagesToChatMessages } from "./types";
 
@@ -50,27 +50,25 @@ export default function ChatPage() {
   };
 
   return (
-    <SiteLayout>
-      <div className="flex-1 flex flex-col h-[100vh]">
-        <DualModeInterface
-          messages={chatMessages}
-          input={input}
-          handleInputChange={handleInputChange}
-          handleSubmit={handleSubmit}
-          isLoading={isLoading}
-          append={(message) =>
-            sendMessage({
-              role: "user",
-              parts: [{ type: "text", text: message.content }],
-            })
-          }
-          reload={() => {
-            void regenerate();
-          }}
-          stop={stop}
-          setMessages={(updatedMessages) => setMessages(chatMessagesToUIMessages(updatedMessages))}
-        />
-      </div>
-    </SiteLayout>
+    <div className="flex h-full w-full flex-col">
+      <DualModeInterface
+        messages={chatMessages}
+        input={input}
+        handleInputChange={handleInputChange}
+        handleSubmit={handleSubmit}
+        isLoading={isLoading}
+        append={(message) =>
+          sendMessage({
+            role: "user",
+            parts: [{ type: "text", text: message.content }],
+          })
+        }
+        reload={() => {
+          void regenerate();
+        }}
+        stop={stop}
+        setMessages={(updatedMessages) => setMessages(chatMessagesToUIMessages(updatedMessages))}
+      />
+    </div>
   );
 }
