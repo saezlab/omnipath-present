@@ -11,6 +11,5 @@ export default defineConfig({
     url: process.env.DATABASE_URL!,
   },
   verbose: true,
-  schemaFilter: ['metadata', 'bronze', 'silver', 'gold'],
   casing: 'snake_case'
 });

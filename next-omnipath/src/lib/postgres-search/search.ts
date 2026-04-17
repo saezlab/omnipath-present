@@ -105,7 +105,19 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
 }
 
 function identifierLabel(identifierType: string): string {
-  return parseCvValue(identifierType).label.toLowerCase();
+  const text = (identifierType || '').trim();
+  if (!text) return '';
+  const parts = text.split(':');
+
+  // Legacy normalized identifier keys are stored as "label:ACCESSION",
+  // e.g. "gene name primary:OM:0200" or "uniprot:MI:1097".
+  // Raw CV values are stored as "ACCESSION:LABEL",
+  // e.g. "OM:0200:Gene Name Primary" or "MI:1097:Uniprot".
+  if (parts.length >= 3 && !/^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
+    return parts[0].toLowerCase();
+  }
+
+  return parseCvValue(text).label.toLowerCase();
 }
 
 function classifyEntityIdentifiers(identifiers: IdentifierEntry[]): {
@@ -178,18 +190,20 @@ function mapEntityAttributesToDescriptions(attributes: Array<{ term?: string | n
 }
 
 function mapEntityRow(row: any): SearchResult {
-  const identifiers = ((row.identifiers || []) as Array<{ key: string; value: string }>)
+  const identifiers = ((row.identifiers || []) as Array<{
+    key?: string;
+    value?: string;
+    identifier_type?: string;
+    identifier?: string;
+  }>)
     .map((item) => ({
-      key: normalizeIdentifierKey(item.key),
-      value: item.value,
+      key: normalizeIdentifierKey(item.key ?? item.identifier_type),
+      value: item.value ?? item.identifier,
     }))
-    .filter((item) => item.value);
+    .filter((item): item is { key: string; value: string } => Boolean(item.key && item.value));
 
   const classified = classifyEntityIdentifiers(identifiers);
-  const names = uniqueStrings([
-    ...classified.names,
-    row.canonical_identifier,
-  ]);
+  const names = uniqueStrings(classified.names);
   const descriptions = mapEntityAttributesToDescriptions(row.entity_attributes);
   const ontologyTerms = uniqueStrings((row.ontology_terms || []) as string[]);
   const publicId = toPublicEntityId(row);
@@ -210,6 +224,8 @@ function mapEntityRow(row: any): SearchResult {
     ontology_terms: ontologyTerms,
     cv_terms: ontologyTerms,
     ncbi_tax_id: row.taxonomy_id || null,
+    canonical_identifier: row.canonical_identifier || null,
+    canonical_identifier_type: row.canonical_identifier_type || null,
   };
 }
 

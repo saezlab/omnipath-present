@@ -277,6 +277,8 @@ export interface SearchResult {
   pathways?: number[];
   reactions?: number[];
   num_interactions?: number;
+  canonical_identifier?: string | null;
+  canonical_identifier_type?: string | null;
   // CV term fields
   namespace_name?: string;
   definition?: string;
@@ -669,13 +671,27 @@ export function ResultCard({ result }: { result: SearchResult }) {
   };
 
   // Extract data based on type
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
-  const identifiers = result._formatted?.identifiers || result.identifiers || [];
-  const synonyms = result._formatted?.synonyms || result.synonyms || [];
-  const references = result._formatted?.references || result.references || [];
-  const sources = result._formatted?.sources || result.sources || [];
+  const descriptions = (result._formatted?.descriptions && result._formatted.descriptions.length > 0)
+    ? result._formatted.descriptions
+    : (result.descriptions || []);
+  const names = (result._formatted?.names && result._formatted.names.length > 0)
+    ? result._formatted.names
+    : (result.names || []);
+  const geneSymbols = (result._formatted?.gene_symbols && result._formatted.gene_symbols.length > 0)
+    ? result._formatted.gene_symbols
+    : (result.gene_symbols || []);
+  const identifiers = (result._formatted?.identifiers && result._formatted.identifiers.length > 0)
+    ? result._formatted.identifiers
+    : (result.identifiers || []);
+  const synonyms = (result._formatted?.synonyms && result._formatted.synonyms.length > 0)
+    ? result._formatted.synonyms
+    : (result.synonyms || []);
+  const references = (result._formatted?.references && result._formatted.references.length > 0)
+    ? result._formatted.references
+    : (result.references || []);
+  const sources = (result._formatted?.sources && result._formatted.sources.length > 0)
+    ? result._formatted.sources
+    : (result.sources || []);
   const complexes = result.complexes || [];
   const cvTerms = getUnifiedCvTerms(result);
   const entityType = result._formatted?.entity_type || result.entity_type;
@@ -711,18 +727,12 @@ export function ResultCard({ result }: { result: SearchResult }) {
     let secondaryName: string | undefined;
 
     if (isProtein) {
-      // Try to find UniProt identifier
-      const uniprotId = identifiers.find(id => {
-        const idType = id.key?.split(':')[0].toLowerCase();
-        return idType === 'uniprot' || idType === 'uniprot_id' || idType === 'uniprotkb';
-      });
-      const uniprotValue = uniprotId?.value;
+      const canonicalIdentifier = typeof result.canonical_identifier === 'string' ? result.canonical_identifier : undefined;
 
-      // For proteins: gene symbol first, fallback to UniProt
-      displayName = geneSymbol || uniprotValue || name || firstIdentifier || `Entity ${result.id}`;
-      // Show UniProt as secondary if gene symbol is primary
-      if (geneSymbol && uniprotValue && geneSymbol !== uniprotValue) {
-        secondaryName = uniprotValue;
+      // For proteins: primary gene symbol first, canonical identifier as support/fallback
+      displayName = geneSymbol || name || canonicalIdentifier || firstIdentifier || `Entity ${result.id}`;
+      if (geneSymbol && canonicalIdentifier && geneSymbol !== canonicalIdentifier) {
+        secondaryName = canonicalIdentifier;
       }
     } else {
       // Original logic for non-proteins
@@ -927,9 +937,15 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const type = result.type || "entity";
 
   // Extract data
-  const descriptions = result._formatted?.descriptions || result.descriptions || [];
-  const names = result._formatted?.names || result.names || [];
-  const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
+  const descriptions = (result._formatted?.descriptions && result._formatted.descriptions.length > 0)
+    ? result._formatted.descriptions
+    : (result.descriptions || []);
+  const names = (result._formatted?.names && result._formatted.names.length > 0)
+    ? result._formatted.names
+    : (result.names || []);
+  const geneSymbols = (result._formatted?.gene_symbols && result._formatted.gene_symbols.length > 0)
+    ? result._formatted.gene_symbols
+    : (result.gene_symbols || []);
   const entityType = result._formatted?.entity_type || result.entity_type;
   const namespaceName = result._formatted?.namespace_name || result.namespace_name;
   const definition = result._formatted?.definition || result.definition;

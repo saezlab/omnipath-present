@@ -105,7 +105,7 @@ export function EntitiesExploreTab({
         filters: effectiveFilters,
         facets: [],
         trackTotalHits: false,
-        includeIdentifiers: false,
+        includeIdentifiers: true,
         includeOntologyTerms: false,
       });
 

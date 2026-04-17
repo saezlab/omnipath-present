@@ -2,11 +2,24 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn, formatNumber } from "@/lib/utils";
 import type { ResourceRecord } from "@/lib/resources";
-import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
 import { downloadResourceSelection } from "@/lib/resource-downloads";
-import { Check, CirclePlus, Copy, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from "lucide-react";
+import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
+import { cn, formatNumber } from "@/lib/utils";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CirclePlus,
+  Copy,
+  Database,
+  Download,
+  ExternalLink,
+  Layers3,
+  Network,
+  Search,
+  Tags,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -63,16 +76,24 @@ function iconForCategories(categories: string[]) {
   return Database;
 }
 
-function Pill({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick?: () => void }) {
+function Pill({
+  active,
+  children,
+  onClick,
+}: {
+  active?: boolean;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-sm transition-colors",
+        "rounded-full border px-3.5 py-2 text-sm transition-colors",
         active
           ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-background text-muted-foreground hover:text-foreground",
+          : "border-border bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground",
       )}
     >
       {children}
@@ -82,19 +103,223 @@ function Pill({ active, children, onClick }: { active?: boolean; children: React
 
 function MiniTag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md border border-border/50 bg-muted/30 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+    <span className="inline-flex items-center rounded-full border border-border/60 bg-muted/35 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
       {children}
     </span>
   );
 }
 
-function ScrollableDescription({ children }: { children: React.ReactNode }) {
+function ResourceCard({
+  resource,
+  selected,
+  onToggle,
+}: {
+  resource: ResourceRecord;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const Icon = iconForCategories(resource.categories);
+  const stats = [
+    { label: "Entities", value: resource.entity_count },
+    { label: "Interactions", value: resource.interaction_count },
+    { label: "Associations", value: resource.association_count },
+    { label: "Annotations", value: resource.annotation_count },
+    { label: "Ontology Terms", value: resource.ontology_term_count },
+  ].filter((stat) => stat.value > 0);
+  const compactStats = stats.slice(0, 3);
+  const canDownloadArchive = resource.build_status === "success" && resource.download_archive_exists;
+
   return (
-    <div className="mt-4 rounded-lg bg-muted/20 px-3 py-2.5">
-      <div className="max-h-32 overflow-y-auto pr-1 text-sm leading-6 text-muted-foreground [scrollbar-width:thin]">
-        {children}
+    <article
+      className={cn(
+        "flex h-full flex-col rounded-[1.25rem] border bg-card/70 p-4 transition-all",
+        selected ? "border-primary/60 bg-primary/[0.04] ring-1 ring-primary/20" : "border-border/50 hover:bg-muted/[0.18]",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="rounded-xl border border-border/60 bg-muted/25 p-2.5">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-lg font-semibold tracking-tight">{resource.resource_name}</div>
+          </div>
+        </div>
+
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium",
+            resource.build_status === "success"
+              ? "bg-secondary/15 text-secondary"
+              : "bg-muted text-muted-foreground",
+          )}
+        >
+          {sentenceCase(resource.build_status)}
+        </span>
       </div>
-    </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {resource.categories.map((category) => (
+          <MiniTag key={`${resource.resource_id}-${category}`}>{sentenceCase(category)}</MiniTag>
+        ))}
+        {!expanded && resource.annotation_ontologies.slice(0, 1).map((ontology) => (
+          <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-xl bg-muted/18 px-3.5 py-3">
+        <p
+          className={cn(
+            "text-sm leading-6 text-muted-foreground [display:-webkit-box] [-webkit-box-orient:vertical] overflow-hidden",
+            expanded ? "[-webkit-line-clamp:8]" : "[-webkit-line-clamp:2]",
+          )}
+        >
+          {resource.description || "No description available."}
+        </p>
+      </div>
+
+      {compactStats.length > 0 ? (
+        <div className="mt-3 grid grid-cols-2 gap-2.5 border-t border-border/50 pt-3 sm:grid-cols-3">
+          {compactStats.map((stat) => (
+            <div key={`${resource.resource_id}-${stat.label}`} className="rounded-lg bg-muted/15 px-3 py-2">
+              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
+              <div className="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/50 pt-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        >
+          {expanded ? (
+            <>
+              Hide details
+              <ChevronUp className="h-4 w-4" />
+            </>
+          ) : (
+            <>
+              More details
+              <ChevronDown className="h-4 w-4" />
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggle}
+          className={cn(
+            "inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
+            selected
+              ? "bg-primary text-primary-foreground"
+              : "border border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground",
+          )}
+        >
+          {selected ? (
+            <>
+              Selected
+              <Check className="h-4 w-4" />
+            </>
+          ) : (
+            <>
+              Select
+              <CirclePlus className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
+          {resource.annotation_ontologies.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {resource.annotation_ontologies.map((ontology) => (
+                <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
+              ))}
+            </div>
+          ) : null}
+
+          {stats.length > compactStats.length ? (
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {stats.slice(compactStats.length).map((stat) => (
+                <div key={`${resource.resource_id}-${stat.label}`} className="rounded-lg bg-muted/15 px-3 py-2">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
+                  <div className="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <dl className="grid gap-2 text-sm">
+            <div className="flex items-start justify-between gap-4">
+              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Resource ID</dt>
+              <dd className="max-w-[65%] text-right font-mono text-foreground/90 break-words">{resource.resource_id}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">License</dt>
+              <dd className="max-w-[65%] text-right text-foreground/90 break-words">{resource.license || "—"}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Built</dt>
+              <dd className="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
+              <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
+              <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
+            </div>
+          </dl>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1">
+              {resource.homepage_url ? (
+                <Link
+                  href={resource.homepage_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                >
+                  Site
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Link>
+              ) : null}
+              {resource.pubmed_id ? (
+                <Link
+                  href={`https://pubmed.ncbi.nlm.nih.gov/${resource.pubmed_id}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                >
+                  PMID
+                  <Tags className="h-3.5 w-3.5" />
+                </Link>
+              ) : null}
+            </div>
+
+            {canDownloadArchive ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
+                  Download
+                  <Download className="h-4 w-4" />
+                </a>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled>
+                Download
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -121,7 +346,16 @@ export default function ResourcesPage({
     const normalizedQuery = query.trim().toLowerCase();
 
     return resources.filter((resource) => {
-      const searchableText = resource.resource_name.toLowerCase();
+      const searchableText = [
+        resource.resource_name,
+        resource.resource_id,
+        resource.description,
+        ...(resource.categories || []),
+        ...(resource.annotation_ontologies || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
       const matchesQuery = normalizedQuery.length === 0 || searchableText.includes(normalizedQuery);
       const matchesCategory = selectedCategory === "all" || resource.categories.includes(selectedCategory);
@@ -188,34 +422,50 @@ export default function ResourcesPage({
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="border-b bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
-        <div className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 md:px-6 md:py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-32 pr-1">
+        <div className="space-y-4">
+          <div className="rounded-[1.4rem] border bg-card p-3 shadow-sm">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xl font-semibold tracking-tight">Resource catalog</div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Browse curated OmniPath resources and open focused local workspaces.
+                  </p>
+                </div>
 
-          <div className="mt-6 flex flex-col gap-3">
-            <div className="relative max-w-xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search resource name…"
-                className="pl-9"
-              />
-            </div>
+                <div className="relative w-full xl:max-w-xl">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search resources, IDs, categories, or ontologies…"
+                    className="h-11 rounded-[1rem] border-0 bg-muted/40 pl-10 text-sm shadow-none sm:text-base"
+                  />
+                </div>
+              </div>
 
-            <div className="flex flex-wrap gap-2">
-              {categories.map((category) => (
-                <Pill key={category} active={selectedCategory === category} onClick={() => setSelectedCategory(category)}>
-                  {category === "all" ? "All categories" : sentenceCase(category)}
-                </Pill>
-              ))}
+              <div className="flex flex-wrap gap-2">
+                {categories.map((category) => (
+                  <Pill key={category} active={selectedCategory === category} onClick={() => setSelectedCategory(category)}>
+                    {category === "all" ? "All categories" : sentenceCase(category)}
+                  </Pill>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-sm text-muted-foreground">
+                <span>{formatNumber(summary.totalResources)} resources</span>
+                <span>•</span>
+                <span>{formatNumber(summary.totalEntities)} entities</span>
+                <span>•</span>
+                <span>{formatNumber(summary.totalInteractions)} interactions</span>
+                <span>•</span>
+                <span>{formatNumber(summary.totalAnnotations)} annotations</span>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8 pb-28">
           <section className="space-y-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -224,189 +474,40 @@ export default function ResourcesPage({
                 </p>
               </div>
               <div className="text-sm text-muted-foreground">
-                {formatNumber(summary.totalEntities)} entities • {formatNumber(summary.totalInteractions)} interactions • {formatNumber(summary.totalAnnotations)} annotations • {formatNumber(summary.totalOntologyTerms)} ontology terms
+                {formatNumber(summary.totalOntologyTerms)} ontology terms • {formatFileSize(summary.totalBytes)} total size
               </div>
             </div>
 
-            <div className="columns-1 gap-4 sm:columns-2 xl:columns-3">
-              {filteredResources.map((resource) => {
-                const Icon = iconForCategories(resource.categories);
-                const isSelected = selectedIds.includes(resource.resource_id);
-                const stats = [
-                  { label: "Entities", value: resource.entity_count },
-                  { label: "Interactions", value: resource.interaction_count },
-                  { label: "Associations", value: resource.association_count },
-                  { label: "Annotations", value: resource.annotation_count },
-                  { label: "Ontology Terms", value: resource.ontology_term_count },
-                ].filter((stat) => stat.value > 0);
-                const canDownloadArchive = resource.build_status === "success" && resource.download_archive_exists;
-
-                return (
-                  <article
+            {filteredResources.length > 0 ? (
+              <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                {filteredResources.map((resource) => (
+                  <ResourceCard
                     key={resource.resource_id}
-                    className="mb-4 break-inside-avoid rounded-xl border border-border/50 bg-card p-4 transition-colors hover:bg-muted/10"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <div className="rounded-lg border border-border/60 bg-muted/30 p-2">
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-lg font-semibold tracking-tight">{resource.resource_name}</div>
-                          <div className="mt-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-                            {resource.resource_id}
-                          </div>
-                        </div>
-                      </div>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-full px-2 py-1 text-[11px] font-medium",
-                          resource.build_status === "success"
-                            ? "bg-secondary/15 text-secondary"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {sentenceCase(resource.build_status)}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {resource.categories.map((category) => (
-                        <MiniTag key={`${resource.resource_id}-${category}`}>{sentenceCase(category)}</MiniTag>
-                      ))}
-                    </div>
-
-                    {resource.annotation_ontologies.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {resource.annotation_ontologies.map((ontology) => (
-                          <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <ScrollableDescription>
-                      {resource.description || "No description available."}
-                    </ScrollableDescription>
-
-                    {stats.length > 0 ? (
-                      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/50 pt-4">
-                        {stats.map((stat) => (
-                          <div key={`${resource.resource_id}-${stat.label}`}>
-                            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
-                            <div className="mt-1 text-sm font-medium">{formatNumber(stat.value)}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <dl className="mt-4 space-y-2 border-t border-border/50 pt-4 text-sm">
-                      <div className="flex items-start justify-between gap-4">
-                        <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">License</dt>
-                        <dd className="max-w-[65%] truncate text-right text-foreground/90">{resource.license || "—"}</dd>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Built</dt>
-                        <dd className="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
-                        <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
-                        <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
-                      </div>
-                    </dl>
-
-                    <div className="mt-4 space-y-3 border-t border-border/50 pt-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {resource.homepage_url ? (
-                            <Link
-                              href={resource.homepage_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-                            >
-                              Site
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </Link>
-                          ) : null}
-                          {resource.pubmed_id ? (
-                            <Link
-                              href={`https://pubmed.ncbi.nlm.nih.gov/${resource.pubmed_id}/`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-                            >
-                              PMID
-                              <Tags className="h-3.5 w-3.5" />
-                            </Link>
-                          ) : null}
-                        </div>
-
-                        {canDownloadArchive ? (
-                          <Button asChild variant="outline" size="sm" disabled={downloadingSelection}>
-                            <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
-                              Download
-                              <Download className="h-4 w-4" />
-                            </a>
-                          </Button>
-                        ) : (
-                          <Button variant="outline" size="sm" disabled>
-                            Download
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => toggleSelected(resource.resource_id)}
-                        className={cn(
-                          "inline-flex w-full items-center justify-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-                          isSelected
-                            ? "bg-primary text-primary-foreground"
-                            : "border border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground",
-                        )}
-                      >
-                        {isSelected ? (
-                          <>
-                            Selected
-                            <Check className="h-4 w-4" />
-                          </>
-                        ) : (
-                          <>
-                            Select
-                            <CirclePlus className="h-4 w-4" />
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-
-            {filteredResources.length === 0 ? (
-              <div className="rounded-xl border border-border/50 bg-card px-6 py-12 text-center text-muted-foreground">
+                    resource={resource}
+                    selected={selectedIds.includes(resource.resource_id)}
+                    onToggle={() => toggleSelected(resource.resource_id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-[1.25rem] border border-border/60 bg-card px-6 py-14 text-center text-muted-foreground shadow-sm">
                 No resources matched the current search and filter settings.
               </div>
-            ) : null}
+            )}
           </section>
         </div>
       </div>
 
       {selectedResources.length > 0 ? (
         <div className="fixed inset-x-4 bottom-4 z-40">
-          <div className="mx-auto w-full max-w-screen-xl rounded-xl border border-border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mx-auto w-full max-w-7xl rounded-[1.25rem] border border-border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="text-base font-medium">{selectedResources.length} resources selected</div>
                 <div className="text-sm text-muted-foreground">Estimated total size: {formatFileSize(selectedTotalBytes)}</div>
                 {downloadError ? <div className="mt-1 text-sm text-destructive">{downloadError}</div> : null}
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <Button variant="ghost" onClick={() => setSelectedIds([])}>
                   Clear selection
                 </Button>
