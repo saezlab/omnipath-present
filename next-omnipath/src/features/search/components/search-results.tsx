@@ -16,7 +16,7 @@ export function SearchResults({
   loading = false,
   loadingMore = false,
   hasMore = false,
-  sentinelRef
+  sentinelRef,
 }: SearchResultsProps) {
 
   if (loading && !results.length) {

@@ -481,13 +481,22 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
     <Card
       className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative"
     >
-      {/* Action buttons */}
       {entityId && (
-        <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={selected ? "default" : "outline"}
+            onClick={handleAddToSelection}
+            className="h-8 shrink-0"
+            title={selected ? "Remove from selection" : "Add to selection"}
+          >
+            {selected ? <Check className="size-4" /> : <Plus className="size-4" />}
+            {selected ? "Selected" : "Add"}
+          </Button>
           <Button
             variant="secondary"
             size="icon"
-            className="h-6 w-6 rounded-full shadow-md"
+            className="h-8 w-8 rounded-full shadow-sm"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -495,16 +504,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
             }}
             title="View details"
           >
-            <Info className="h-3 w-3" />
-          </Button>
-          <Button
-            variant={selected ? "default" : "secondary"}
-            size="icon"
-            className="h-6 w-6 rounded-full shadow-md"
-            onClick={handleAddToSelection}
-            title={selected ? "Remove from selection" : "Add to selection"}
-          >
-            {selected ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+            <Info className="h-4 w-4" />
           </Button>
         </div>
       )}
@@ -763,13 +763,22 @@ export function ResultCard({ result }: { result: SearchResult }) {
 
   return (
     <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative">
-      {/* Action buttons - positioned at bottom center, visible on hover for entities */}
       {type === 'entity' && entityId && (
-        <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={selected ? "default" : "outline"}
+            onClick={handleAddToSelection}
+            className="h-8 shrink-0"
+            title={selected ? "Remove from selection" : "Add to selection"}
+          >
+            {selected ? <Check className="size-4" /> : <Plus className="size-4" />}
+            {selected ? "Selected" : "Add"}
+          </Button>
           <Button
             variant="secondary"
             size="icon"
-            className="h-6 w-6 rounded-full shadow-md"
+            className="h-8 w-8 rounded-full shadow-sm"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -777,16 +786,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
             }}
             title="View details"
           >
-            <Info className="h-3 w-3" />
-          </Button>
-          <Button
-            variant={selected ? "default" : "secondary"}
-            size="icon"
-            className="h-6 w-6 rounded-full shadow-md"
-            onClick={handleAddToSelection}
-            title={selected ? "Remove from selection" : "Add to selection"}
-          >
-            {selected ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+            <Info className="h-4 w-4" />
           </Button>
         </div>
       )}
@@ -825,7 +825,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
         </DialogContent>
       </Dialog>
 
-      <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
+      <CardHeader className="relative space-y-0 p-3 pr-24 border-b shrink-0">
         <CardTitle className="text-lg line-clamp-3">
           <span dangerouslySetInnerHTML={{ __html: title }} />
         </CardTitle>
@@ -841,15 +841,15 @@ export function ResultCard({ result }: { result: SearchResult }) {
                 className="flex-1 min-h-0 max-h-56 w-full mb-2 cursor-zoom-in"
                 onClick={() => setDescriptionsOpen(true)}
               >
-                <div className="space-y-3 text-sm text-muted-foreground pr-1">
+                <div className="min-w-0 max-w-full space-y-3 pr-1 text-sm text-muted-foreground">
                   {descriptionSections.map((section) => (
-                    <div key={`${result.id}-description-preview-${section.label}`} className="space-y-1">
+                    <div key={`${result.id}-description-preview-${section.label}`} className="min-w-0 max-w-full space-y-1">
                       <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
                         {section.label}
                       </h4>
                       {section.items.map((item, index) => (
-                        <p key={`${result.id}-description-preview-item-${section.label}-${index}`}>
-                          <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
+                        <p key={`${result.id}-description-preview-item-${section.label}-${index}`} className="max-w-full whitespace-normal break-words">
+                          <span className="whitespace-normal break-words" dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
                         </p>
                       ))}
                     </div>

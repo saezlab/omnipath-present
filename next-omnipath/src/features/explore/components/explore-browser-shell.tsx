@@ -37,7 +37,6 @@ interface ExploreBrowserShellProps<TTab extends string> {
   summarySlot?: ReactNode;
 }
 
-const DEFAULT_HELPER_TEXT = "/ focuses search";
 
 export function ExploreBrowserShell<TTab extends string>({
   draftQuery,
@@ -53,7 +52,6 @@ export function ExploreBrowserShell<TTab extends string>({
   onSpeciesChange,
   showSpeciesPicker = false,
   speciesOptions = [],
-  helperText = DEFAULT_HELPER_TEXT,
   footerCta,
   summarySlot,
 }: ExploreBrowserShellProps<TTab>) {
@@ -111,7 +109,6 @@ export function ExploreBrowserShell<TTab extends string>({
                 ))}
               </TabsList>
             </Tabs>
-            <div className="hidden shrink-0 text-xs text-muted-foreground md:block">{helperText}</div>
           </div>
         </div>
 

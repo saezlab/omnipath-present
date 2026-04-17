@@ -135,7 +135,6 @@ export function SelectionResultsView() {
       searchPlaceholder={tab === "annotations" ? "Search scoped annotations…" : tab === "interactions" ? "Search scoped interactions…" : "Search scoped entities…"}
       searchInputRef={inputRef}
       showSpeciesPicker={false}
-      helperText={<><Search className="mr-1 inline size-3" />/ focuses search</>}
     />
   );
 }

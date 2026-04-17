@@ -190,14 +190,7 @@ export default function ResourcesPage({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="border-b bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
-        <div className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="space-y-3">
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Resources</h1>
-            <p className="max-w-3xl text-base leading-7 text-muted-foreground">
-              Browse the current OmniPath build resources from <code>resources.parquet</code>, with each resource categorized as
-              annotation, interaction, and/or association based on the artifacts present in the current gold snapshot.
-            </p>
-          </div>
+        <div className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8">
 
           <div className="mt-6 flex flex-col gap-3">
             <div className="relative max-w-xl">
