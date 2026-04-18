@@ -6,22 +6,23 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { browseTopOntologyTerms, resolveOntologyTerms, searchOntologyTerms, type ExploreOntologyTerm } from "@/features/explore/api/queries";
-import { searchMeilisearch } from "@/features/search/api/queries";
+import {
+  browseTopOntologyTerms,
+  getScopedAnnotationTerms,
+  searchOntologyTerms,
+  type ExploreOntologyTerm,
+} from "@/lib/queries";
 import { useEntitySelection } from "@/lib/navigation/url-state";
 import { formatNumber } from "@/lib/utils";
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 
 interface AnnotationBrowserTabProps {
   query: string;
   species?: string;
   scopedEntityIds?: string[];
-  entityFilters?: MeilisearchFilters;
+  entityFilters?: SearchFilters;
 }
 
-interface ScopedAnnotationTerm extends ExploreOntologyTerm {
-  entityCount: number;
-}
 
 function LoadingGrid() {
   return (
@@ -42,49 +43,6 @@ function EmptyState({ title, description }: { title: string; description: string
       </CardContent>
     </Card>
   );
-}
-
-async function fetchScopedAnnotationTerms(scopedEntityIds: string[], filters: MeilisearchFilters = {}): Promise<ScopedAnnotationTerm[]> {
-  if (scopedEntityIds.length === 0) return [];
-
-  const pageSize = 250;
-  const counts = new Map<string, number>();
-
-  for (let index = 0; index < scopedEntityIds.length; index += pageSize) {
-    const batch = scopedEntityIds.slice(index, index + pageSize);
-    const response = await searchMeilisearch({
-      query: "",
-      index: "search_entities",
-      limit: batch.length,
-      offset: 0,
-      filters: { ...filters, entity_ids: batch },
-    });
-
-    for (const hit of response.hits || []) {
-      const rawTerms = Array.isArray(hit.ontology_terms)
-        ? hit.ontology_terms
-        : Array.isArray(hit.cv_terms)
-          ? hit.cv_terms
-          : [];
-
-      const uniqueTerms = new Set(rawTerms.map((term) => String(term).trim()).filter(Boolean));
-      uniqueTerms.forEach((term) => counts.set(term, (counts.get(term) || 0) + 1));
-    }
-  }
-
-  const termIds = Array.from(counts.keys());
-  if (termIds.length === 0) return [];
-
-  const resolved = await resolveOntologyTerms(termIds);
-  return termIds
-    .map((termId) => ({
-      id: termId,
-      label: resolved[termId]?.label || termId,
-      namespace: resolved[termId]?.namespace,
-      definition: resolved[termId]?.definition,
-      entityCount: counts.get(termId) || 0,
-    }))
-    .sort((a, b) => b.entityCount - a.entityCount || a.label.localeCompare(b.label));
 }
 
 function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
@@ -151,7 +109,7 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
       : ["explore-annotations", query, species],
     queryFn: () => {
       if (isScoped) {
-        return fetchScopedAnnotationTerms(scopedEntityIds || [], entityFilters);
+        return getScopedAnnotationTerms(scopedEntityIds || [], entityFilters);
       }
       return query.trim().length > 0 ? searchOntologyTerms(query, 30) : browseTopOntologyTerms(species, 30);
     },

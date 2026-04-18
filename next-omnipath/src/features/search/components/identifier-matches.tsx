@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ResultCard, type SearchResult } from "./result-card";
+import { ResultCard, type EntitySearchResult } from "./result-card";
 import { cn } from "@/lib/utils";
 
 export interface IdentifierMatch {
@@ -12,13 +12,13 @@ export interface IdentifierMatch {
 
 interface IdentifierMatchesProps {
   matches: IdentifierMatch[];
-  entities: SearchResult[];
+  entities: EntitySearchResult[];
   loading?: boolean;
   error?: string | null;
 }
 
 export function IdentifierMatches({ matches, entities, loading = false, error }: IdentifierMatchesProps) {
-  const entityMap = new Map<string, SearchResult>();
+  const entityMap = new Map<string, EntitySearchResult>();
   for (const entity of entities) {
     const key = (entity.entity_id ?? entity.id)?.toString();
     if (key) {
@@ -54,7 +54,7 @@ export function IdentifierMatches({ matches, entities, loading = false, error }:
       {matches.map((match) => {
         const candidates = match.entityIds
           .map((id) => entityMap.get(id.toString()))
-          .filter((result): result is SearchResult => Boolean(result));
+          .filter((result): result is EntitySearchResult => Boolean(result));
 
         const status = (() => {
           if (match.entityIds.length === 0) return "unmapped" as const;

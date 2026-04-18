@@ -3,12 +3,12 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Search, ArrowRight, Minus, Plus, Layers3, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
-import { MeilisearchInteraction, InteractionEvidence, InteractionDirection } from "@/types/meilisearch"
+import { InteractionSearchResult, InteractionEvidence, InteractionDirection } from "@/types/search"
 import { CvTermHoverCard } from "@/features/search/components/result-card"
 import { EntityBadge } from "@/components/entity-badge"
 
 interface InteractionDetailsProps {
-  selectedInteraction: MeilisearchInteraction | null
+  selectedInteraction: InteractionSearchResult | null
 }
 
 function extractLabel(value: string): string {
@@ -25,7 +25,7 @@ function splitLabelAndId(value: string): { label: string; id?: string } {
   };
 }
 
-function getInteractionDirections(interaction: MeilisearchInteraction | null): InteractionDirection[] {
+function getInteractionDirections(interaction: InteractionSearchResult | null): InteractionDirection[] {
   if (!interaction) return [];
   if (interaction.directions?.length) return interaction.directions;
   return [{
@@ -210,7 +210,7 @@ function getAnnotationAccessions(
     .filter((value): value is string => Boolean(value));
 }
 
-function getInteractionTypeDirection(interaction: MeilisearchInteraction): EvidenceDirection {
+function getInteractionTypeDirection(interaction: InteractionSearchResult): EvidenceDirection {
   const typeA = extractLabel(interaction.member_types[0] || '').trim().toLowerCase();
   const typeB = extractLabel(interaction.member_types[1] || '').trim().toLowerCase();
 
@@ -229,7 +229,7 @@ function collapseSigns(signs: Set<-1 | 1>, fallbackSign: EvidenceSign = null): E
 }
 
 function inferEvidenceCombos(
-  interaction: MeilisearchInteraction,
+  interaction: InteractionSearchResult,
   evidence: InteractionEvidence,
 ): EvidenceCombo[] {
   const explicitDirection = getEvidenceDirection(evidence);
@@ -335,7 +335,7 @@ function extractAnnotationTerms(evidence: InteractionEvidence[]): string[] {
 }
 
 function buildEvidenceGroups(
-  interaction: MeilisearchInteraction,
+  interaction: InteractionSearchResult,
   swap: boolean,
 ): AggregatedEvidenceGroup[] {
   if (!interaction.evidence?.length) return [];

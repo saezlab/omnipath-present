@@ -4,12 +4,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { InteractionDetails } from "@/features/interactions-search/components/interaction-details"
-import { MeilisearchInteraction, InteractionEvidence } from "@/types/meilisearch"
+import { InteractionSearchResult, InteractionEvidence } from "@/types/search"
 
 interface InteractionDetailsSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  interaction: MeilisearchInteraction | null
+  interaction: InteractionSearchResult | null
 }
 
 interface InteractionEvidenceResponse {
@@ -19,7 +19,7 @@ interface InteractionEvidenceResponse {
 }
 
 export function InteractionDetailsSheet({ open, onOpenChange, interaction }: InteractionDetailsSheetProps) {
-  const [resolvedInteraction, setResolvedInteraction] = useState<MeilisearchInteraction | null>(interaction)
+  const [resolvedInteraction, setResolvedInteraction] = useState<InteractionSearchResult | null>(interaction)
 
   useEffect(() => {
     setResolvedInteraction(interaction)

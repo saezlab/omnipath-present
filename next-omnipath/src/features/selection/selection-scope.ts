@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { searchMeilisearch } from "@/features/search/api/queries";
+import { getEntityIdsForAnnotationTerms } from "@/lib/queries";
 
 export interface DerivedSelectionScope {
   selectedEntityIds: string[];
@@ -33,37 +33,7 @@ function normalizeIds(ids?: Array<string | number>) {
 }
 
 async function fetchEntityIdsForSelectedAnnotations(annotationIds: string[]): Promise<string[]> {
-  const normalized = normalizeIds(annotationIds);
-  if (normalized.length === 0) return [];
-
-  const pageSize = 250;
-  const entityIds = new Set<string>();
-  let offset = 0;
-  let total = Infinity;
-
-  while (offset < total) {
-    const response = await searchMeilisearch({
-      query: "",
-      index: "search_entities",
-      limit: pageSize,
-      offset,
-      filters: { ontology_terms: normalized },
-    });
-
-    const hits = response.hits || [];
-    for (const hit of hits) {
-      const entityId = String(hit.entity_id ?? "").trim();
-      if (entityId) {
-        entityIds.add(entityId);
-      }
-    }
-
-    total = response.estimatedTotalHits || hits.length;
-    if (hits.length < pageSize) break;
-    offset += pageSize;
-  }
-
-  return Array.from(entityIds);
+  return getEntityIdsForAnnotationTerms(annotationIds);
 }
 
 export function useSelectionScope(selectedEntityIds: string[], selectedAnnotationIds: string[]) {

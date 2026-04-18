@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@next-omnipath/drizzle": [
+        "./drizzle/index.ts"
       ]
     }
   },

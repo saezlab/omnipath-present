@@ -6,11 +6,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Network, Tag, Shapes, FileText, Database, Loader2 } from "lucide-react";
-import type { SearchResult } from "./result-card";
+import type { EntitySearchResult } from "./result-card";
 import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
-import { MeilisearchFilters, MeilisearchAssociation } from "@/types/meilisearch";
-import { searchAssociations, searchInteractions } from "@/features/interactions-search/api/queries";
+import { SearchFilters, AssociationSearchResult } from "@/types/search";
+import { searchAssociations, searchInteractions } from "@/lib/queries";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import SearchPage from "@/features/search/page";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
@@ -18,7 +18,7 @@ import { getUnifiedCvTerms } from "@/lib/cv-terms";
 interface EntityDetailsDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    entity: SearchResult | null;
+    entity: EntitySearchResult | null;
 }
 
 const getDescriptionEntries = (definition: string | undefined, descriptions: string[] = []): string[] => {
@@ -36,8 +36,8 @@ const getDescriptionEntries = (definition: string | undefined, descriptions: str
 };
 
 // Helper to detect if entity is a small molecule
-const isSmallMolecule = (result: SearchResult): boolean => {
-    const entityType = result._formatted?.entity_type || result.entity_type || '';
+const isSmallMolecule = (result: EntitySearchResult): boolean => {
+    const entityType = result.entity_type || '';
     const typeLabel = entityType.split(':')[0].toLowerCase().replace(/[\s_]/g, '');
     return typeLabel === 'smallmolecule' ||
         typeLabel === 'compound' ||
@@ -48,13 +48,13 @@ const isSmallMolecule = (result: SearchResult): boolean => {
 };
 
 // Entity Card Header Component
-function EntityCardHeader({ entity }: { entity: SearchResult }) {
-    const entityType = entity._formatted?.entity_type || entity.entity_type;
+function EntityCardHeader({ entity }: { entity: EntitySearchResult }) {
+    const entityType = entity.entity_type;
     const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
-    const names = entity._formatted?.names || entity.names || [];
-    const geneSymbols = entity._formatted?.gene_symbols || entity.gene_symbols || [];
-    const descriptions = entity._formatted?.descriptions || entity.descriptions || [];
-    const definition = entity._formatted?.definition || entity.definition;
+    const names = entity.names || [];
+    const geneSymbols = entity.gene_symbols || [];
+    const descriptions = entity.descriptions || [];
+    const definition = entity.definition;
     const descriptionEntries = getDescriptionEntries(definition, descriptions);
     // Get display name
     const displayName = geneSymbols[0] || names[0] || `Entity ${entity.entity_id || entity.id}`;
@@ -62,7 +62,7 @@ function EntityCardHeader({ entity }: { entity: SearchResult }) {
     // Extract SMILES for molecules
     const smiles = useMemo(() => {
         if (!isSmallMolecule(entity)) return null;
-        const identifiers = entity._formatted?.identifiers || entity.identifiers || [];
+        const identifiers = entity.identifiers || [];
         for (const id of identifiers) {
             const idType = id.key?.split(':')[0].toLowerCase().trim();
             if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
@@ -157,7 +157,7 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
     const entityIds = useMemo(() => (entityId ? [entityId] : []), [entityId]);
 
     // Filters for interactions tab
-    const [interactionFilters, setInteractionFilters] = useState<MeilisearchFilters>({});
+    const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
 
     // Update filters when entity changes
     useEffect(() => {
@@ -181,8 +181,8 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
             ]);
 
             const entityIdSet = new Set<string>();
-            const parentHits = parentsResponse.hits as MeilisearchAssociation[];
-            const memberHits = membersResponse.hits as MeilisearchAssociation[];
+            const parentHits = parentsResponse.hits as AssociationSearchResult[];
+            const memberHits = membersResponse.hits as AssociationSearchResult[];
 
             parentHits.forEach(hit => {
                 if (hit.parent_entity_id) entityIdSet.add(hit.parent_entity_id);

@@ -12,7 +12,7 @@ import { AnnotationBrowserTab } from "@/features/explore/components/annotation-b
 import { EntitiesExploreTab } from "@/features/explore/components/entities-explore-tab";
 import { ExploreBrowserShell } from "@/features/explore/components/explore-browser-shell";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 
 const exploreTabParser = parseAsStringLiteral(["entities", "interactions", "annotations"] as const).withDefault("entities");
 const speciesParser = parseAsString.withDefault("9606");
@@ -41,8 +41,8 @@ export default function ExplorePage() {
   const [query, setQuery] = useQueryState("q", queryParser);
   const [species, setSpecies] = useQueryState("species", speciesParser);
   const [draftQuery, setDraftQuery] = useState(query);
-  const [entityFilters, setEntityFilters] = useState<MeilisearchFilters>({ ncbi_tax_id: [species || "9606"] });
-  const [interactionFilters, setInteractionFilters] = useState<MeilisearchFilters>({});
+  const [entityFilters, setEntityFilters] = useState<SearchFilters>({ ncbi_tax_id: [species || "9606"] });
+  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
   const [, setInteractionFilterCounts] = useState<Record<string, Record<string, number>>>({});
   const { entityIds, annotationIds, totalSelectionCount } = useEntitySelection();
 

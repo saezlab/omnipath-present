@@ -3,9 +3,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
-import { searchMeilisearch } from "./api/queries";
+import { searchEntities } from "@/lib/queries";
 import { EntityFilterSidebar } from "./components/entity-filter-sidebar";
-import type { SearchResult } from "./components/result-card";
+import type { EntitySearchResult, SearchResult } from "./components/result-card";
 import { SearchBar } from "./components/search-bar";
 import { SearchResults } from "./components/search-results";
 import { IdentifierMatches, type IdentifierMatch } from "./components/identifier-matches";
@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Download, MessageSquare, Search } from "lucide-react";
 import { AnnotationFilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { cn } from "@/lib/utils";
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useSearchUrlState } from "@/lib/navigation/url-state";
 import { useSearchWorkspaceState, type SearchWorkspacePane } from "./use-search-workspace-state";
@@ -82,7 +82,7 @@ export default function SearchPage({
     () => lockedEntityIds.map((id) => String(id).trim()).filter((id) => id.length > 0),
     [lockedEntityIds]
   );
-  const [embeddedFilters, setEmbeddedFilters] = useState<MeilisearchFilters>(() => {
+  const [embeddedFilters, setEmbeddedFilters] = useState<SearchFilters>(() => {
     const base = initialFilters || { ncbi_tax_id: ["9606"] };
     if (normalizedLockedEntityIds.length > 0) {
       return { ...base, entity_ids: normalizedLockedEntityIds };
@@ -92,7 +92,7 @@ export default function SearchPage({
   const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; ontology_terms?: Record<string, number> }>({});
   const [ontologyFacetCountsByPrefix, setOntologyFacetCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
-  const [lookupEntities, setLookupEntities] = useState<SearchResult[]>([]);
+  const [lookupEntities, setLookupEntities] = useState<EntitySearchResult[]>([]);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [identifierInput, setIdentifierInput] = useState(
@@ -155,7 +155,7 @@ export default function SearchPage({
     setUrlSpecies(next);
   }, [embedded, setUrlSpecies]);
 
-  const setFilters = useCallback((next: MeilisearchFilters | ((prev: MeilisearchFilters) => MeilisearchFilters)) => {
+  const setFilters = useCallback((next: SearchFilters | ((prev: SearchFilters) => SearchFilters)) => {
     const resolved = typeof next === "function" ? next(filters) : next;
     if (embedded) {
       setEmbeddedFilters(resolved);
@@ -177,7 +177,7 @@ export default function SearchPage({
       }
 
       const [response, facetResponse] = await Promise.all([
-        searchMeilisearch({
+        searchEntities({
           query: query || "", // Allow empty query to fetch all results
           index: "search_entities",
           limit,
@@ -186,7 +186,7 @@ export default function SearchPage({
           facets: [] // Do not compute facets for the main search hits query
         }),
         offset === 0 && initialSearchType === "search_entities"
-          ? searchMeilisearch({
+          ? searchEntities({
               query: query || "", // Allow empty query to fetch all results
               index: "search_entities",
               limit: 0,
@@ -196,7 +196,7 @@ export default function SearchPage({
           : Promise.resolve(null)
       ]);
 
-      const hits = response.hits as SearchResult[] || [];
+      const hits = response.hits as unknown as SearchResult[] || [];
 
       // Update filter counts from backend-provided facet distribution (only on first page)
       if (facetResponse && initialSearchType === "search_entities") {
@@ -278,7 +278,7 @@ export default function SearchPage({
     }));
   }, [normalizedLockedEntityIds]);
 
-  const handleAnnotationFilterChange = useCallback((newFilters: MeilisearchFilters) => {
+  const handleAnnotationFilterChange = useCallback((newFilters: SearchFilters) => {
     setFilters({
       ...newFilters,
       ...(normalizedLockedEntityIds.length > 0 ? { entity_ids: normalizedLockedEntityIds } : {}),
@@ -482,7 +482,7 @@ export default function SearchPage({
 
       const data = await response.json();
       setLookupMatches((data.matches || []) as IdentifierMatch[]);
-      setLookupEntities((data.entities || []) as SearchResult[]);
+      setLookupEntities((data.entities || []) as EntitySearchResult[]);
     } catch (err) {
       console.error("Identifier lookup error", err);
       setLookupMatches([]);

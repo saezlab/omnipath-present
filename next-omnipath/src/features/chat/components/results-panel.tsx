@@ -6,7 +6,7 @@ import { ToolResult } from "./dual-mode-interface"
 import SearchPage from "@/features/search/page"
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab"
 import { useState, useCallback, useEffect } from "react"
-import { MeilisearchFilters } from "@/types/meilisearch"
+import { SearchFilters } from "@/types/search"
 
 interface ResultsPanelProps {
   toolResult: ToolResult | null
@@ -15,7 +15,7 @@ interface ResultsPanelProps {
 
 export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
   // State for interactions tab
-  const [interactionsFilters, setInteractionsFilters] = useState<MeilisearchFilters>({})
+  const [interactionsFilters, setInteractionsFilters] = useState<SearchFilters>({})
   const [, setInteractionsFilterCounts] = useState<Record<string, Record<string, number>>>({})
 
   // Reset filters when toolResult changes
@@ -38,7 +38,7 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
           ? value.map(item => String(item).trim()).filter(item => item.length > 0)
           : undefined
 
-      const nextFilters: MeilisearchFilters = {}
+      const nextFilters: SearchFilters = {}
 
       if (ids.length > 0) nextFilters.entity_ids = ids
 
@@ -73,7 +73,7 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
     }
   }, [toolResult])
 
-  const handleInteractionsFilterChange = useCallback((newFilters: MeilisearchFilters) => {
+  const handleInteractionsFilterChange = useCallback((newFilters: SearchFilters) => {
     setInteractionsFilters(newFilters)
   }, [])
 

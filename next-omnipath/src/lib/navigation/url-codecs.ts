@@ -1,4 +1,4 @@
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 
 export type ResultsView = "entities" | "interactions" | "selection";
 export type SelectionTab = "entities" | "interactions" | "annotations";
@@ -33,7 +33,7 @@ export function serializeEntityIdsParam(value: Array<string | number> | undefine
   return normalized.length > 0 ? normalized.join(",") : null;
 }
 
-export function parseFiltersParam(value: string | null | undefined): MeilisearchFilters {
+export function parseFiltersParam(value: string | null | undefined): SearchFilters {
   if (!value) return {};
 
   try {
@@ -41,13 +41,13 @@ export function parseFiltersParam(value: string | null | undefined): Meilisearch
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return {};
     }
-    return parsed as MeilisearchFilters;
+    return parsed as SearchFilters;
   } catch {
     return {};
   }
 }
 
-export function serializeFiltersParam(value: MeilisearchFilters | undefined | null): string | null {
+export function serializeFiltersParam(value: SearchFilters | undefined | null): string | null {
   if (!value || Object.keys(value).length === 0) return null;
   return JSON.stringify(value);
 }
@@ -96,7 +96,7 @@ export function buildWorkspaceUrl(params: {
   entityIds?: Array<string | number>;
   annotationIds?: Array<string | number>;
   tab?: SelectionTab;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
 }): string {
   const view = params.view || "entities";
   const searchParams = new URLSearchParams();
@@ -142,7 +142,7 @@ export function buildSearchUrl(params: {
   type?: SearchType;
   species?: string | null;
   entityWorkflow?: EntityWorkflow;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
   entityIds?: Array<string | number>;
 }): string {
   return buildWorkspaceUrl({
@@ -159,7 +159,7 @@ export function buildSearchUrl(params: {
 
 export function buildInteractionsUrl(params: {
   entityIds?: Array<string | number>;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
 }): string {
   return buildWorkspaceUrl({
     view: "interactions",
@@ -172,7 +172,7 @@ export function buildSelectionUrl(params: {
   entityIds?: Array<string | number>;
   annotationIds?: Array<string | number>;
   tab?: SelectionTab;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
 }): string {
   return buildWorkspaceUrl({
     view: "selection",

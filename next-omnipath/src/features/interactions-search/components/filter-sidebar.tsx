@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MeilisearchFilters } from "@/types/meilisearch"
+import { SearchFilters } from "@/types/search"
 import { X, Filter, Search, ArrowRight, Minus, Plus, Ban } from "lucide-react"
 import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -21,14 +21,14 @@ interface FilterOption {
   label?: string;
   icon?: ReactNode;
   prefix?: string;
-  filterKey?: keyof MeilisearchFilters;
+  filterKey?: keyof SearchFilters;
 }
 
 
 interface FilterSidebarProps {
-  filters: MeilisearchFilters;
+  filters: SearchFilters;
   filterCounts: Record<string, Record<string, number>>;
-  onFilterChange: (filters: MeilisearchFilters) => void;
+  onFilterChange: (filters: SearchFilters) => void;
   onClearFilters: () => void;
   isMobile?: boolean;
 }
@@ -55,7 +55,7 @@ const PREFIX_NAMES: Record<string, string> = {
   REACTOME: "Reactome",
 };
 
-const ENTITY_ONTOLOGY_FACET_MAP: Record<string, keyof MeilisearchFilters> = {
+const ENTITY_ONTOLOGY_FACET_MAP: Record<string, keyof SearchFilters> = {
   GO: "ontology_terms",
   MI: "ontology_terms",
   OM: "ontology_terms",
@@ -64,7 +64,7 @@ const ENTITY_ONTOLOGY_FACET_MAP: Record<string, keyof MeilisearchFilters> = {
   CHEBI: "ontology_terms",
 };
 
-const PARTICIPANT_ONTOLOGY_FACET_MAP: Record<string, keyof MeilisearchFilters> = {
+const PARTICIPANT_ONTOLOGY_FACET_MAP: Record<string, keyof SearchFilters> = {
   GO: "participant_annotation_terms",
   MI: "participant_annotation_terms",
   OM: "participant_annotation_terms",
@@ -90,7 +90,7 @@ function extractPrefix(termId: string): string {
   return match ? match[1] : "OTHER";
 }
 
-function getEntityFilterKeyForValue(value: string): keyof MeilisearchFilters | null {
+function getEntityFilterKeyForValue(value: string): keyof SearchFilters | null {
   const prefix = extractPrefix(value);
   return ENTITY_ONTOLOGY_FACET_MAP[prefix] ?? "ontology_terms";
 }
@@ -126,7 +126,7 @@ function extractTermLabel(value: string): string {
 // Helper component for array filter sections
 interface ArrayFilterSectionProps {
   title: string;
-  filterKey: keyof MeilisearchFilters;
+  filterKey: keyof SearchFilters;
   options: FilterOption[];
   selectedValues: string[];
   onToggle: (value: string) => void;
@@ -168,7 +168,7 @@ function ArrayFilterSection({
 }
 
 interface FilterOptionRowProps {
-  filterKey: keyof MeilisearchFilters;
+  filterKey: keyof SearchFilters;
   option: FilterOption;
   selectedValues: string[];
   onToggle: (value: string) => void;
@@ -302,7 +302,7 @@ export function FilterSidebar({
   }, 0);
 
   // Handler for toggling array filters
-  const handleArrayToggle = (filterKey: keyof MeilisearchFilters, value: string) => {
+  const handleArrayToggle = (filterKey: keyof SearchFilters, value: string) => {
     const currentValues = (filters[filterKey] as string[]) || [];
     const newValues = currentValues.includes(value)
       ? currentValues.filter(v => v !== value)
@@ -357,35 +357,35 @@ export function FilterSidebar({
       count: filterCounts.is_directed.true,
       label: 'Directed',
       icon: <ArrowRight className="h-3.5 w-3.5" />,
-      filterKey: 'is_directed' as keyof MeilisearchFilters,
+      filterKey: 'is_directed' as keyof SearchFilters,
     }] : []),
     ...(filterCounts.is_directed?.false !== undefined ? [{
       value: 'undirected',
       count: filterCounts.is_directed.false,
       label: 'Undirected',
       icon: <Minus className="h-3.5 w-3.5" />,
-      filterKey: 'is_directed' as keyof MeilisearchFilters,
+      filterKey: 'is_directed' as keyof SearchFilters,
     }] : []),
     ...(filterCounts.sign?.['1'] !== undefined ? [{
       value: '1',
       count: filterCounts.sign['1'],
       label: 'Activation',
       icon: <Plus className="h-3.5 w-3.5 text-green-600" />,
-      filterKey: 'signs' as keyof MeilisearchFilters,
+      filterKey: 'signs' as keyof SearchFilters,
     }] : []),
     ...(filterCounts.sign?.['-1'] !== undefined ? [{
       value: '-1',
       count: filterCounts.sign['-1'],
       label: 'Inhibition',
       icon: <Ban className="h-3.5 w-3.5 text-red-600" />,
-      filterKey: 'signs' as keyof MeilisearchFilters,
+      filterKey: 'signs' as keyof SearchFilters,
     }] : []),
     ...(filterCounts.sign?.['0'] !== undefined ? [{
       value: '0',
       count: filterCounts.sign['0'],
       label: 'Unsigned',
       icon: <Minus className="h-3.5 w-3.5 text-muted-foreground" />,
-      filterKey: 'signs' as keyof MeilisearchFilters,
+      filterKey: 'signs' as keyof SearchFilters,
     }] : []),
   ];
 
@@ -501,16 +501,16 @@ export function FilterSidebar({
 type AnnotationFilterSidebarProps =
   | {
       mode: "entities";
-      filters: MeilisearchFilters;
-      onFilterChange: (filters: MeilisearchFilters) => void;
+      filters: SearchFilters;
+      onFilterChange: (filters: SearchFilters) => void;
       ontologyFacetCountsByPrefix: Record<string, Record<string, number>>;
       isMobile?: boolean;
     }
   | {
       mode: "interactions";
-      filters: MeilisearchFilters;
+      filters: SearchFilters;
       filterCounts: Record<string, Record<string, number>>;
-      onFilterChange: (filters: MeilisearchFilters) => void;
+      onFilterChange: (filters: SearchFilters) => void;
       isMobile?: boolean;
     };
 
@@ -645,8 +645,8 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
             const filterKey = mode === "entities"
               ? getEntityFilterKeyForValue(termId) || undefined
               : interactionScope === "participant"
-                ? ("participant_annotation_terms" as keyof MeilisearchFilters)
-                : ("interaction_annotation_terms" as keyof MeilisearchFilters);
+                ? ("participant_annotation_terms" as keyof SearchFilters)
+                : ("interaction_annotation_terms" as keyof SearchFilters);
 
             return {
               value: termId,
@@ -710,7 +710,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
             label: resolveLabel(value),
             icon: prefix,
             prefix,
-            filterKey: "participant_annotation_terms" as keyof MeilisearchFilters,
+            filterKey: "participant_annotation_terms" as keyof SearchFilters,
           };
         })
         .sort((a, b) => b.count - a.count);
@@ -723,7 +723,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
         value,
         count,
         label: resolveLabel(value),
-        filterKey: "interaction_annotation_terms" as keyof MeilisearchFilters,
+        filterKey: "interaction_annotation_terms" as keyof SearchFilters,
       }))
       .sort((a, b) => b.count - a.count);
   }, [interactionFilterCounts, interactionScope, mode, normalizedQuery, ontologyFacetCountsByPrefix, ontologySearchOptions, ontologyTermsById]);
@@ -873,7 +873,7 @@ export function AnnotationFilterSidebar(props: AnnotationFilterSidebarProps) {
     [filteredGroups, normalizedQuery]
   );
 
-  const handleAnnotationToggle = (value: string, explicitFilterKey?: keyof MeilisearchFilters) => {
+  const handleAnnotationToggle = (value: string, explicitFilterKey?: keyof SearchFilters) => {
     let filterKey = explicitFilterKey;
 
     if (!filterKey) {

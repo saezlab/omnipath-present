@@ -1,28 +1,21 @@
 import 'server-only';
-import { Pool } from 'pg';
 import type { SearchResponse } from '@/lib/search/types';
 import type {
+  AssociationSearchResult,
   IdentifierEntry,
-  MeilisearchAssociation,
-  MeilisearchFilters,
-  MeilisearchInteraction,
-} from '@/types/meilisearch';
-import type { SearchResult } from '@/features/search/components/result-card';
+  InteractionSearchResult,
+  SearchFilters,
+} from '@/types/search';
+import type { Association, Entity, Identifier, Interaction } from '@next-omnipath/drizzle';
+import type { EntitySearchResult } from '@/types/entities';
+import type { SearchResult } from '@/types/search-results';
+import { getPool, schema } from '@/lib/db/client';
 
-const DATABASE_URL = process.env.DATABASE_URL;
 const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || 'public';
 
-let pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (!DATABASE_URL) {
-    throw new Error('DATABASE_URL is not configured');
-  }
-  if (!pool) {
-    pool = new Pool({ connectionString: DATABASE_URL });
-  }
-  return pool;
-}
+type EntityRecord = Entity;
+type InteractionRecord = Interaction;
+type AssociationRecord = Association;
 
 type SqlParams = unknown[];
 
@@ -51,9 +44,10 @@ function toLegacyLabeledValue(value: string | null | undefined): string {
   return `${label.toLowerCase()}:${accession}`;
 }
 
-function toPublicEntityId(row: { canonical_identifier_type?: string | null; canonical_identifier?: string | null }): string {
-  const type = row.canonical_identifier_type || '';
-  const identifier = row.canonical_identifier || '';
+function toPublicEntityId(row: Pick<EntityRecord, 'canonicalIdentifierType' | 'canonicalIdentifier'> | { canonical_identifier_type?: string | null; canonical_identifier?: string | null }): string {
+  const typedRow = row as { canonicalIdentifierType?: string | null; canonicalIdentifier?: string | null; canonical_identifier_type?: string | null; canonical_identifier?: string | null };
+  const type = typedRow.canonicalIdentifierType || typedRow.canonical_identifier_type || '';
+  const identifier = typedRow.canonicalIdentifier || typedRow.canonical_identifier || '';
   return `${type}|${identifier}`;
 }
 
@@ -115,7 +109,7 @@ function identifierLabel(identifierType: string): string {
   return parseCvValue(text).label.toLowerCase();
 }
 
-function classifyEntityIdentifiers(identifiers: IdentifierEntry[]): {
+function classifyEntityIdentifiers(identifiers: Array<IdentifierEntry | Identifier>): {
   names: string[];
   synonyms: string[];
   geneSymbols: string[];
@@ -184,7 +178,7 @@ function mapEntityAttributesToDescriptions(attributes: Array<{ term?: string | n
   return uniqueStrings([...preferred, ...fallback]).slice(0, 20);
 }
 
-function mapEntityRow(row: any): SearchResult {
+function mapEntityRow(row: any): EntitySearchResult {
   const identifiers = ((row.identifiers || []) as Array<{
     key?: string;
     value?: string;
@@ -259,7 +253,7 @@ async function loadFacetDistributionFromMaterializedView(viewName: string): Prom
 
 export async function getEntityFilterFacetDistributionPostgres(params?: {
   query?: string;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
   facets?: string[];
 }): Promise<FacetDistribution> {
   const query = params?.query || '';
@@ -361,7 +355,7 @@ export async function getInteractionFilterFacetDistributionPostgres(): Promise<F
   return loadFacetDistributionFromMaterializedView('interaction_filter_counts');
 }
 
-function buildEntityWhere(filters: MeilisearchFilters, query: string, params: SqlParams): string[] {
+function buildEntityWhere(filters: SearchFilters, query: string, params: SqlParams): string[] {
   const where: string[] = [];
 
   if (filters.entity_ids?.length) {
@@ -418,7 +412,7 @@ export async function searchEntitiesPostgres(params: {
   query: string;
   limit?: number;
   offset?: number;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
   facets?: string[];
   trackTotalHits?: boolean;
   includeIdentifiers?: boolean;
@@ -518,7 +512,7 @@ export async function searchEntitiesPostgres(params: {
       : undefined;
     const estimatedTotalHits = total ?? (offset + hits.length + (hits.length === limit ? 1 : 0));
     return {
-      hits,
+      hits: hits as unknown as Record<string, unknown>[],
       estimatedTotalHits,
       limit,
       offset,
@@ -531,7 +525,7 @@ export async function searchEntitiesPostgres(params: {
   }
 }
 
-async function fetchEntityRowsByPublicIds(publicIds: string[]): Promise<SearchResult[]> {
+async function fetchEntityRowsByPublicIds(publicIds: string[]): Promise<EntitySearchResult[]> {
   if (publicIds.length === 0) return [];
   const client = await getPool().connect();
   try {
@@ -574,7 +568,7 @@ export async function fetchDocumentsPostgres(indexName: string, documentIds: str
   return { documents: documents as unknown as Record<string, unknown>[] };
 }
 
-function buildInteractionWhere(filters: MeilisearchFilters, query: string, params: SqlParams): string[] {
+function buildInteractionWhere(filters: SearchFilters, query: string, params: SqlParams): string[] {
   const where: string[] = [];
   const publicA = `(ea.canonical_identifier_type || '|' || ea.canonical_identifier)`;
   const publicB = `(eb.canonical_identifier_type || '|' || eb.canonical_identifier)`;
@@ -643,7 +637,7 @@ function buildInteractionWhere(filters: MeilisearchFilters, query: string, param
   return where;
 }
 
-function mapInteractionRow(row: any): MeilisearchInteraction {
+function mapInteractionRow(row: any): InteractionSearchResult {
   const memberAId = toPublicEntityId({
     canonical_identifier_type: row.member_a_identifier_type,
     canonical_identifier: row.member_a_identifier,
@@ -682,7 +676,7 @@ export async function searchInteractionsPostgres(params: {
   query: string;
   limit?: number;
   offset?: number;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
 }): Promise<SearchResponse> {
   const { query, limit = 20, offset = 0, filters = {} } = params;
   const client = await getPool().connect();
@@ -775,7 +769,7 @@ export async function searchInteractionsPostgres(params: {
   }
 }
 
-function mapAssociationRow(row: any): MeilisearchAssociation {
+function mapAssociationRow(row: any): AssociationSearchResult {
   const parentEntityId = toPublicEntityId({
     canonical_identifier_type: row.parent_identifier_type,
     canonical_identifier: row.parent_identifier,
@@ -821,7 +815,7 @@ function mapAssociationRow(row: any): MeilisearchAssociation {
   };
 }
 
-function buildAssociationWhere(filters: MeilisearchFilters, query: string, params: SqlParams): string[] {
+function buildAssociationWhere(filters: SearchFilters, query: string, params: SqlParams): string[] {
   const where: string[] = [];
   const publicParent = `(ep.canonical_identifier_type || '|' || ep.canonical_identifier)`;
   const publicMember = `(em.canonical_identifier_type || '|' || em.canonical_identifier)`;
@@ -863,7 +857,7 @@ export async function searchAssociationsPostgres(params: {
   query: string;
   limit?: number;
   offset?: number;
-  filters?: MeilisearchFilters;
+  filters?: SearchFilters;
 }): Promise<SearchResponse> {
   const { query, limit = 20, offset = 0, filters = {} } = params;
   const client = await getPool().connect();

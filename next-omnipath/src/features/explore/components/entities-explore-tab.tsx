@@ -6,19 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { searchMeilisearch } from "@/features/search/api/queries";
+import { searchEntities } from "@/lib/queries";
 import { EntityFilterSidebar } from "@/features/search/components/entity-filter-sidebar";
 import type { SearchResult } from "@/features/search/components/result-card";
 import { SearchResults } from "@/features/search/components/search-results";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 
 interface EntitiesExploreTabProps {
   query: string;
   species?: string;
-  filters: MeilisearchFilters;
-  onFiltersChange: (filters: MeilisearchFilters) => void;
+  filters: SearchFilters;
+  onFiltersChange: (filters: SearchFilters) => void;
   scopedEntityIds?: string[];
 }
 
@@ -64,7 +64,7 @@ export function EntitiesExploreTab({
     ...filters,
     ...(species ? { ncbi_tax_id: filters.ncbi_tax_id ?? [species] } : {}),
     ...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {}),
-  } satisfies MeilisearchFilters), [filters, scopedEntityIds, species]);
+  } satisfies SearchFilters), [filters, scopedEntityIds, species]);
 
   useEffect(() => {
     if (!species || scopedEntityIds?.length) return;
@@ -73,7 +73,7 @@ export function EntitiesExploreTab({
   }, [filters, onFiltersChange, scopedEntityIds, species]);
 
   const handleFilterChange = useCallback((next: { entity_types?: string[]; sources?: string[] }) => {
-    const merged: MeilisearchFilters = {
+    const merged: SearchFilters = {
       ...filters,
       ...next,
       ...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {}),
@@ -97,7 +97,7 @@ export function EntitiesExploreTab({
   } = useInfiniteScroll<SearchResult>({
     root: isMobile ? null : scrollRoot,
     fetchData: useCallback(async (offset: number, limit: number) => {
-      const response = await searchMeilisearch({
+      const response = await searchEntities({
         query: query || "",
         index: "search_entities",
         limit,
@@ -110,7 +110,7 @@ export function EntitiesExploreTab({
       });
 
       return {
-        results: (response.hits as SearchResult[]) || [],
+        results: (response.hits as unknown as SearchResult[]) || [],
         totalResults: response.estimatedTotalHits || 0,
       };
     }, [effectiveFilters, query]),
@@ -127,7 +127,7 @@ export function EntitiesExploreTab({
         const facetFilters = { ...effectiveFilters };
         delete facetFilters.ncbi_tax_id;
 
-        const response = await searchMeilisearch({
+        const response = await searchEntities({
           query: query || "",
           index: "search_entities",
           limit: 0,

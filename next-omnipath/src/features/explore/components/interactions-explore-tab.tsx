@@ -7,15 +7,14 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { EntityInfo, fetchEntitiesByIds, searchInteractions } from "@/features/interactions-search/api/queries";
+import { EntityInfo, getEntitiesByIds, searchInteractions } from "@/lib/queries";
 import { DataCard } from "@/features/interactions-search/components/data-card";
 import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
-import GraphView from "@/features/interactions-search/components/graph-view";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatNumber } from "@/lib/utils";
-import { MeilisearchFilters, MeilisearchInteraction } from "@/types/meilisearch";
+import { SearchFilters, InteractionSearchResult } from "@/types/search";
 import { ArrowRight, Filter, Minus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -26,8 +25,8 @@ type ViewMode = "table" | "network";
 type LayoutMode = "search" | "split" | "ontology";
 
 interface InteractionsExploreTabProps {
-  filters: MeilisearchFilters;
-  onFilterChange: (filters: MeilisearchFilters) => void;
+  filters: SearchFilters;
+  onFilterChange: (filters: SearchFilters) => void;
   onFilterCountsUpdate: (counts: Record<string, Record<string, number>>) => void;
   useInternalRefineLayout?: boolean;
   scopedEntityIds?: string[];
@@ -39,7 +38,7 @@ function extractTypeLabel(memberType: string): string {
   return colonIndex > 0 ? memberType.substring(0, colonIndex) : memberType;
 }
 
-function getConsensusSign(interaction: MeilisearchInteraction): 'positive' | 'negative' | null {
+function getConsensusSign(interaction: InteractionSearchResult): 'positive' | 'negative' | null {
   if (interaction.sign === 1) return 'positive';
   if (interaction.sign === -1) return 'negative';
   return null;
@@ -57,7 +56,7 @@ export function InteractionsExploreTab({
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
   const [filterCounts, setFilterCounts] = useState<Record<string, Record<string, number>> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const effectiveFilters = useMemo<MeilisearchFilters>(() => ({
+  const effectiveFilters = useMemo<SearchFilters>(() => ({
     ...filters,
     ...(scopedEntityIds && scopedEntityIds.length > 0
       ? {
@@ -77,7 +76,7 @@ export function InteractionsExploreTab({
     error: infiniteScrollError,
     totalResults,
     sentinelRef
-  } = useInfiniteScroll<MeilisearchInteraction>({
+  } = useInfiniteScroll<InteractionSearchResult>({
     fetchData: useCallback(async (offset: number, limit: number) => {
       const response = await searchInteractions("", effectiveFilters, limit, offset);
 
@@ -106,10 +105,10 @@ export function InteractionsExploreTab({
     root: rootElement
   });
 
-  const [selectedInteraction, setSelectedInteraction] = useState<MeilisearchInteraction | null>(null);
+  const [selectedInteraction, setSelectedInteraction] = useState<InteractionSearchResult | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
-  const [allInteractions, setAllInteractions] = useState<MeilisearchInteraction[]>([]);
+  const [allInteractions, setAllInteractions] = useState<InteractionSearchResult[]>([]);
   const [isLoadingAll, setIsLoadingAll] = useState(false);
   const [hasLoadedGraphData, setHasLoadedGraphData] = useState(false);
   const [entityMap, setEntityMap] = useState<Map<string, EntityInfo>>(new Map());
@@ -142,7 +141,7 @@ export function InteractionsExploreTab({
       const idsToFetch = [...entityIds].filter(id => !entityMap.has(id));
       if (idsToFetch.length === 0) return;
 
-      const newEntities = await fetchEntitiesByIds(idsToFetch);
+      const newEntities = await getEntitiesByIds(idsToFetch);
       console.log('Fetched entities:', Object.fromEntries(newEntities));
       if (newEntities.size > 0) {
         setEntityMap(prev => new Map([...prev, ...newEntities]));
@@ -189,37 +188,10 @@ export function InteractionsExploreTab({
     onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {});
   };
 
-  const handleRowClick = (row: MeilisearchInteraction) => {
+  const handleRowClick = (row: InteractionSearchResult) => {
     setSelectedInteraction(row);
     setDetailsOpen(true);
   };
-
-  // Convert MeilisearchInteraction to format expected by GraphView
-  const convertToGraphViewFormat = useCallback((interactions: MeilisearchInteraction[]) => {
-    return interactions.map((interaction) => {
-      const consensusSign = getConsensusSign(interaction);
-      const typeA = interaction.member_types[0] ? extractTypeLabel(interaction.member_types[0]) : 'Unknown';
-      const typeB = interaction.member_types[1] ? extractTypeLabel(interaction.member_types[1]) : 'Unknown';
-
-      return {
-        id: interaction.interaction_key,
-        entity_a: {
-          id: interaction.member_a_id.toString(),
-          canonical_identifier: interaction.member_a_id.toString(),
-          display_name: `${typeA} ${interaction.member_a_id}`,
-        },
-        entity_b: {
-          id: interaction.member_b_id.toString(),
-          canonical_identifier: interaction.member_b_id.toString(),
-          display_name: `${typeB} ${interaction.member_b_id}`,
-        },
-        has_directed_evidence: interaction.is_directed,
-        consensus_sign: consensusSign,
-        evidence_count: interaction.evidence_count || 0,
-        evidences: []
-      };
-    });
-  }, []);
 
   // Handle export
   const handleExport = useCallback(async () => {
@@ -260,7 +232,7 @@ export function InteractionsExploreTab({
   }, [effectiveFilters]);
 
   // Helper to render sign indicator
-  const renderSignIndicator = (interaction: MeilisearchInteraction) => {
+  const renderSignIndicator = (interaction: InteractionSearchResult) => {
     const consensusSign = getConsensusSign(interaction);
 
     if (interaction.is_directed) {
@@ -452,47 +424,7 @@ export function InteractionsExploreTab({
               </p>
             </div>
           )
-        ) : viewMode === "network" ? (
-          // Graph View
-          <div className="flex-1 overflow-hidden" style={{ minHeight: '500px' }}>
-            {isLoadingAll ? (
-              <div className="flex flex-col items-center justify-center h-full p-8">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mb-4" />
-                <p className="text-muted-foreground">
-                  Loading {formatNumber(Math.min(totalResults, MAX_GRAPH_INTERACTIONS))} interactions...
-                </p>
-              </div>
-            ) : allInteractions.length > 0 ? (
-              <GraphView
-                interactions={convertToGraphViewFormat(allInteractions)}
-                onSelectInteraction={(interaction) => {
-                  const meilisearchInteraction = allInteractions.find(i => i.interaction_key === interaction.id?.toString());
-                  if (meilisearchInteraction) {
-                    setSelectedInteraction(meilisearchInteraction);
-                    setDetailsOpen(true);
-                  }
-                }}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full p-8">
-                <p className="text-muted-foreground mb-4">
-                  {totalResults > 0
-                    ? `No interactions loaded yet`
-                    : "No interactions to visualize"}
-                </p>
-                {totalResults > 0 && !hasLoadedGraphData && (
-                  <Button
-                    onClick={loadAllInteractions}
-                    disabled={isLoadingAll}
-                    size="lg"
-                  >
-                    Load All (max {formatNumber(MAX_GRAPH_INTERACTIONS)})
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        ) : null}
+        )  : null}
       </DataCard>
     </div>
   );

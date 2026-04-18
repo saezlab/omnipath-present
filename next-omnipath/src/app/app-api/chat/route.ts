@@ -3,12 +3,15 @@ import { convertToModelMessages, stepCountIs, streamText, validateUIMessages } f
 import type { UIMessage } from "ai";
 import { z } from "zod";
 import {
-  searchMeilisearch,
-  searchInteractionsMeilisearch,
-  searchAssociationsMeilisearch
-} from "@/lib/meilisearch/search";
-import type { MeilisearchFilters } from "@/types/meilisearch";
-import { INDEXES } from "@/lib/search/indexes";
+  exploreOntologyTree as exploreOntologyTreeQuery,
+  normalizeOntologyFilterValues,
+  resolveEntityIdentifiers as resolveEntityIdentifiersQuery,
+  resolveOntologyTerms as resolveOntologyTermsQuery,
+  searchAssociations,
+  searchEntities,
+  searchInteractions,
+} from "@/lib/queries";
+import type { SearchFilters } from "@/types/search";
 import { getApiServiceUrl } from "@/lib/api/config";
 
 
@@ -37,10 +40,6 @@ interface TermInfo {
   namespace?: string | null;
 }
 
-interface TermsResponse {
-  terms?: Record<string, TermInfo | null>;
-}
-
 interface OntologySearchMatch {
   id: string;
   name?: string | null;
@@ -63,51 +62,6 @@ interface OntologyTreeNode {
   children?: OntologyTreeNode[];
 }
 
-interface OntologyTreeResponse {
-  root?: OntologyTreeNode | null;
-}
-
-const ONTOLOGY_ID_PATTERN = /^(GO|MI|OM|HP|KW):\d+$/;
-
-const normalizeOntologyFilterValues = async (terms: string[] | undefined): Promise<string[] | undefined> => {
-  if (!terms?.length) return undefined;
-
-  const normalizedTerms = terms
-    .map((term) => String(term).trim())
-    .filter((term) => term.length > 0);
-
-  if (normalizedTerms.length === 0) return undefined;
-
-  const idsToResolve = normalizedTerms.filter((term) => ONTOLOGY_ID_PATTERN.test(term));
-  if (idsToResolve.length === 0) return [...new Set(normalizedTerms)];
-
-  try {
-    const response = await fetch(`${getApiServiceUrl()}/terms`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ term_ids: [...new Set(idsToResolve)] }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`API service error: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as TermsResponse;
-    const expandedTerms = new Set<string>(normalizedTerms);
-
-    for (const term of idsToResolve) {
-      const resolved = data.terms?.[term];
-      const name = resolved?.name?.trim();
-      if (name) expandedTerms.add(`${name}:${term}`);
-    }
-
-    return [...expandedTerms];
-  } catch (error) {
-    console.error("Error normalizing ontology filter values:", error);
-    return [...new Set(normalizedTerms)];
-  }
-};
 
 interface AssociationHit {
   id?: string | number;
@@ -194,7 +148,7 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
     }) => {
       console.log(`Searching entities for: ${query}`);
       try {
-        const filters: MeilisearchFilters = {};
+        const filters: SearchFilters = {};
         if (entityTypes?.length) filters.entity_types = entityTypes;
         if (taxonomyIds?.length) filters.ncbi_tax_id = taxonomyIds;
         if (sources?.length) filters.sources = sources;
@@ -203,9 +157,8 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           filters.ontology_terms = normalizedOntologyTerms;
         }
 
-        const data = await searchMeilisearch({
+        const data = await searchEntities({
           query,
-          index: INDEXES.ENTITIES,
           offset: 0,
           filters
         });
@@ -306,18 +259,7 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
       console.log(`Resolving ${identifiers.length} identifiers.`);
       try {
         const normalizedIdentifiers = identifiers.map((identifier) => identifier.trim()).filter((identifier) => identifier.length > 0);
-        const response = await fetch(`${getApiServiceUrl()}/entity-lookup`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identifiers: normalizedIdentifiers }),
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Entity lookup error: ${response.status} ${text}`);
-        }
-
-        const responseData = (await response.json()) as {
+        const responseData = await resolveEntityIdentifiersQuery(normalizedIdentifiers) as {
           matches?: Array<{ identifier: string; entityIds: string[] }>;
           entities?: EntityHit[];
         };
@@ -422,20 +364,15 @@ Prefer searchOntologyTerms first when the user only provides free-text ontology 
       console.log(`Resolving ${termIds.length} ontology terms.`);
       try {
         const normalizedTermIds = termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0);
-        const response = await fetch(`${getApiServiceUrl()}/terms`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ term_ids: normalizedTermIds }),
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`API service error: ${response.status} ${text}`);
-        }
-
-        const data = (await response.json()) as TermsResponse;
+        const data = await resolveOntologyTermsQuery(normalizedTermIds);
         const results = normalizedTermIds.map((termId) => {
-          const term = data.terms?.[termId] || null;
+          const term = data[termId]
+            ? {
+                name: data[termId].label,
+                definition: data[termId].definition,
+                namespace: data[termId].namespace,
+              }
+            : null;
           return {
             termId,
             found: Boolean(term),
@@ -469,19 +406,7 @@ Use this after resolveOntologyTerms when you want to inspect broader or narrower
       console.log(`Building ontology tree for ${termIds.length} terms.`);
       try {
         const normalizedTermIds = termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0);
-        const response = await fetch(`${getApiServiceUrl()}/tree`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ term_ids: normalizedTermIds }),
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`API service error: ${response.status} ${text}`);
-        }
-
-        const data = (await response.json()) as OntologyTreeResponse;
-        const root = data.root || null;
+        const root = await exploreOntologyTreeQuery(normalizedTermIds);
 
         return {
           componentParams: {
@@ -534,7 +459,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
       console.log(`Searching interactions.`);
       try {
         // Build the request with filters
-        const apiFilters: MeilisearchFilters = {};
+        const apiFilters: SearchFilters = {};
 
         // Add entity IDs filter if provided
         if (entityIds && entityIds.length > 0) {
@@ -574,16 +499,9 @@ Do not use broad entity search as a substitute for identifier resolution when an
         if (isNegative) apiFilters.signs = [...(apiFilters.signs || []), -1];
         if (sources?.length) apiFilters.sources = sources;
 
-        const requestParams = {
-          query: "", // Interactions index doesn't support text search
-          offset: 0,
-          index: INDEXES.INTERACTIONS,
-          filters: apiFilters,
-        };
+        const data = await searchInteractions("", apiFilters, 20, 0);
 
-        const data = await searchInteractionsMeilisearch(requestParams);
-
-        const hits = (data.hits || []) as InteractionHit[];
+        const hits = (data.hits || []) as unknown as InteractionHit[];
         console.log(`Interaction search returned ${hits.length} results.`);
 
         // Extract and format facet statistics for AI analysis
@@ -694,7 +612,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
     }) => {
       console.log(`Searching associations.`);
       try {
-        const apiFilters: MeilisearchFilters = {};
+        const apiFilters: SearchFilters = {};
         const normalizedOntologyTerms = await normalizeOntologyFilterValues(ontologyTerms);
 
         if (parentEntityIds?.length) apiFilters.parent_entity_ids = parentEntityIds;
@@ -704,14 +622,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
         if (normalizedOntologyTerms?.length) apiFilters.association_annotation_terms = normalizedOntologyTerms;
         if (sources?.length) apiFilters.sources = sources;
 
-        const requestParams = {
-          query: "",
-          offset: 0,
-          index: INDEXES.ASSOCIATIONS,
-          filters: apiFilters,
-        };
-
-        const data = await searchAssociationsMeilisearch(requestParams);
+        const data = await searchAssociations("", apiFilters, 20, 0);
         const hits = (data.hits || []) as AssociationHit[];
 
         const exampleAssociations = hits.slice(0, 5).map(hit => ({

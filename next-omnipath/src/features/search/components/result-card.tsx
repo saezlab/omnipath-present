@@ -20,6 +20,8 @@ import { MoleculeStructure } from "./molecule_structure";
 import { EntityDetailsDialog } from "./entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
 import { useEntity } from "@/hooks/use-entity";
+import type { EntitySearchResult, Identifier } from "@/types/entities";
+import type { SearchResult } from "@/types/search-results";
 
 // Component that shows a ResultCardContent in a HoverCard for entities
 export function EntityHoverCard({
@@ -226,7 +228,7 @@ const getDescriptionSections = (definition: string | undefined, descriptions: st
 
 // Helper to detect if entity is a small molecule or lipid (displayed similarly)
 const isSmallMolecule = (result: SearchResult): boolean => {
-  const entityType = result._formatted?.entity_type || result.entity_type || '';
+  const entityType = result.entity_type || '';
   // Extract type label from "Label:Accession" format and normalize (remove spaces/underscores)
   const typeLabel = entityType.split(':')[0].toLowerCase().replace(/[\s_]/g, '');
   return typeLabel === 'smallmolecule' ||
@@ -238,74 +240,8 @@ const isSmallMolecule = (result: SearchResult): boolean => {
     !!(result.canonical_smiles || result.formula || result.molecular_weight);
 };
 
-// Identifier object structure from search_entities
-// New format: {key: "type:accession", value: "identifier_value"}
-// e.g., {key: "uniprot:OM:0001", value: "P0A6M2"}
-export type Identifier = { key: string; value: string };
-
-export interface SearchResult {
-  id: string;
-  entity_id?: string | number;  // Canonical entity ID
-  type?: string;
-  _formatted?: {
-    entity_type?: string;        // "Label:entity_id" like "Protein:385235"
-    names?: string[];
-    synonyms?: string[];
-    gene_symbols?: string[];
-    descriptions?: string[];
-    references?: string[];
-    identifiers?: Identifier[];
-    sources?: string[];          // "source_name:source_id"
-    // CV term fields
-    namespace_name?: string;
-    definition?: string;
-    name?: string;
-    [key: string]: unknown;
-  };
-  // Raw fields (non-formatted)
-  entity_type?: string;
-  names?: string[];
-  synonyms?: string[];
-  gene_symbols?: string[];
-  descriptions?: string[];
-  references?: string[];
-  identifiers?: Identifier[];
-  sources?: string[];
-  complexes?: number[];
-  cv_terms?: string[];
-  ontology_terms?: string[];
-  pathways?: number[];
-  reactions?: number[];
-  num_interactions?: number;
-  canonical_identifier?: string | null;
-  canonical_identifier_type?: string | null;
-  // CV term fields
-  namespace_name?: string;
-  definition?: string;
-  name?: string;
-  is_annotated?: boolean;
-  associated_entity_ids?: string[];
-  // Small molecule / compound fields
-  canonical_smiles?: string;
-  formula?: string;
-  molecular_weight?: number;
-  // Source-browser fields
-  source_name?: string;
-  source_ref?: string;
-  source?: string;
-  source_accession?: string;
-  resource_url?: string;
-  resource_description?: string;
-  function_records?: Array<{ function: string; records: number }>;
-  function_names?: string[];
-  content_category_cv_terms?: string[];
-  total_records?: number;
-  license_cv?: string;
-  update_category_cv?: string;
-  pubmed?: string[];
-  finished_at?: string;
-  [key: string]: unknown; // Add index signature for compatibility with DataRow
-}
+export type { EntitySearchResult, Identifier } from "@/types/entities";
+export type { SearchResult } from "@/types/search-results";
 
 // Single identifier badge with copy functionality
 function IdentifierBadge({ id, idx }: { id: { type: string; value: string }; idx: number }) {
@@ -397,19 +333,16 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
 
 // Molecule-specific result card
 function MoleculeResultCard({ result }: { result: SearchResult }) {
-  const entityType = result._formatted?.entity_type || result.entity_type;
+  const entityType = result.entity_type;
   const entityTypeLabel = entityType ? entityType.split(':')[0] : "Small Molecule";
 
   // Memoize identifiers for stable reference in JSX
-  const identifiers = useMemo(() =>
-    result._formatted?.identifiers || result.identifiers || [],
-    [result._formatted?.identifiers, result.identifiers]
-  );
+  const identifiers = useMemo(() => result.identifiers || [], [result.identifiers]);
 
   // Get primary name from names or identifiers, prefer the shortest meaningful name
   const primaryName = useMemo(() => {
-    const names = result._formatted?.names || result.names || [];
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const names = result.names || [];
+    const identifiers = result.identifiers || [];
     const validNames: string[] = [];
 
     // Collect valid names (skip ID-like names)
@@ -440,11 +373,11 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
     }
 
     return `Compound ${result.entity_id || result.id}`;
-  }, [result._formatted?.names, result.names, result._formatted?.identifiers, result.identifiers, result.entity_id, result.id]);
+  }, [result.names, result.identifiers, result.entity_id, result.id]);
 
   // Extract SMILES from identifiers (stored in "biotin tag" identifier type)
   const smiles = useMemo(() => {
-    const identifiers = result._formatted?.identifiers || result.identifiers || [];
+    const identifiers = result.identifiers || [];
     for (const id of identifiers) {
       const idType = id.key?.split(':')[0].toLowerCase().trim();
       if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
@@ -452,7 +385,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       }
     }
     return result.canonical_smiles || null;
-  }, [result._formatted?.identifiers, result.identifiers, result.canonical_smiles]);
+  }, [result.identifiers, result.canonical_smiles]);
 
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const entityId = (result.entity_id ?? result.id)?.toString();
@@ -515,7 +448,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       <EntityDetailsDialog
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        entity={result}
+        entity={result as EntitySearchResult}
       />
 
       {/* Molecule structure visualization */}
@@ -642,8 +575,8 @@ export function ResultCard({ result }: { result: SearchResult }) {
 
   // Get display name for selection
   const getDisplayName = () => {
-    const geneSymbols = result._formatted?.gene_symbols || result.gene_symbols || [];
-    const names = result._formatted?.names || result.names || [];
+    const geneSymbols = result.gene_symbols || [];
+    const names = result.names || [];
     return geneSymbols[0] || names[0] || `Entity ${result.entity_id || result.id}`;
   };
 
@@ -671,32 +604,18 @@ export function ResultCard({ result }: { result: SearchResult }) {
   };
 
   // Extract data based on type
-  const descriptions = (result._formatted?.descriptions && result._formatted.descriptions.length > 0)
-    ? result._formatted.descriptions
-    : (result.descriptions || []);
-  const names = (result._formatted?.names && result._formatted.names.length > 0)
-    ? result._formatted.names
-    : (result.names || []);
-  const geneSymbols = (result._formatted?.gene_symbols && result._formatted.gene_symbols.length > 0)
-    ? result._formatted.gene_symbols
-    : (result.gene_symbols || []);
-  const identifiers = (result._formatted?.identifiers && result._formatted.identifiers.length > 0)
-    ? result._formatted.identifiers
-    : (result.identifiers || []);
-  const synonyms = (result._formatted?.synonyms && result._formatted.synonyms.length > 0)
-    ? result._formatted.synonyms
-    : (result.synonyms || []);
-  const references = (result._formatted?.references && result._formatted.references.length > 0)
-    ? result._formatted.references
-    : (result.references || []);
-  const sources = (result._formatted?.sources && result._formatted.sources.length > 0)
-    ? result._formatted.sources
-    : (result.sources || []);
+  const descriptions = result.descriptions || [];
+  const names = result.names || [];
+  const geneSymbols = result.gene_symbols || [];
+  const identifiers = result.identifiers || [];
+  const synonyms = result.synonyms || [];
+  const references = result.references || [];
+  const sources = result.sources || [];
   const complexes = result.complexes || [];
   const cvTerms = getUnifiedCvTerms(result);
-  const entityType = result._formatted?.entity_type || result.entity_type;
-  const namespaceName = result._formatted?.namespace_name || result.namespace_name;
-  const definition = result._formatted?.definition || result.definition;
+  const entityType = result.entity_type;
+  const namespaceName = result.namespace_name;
+  const definition = result.definition;
   const descriptionSections = getDescriptionSections(definition, descriptions);
 
   // Extract entity type label (e.g., "Protein" from "Protein:385235")
@@ -744,13 +663,13 @@ export function ResultCard({ result }: { result: SearchResult }) {
 
     // Truncate the display name to 8 characters
     const truncatedDisplayName = truncateText(displayName);
-    const formattedDisplayName = result._formatted ? convertEmToHighlight(truncatedDisplayName) : truncatedDisplayName;
+    const formattedDisplayName = truncatedDisplayName;
 
     // Show secondary name in parentheses if available
     if (secondaryName) {
       primaryIdentifier = secondaryName;
       const truncatedPrimaryId = truncateText(primaryIdentifier);
-      title = `${formattedDisplayName} <span class="text-sm text-muted-foreground">(${result._formatted ? convertEmToHighlight(truncatedPrimaryId) : truncatedPrimaryId})</span>`;
+      title = `${formattedDisplayName} <span class="text-sm text-muted-foreground">(${truncatedPrimaryId})</span>`;
     } else {
       title = formattedDisplayName;
     }
@@ -758,9 +677,9 @@ export function ResultCard({ result }: { result: SearchResult }) {
     // Create subtitle from entity type
     subtitle = entityTypeLabel;
   } else if (type === 'cv_term') {
-    const displayName = result._formatted?.name || result.name || `Term ${result.id}`;
+    const displayName = result.name || `Term ${result.id}`;
     const truncatedDisplayName = truncateText(displayName);
-    title = result._formatted ? convertEmToHighlight(truncatedDisplayName) : truncatedDisplayName;
+    title = truncatedDisplayName;
     subtitle = namespaceName || "Ontology Term";
     primaryIdentifier = result.id;
   }
@@ -805,7 +724,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
       <EntityDetailsDialog
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        entity={result}
+        entity={type === 'entity' ? result as EntitySearchResult : null}
       />
 
       {/* Full-screen descriptions dialog */}
@@ -937,18 +856,12 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   const type = result.type || "entity";
 
   // Extract data
-  const descriptions = (result._formatted?.descriptions && result._formatted.descriptions.length > 0)
-    ? result._formatted.descriptions
-    : (result.descriptions || []);
-  const names = (result._formatted?.names && result._formatted.names.length > 0)
-    ? result._formatted.names
-    : (result.names || []);
-  const geneSymbols = (result._formatted?.gene_symbols && result._formatted.gene_symbols.length > 0)
-    ? result._formatted.gene_symbols
-    : (result.gene_symbols || []);
-  const entityType = result._formatted?.entity_type || result.entity_type;
-  const namespaceName = result._formatted?.namespace_name || result.namespace_name;
-  const definition = result._formatted?.definition || result.definition;
+  const descriptions = result.descriptions || [];
+  const names = result.names || [];
+  const geneSymbols = result.gene_symbols || [];
+  const entityType = result.entity_type;
+  const namespaceName = result.namespace_name;
+  const definition = result.definition;
   const descriptionSections = getDescriptionSections(definition, descriptions);
 
   const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
@@ -960,7 +873,7 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
   if (type === 'entity' || type === 'cv_term') {
     const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
     const name = names.length > 0 ? names[0] : undefined;
-    const displayName = result._formatted?.name || result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
+    const displayName = result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
     title = displayName;
     subtitle = namespaceName || entityTypeLabel;
   }

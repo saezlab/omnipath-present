@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 import type { SearchResult } from "@/features/search/components/result-card";
 import {
   normalizeStringArray,
@@ -133,7 +133,7 @@ export function useSearchUrlState() {
 
   const filters = useMemo(() => parseFiltersParam(rawFilters), [rawFilters]);
 
-  const setFilters = useCallback((next: MeilisearchFilters) => {
+  const setFilters = useCallback((next: SearchFilters) => {
     void setRawFilters(serializeFiltersParam(next));
   }, [setRawFilters]);
 
@@ -178,7 +178,7 @@ export function useInteractionsUrlState() {
     void setMultiEntities(serializeEntityIdsParam(normalized));
   }, [setMultiEntities, setSingleEntity]);
 
-  const setFilters = useCallback((next: MeilisearchFilters) => {
+  const setFilters = useCallback((next: SearchFilters) => {
     void setRawFilters(serializeFiltersParam(next));
   }, [setRawFilters]);
 
@@ -205,7 +205,7 @@ export function useSelectionUrlState() {
     void setRawEntities(serializeEntityIdsParam(normalized));
   }, [setRawEntities]);
 
-  const setFilters = useCallback((next: MeilisearchFilters) => {
+  const setFilters = useCallback((next: SearchFilters) => {
     void setRawFilters(serializeFiltersParam(next));
   }, [setRawFilters]);
 

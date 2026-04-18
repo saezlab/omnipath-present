@@ -1,14 +1,12 @@
 "use client"
 
-
 import { useQuery } from "@tanstack/react-query"
-import { fetchSearchDocuments } from "@/features/search/api/queries"
-import { INDEXES } from "@/lib/search/indexes"
+import { getEntityById } from "@/lib/queries"
 import { useEntityDataSource } from "@/contexts/entity-data-source-context"
-import type { SearchResult } from "@/features/search/components/result-card"
+import type { EntitySearchResult } from "@/types/entities"
 
 interface UseEntityResult {
-  data: SearchResult | null
+  data: EntitySearchResult | null
   loading: boolean
   error: Error | null
 }
@@ -28,13 +26,7 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
         return entityDataSource.getEntity(normalizedId)
       }
 
-      const { documents } = await fetchSearchDocuments(
-        INDEXES.ENTITIES,
-        [normalizedId],
-      )
-
-      const hits = (documents as unknown as SearchResult[]) || []
-      return hits.length > 0 ? hits[0] : null
+      return await getEntityById(normalizedId)
     },
     enabled: !!entityId,
   })

@@ -1,4 +1,4 @@
-import type { MeilisearchFilters } from "@/types/meilisearch";
+import type { SearchFilters } from "@/types/search";
 import { buildInteractionsUrl, buildSearchUrl } from "@/lib/navigation/url-codecs";
 import type { ToolResult } from "./components/dual-mode-interface";
 
@@ -12,7 +12,7 @@ export function buildUrlForToolResult(toolResult: ToolResult): string | null {
     case "searchEntities": {
       const query = typeof toolResult.query.query === "string" ? toolResult.query.query : "";
       const filters = toolResult.query.filters && typeof toolResult.query.filters === "object"
-        ? (toolResult.query.filters as MeilisearchFilters)
+        ? (toolResult.query.filters as SearchFilters)
         : {};
       return buildSearchUrl({ query, filters });
     }
