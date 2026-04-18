@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResultCard } from "@/features/search/components/result-card";
-import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search";
+import { fetchSearchDocuments } from "@/features/search/api/queries";
 
 interface EntityDocument {
   id: string;
@@ -60,10 +60,10 @@ interface GraphViewProps {
   onSelectInteraction?: (interaction: InteractionData) => void;
 }
 
-// Fetch entity document from Meilisearch
+// Fetch entity document for graph details
 async function fetchEntityDocument(entityId: string): Promise<EntityDocument | null> {
   try {
-    const response = await fetchMeilisearchDocuments('search_entities', [entityId]);
+    const response = await fetchSearchDocuments('search_entities', [entityId]);
     const documents = response.documents as unknown[];
     const doc = documents?.[0] as EntityDocument;
 

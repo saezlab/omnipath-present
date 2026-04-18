@@ -1,8 +1,12 @@
 "use server";
 
 import { MeilisearchFilters, MeilisearchSearchResponse } from '@/types/meilisearch';
-import { searchInteractionsMeilisearch, fetchMeilisearchDocuments } from '@/lib/meilisearch/search';
-import { INDEXES } from '@/lib/meilisearch/client';
+import {
+  searchInteractionsMeilisearch,
+  fetchMeilisearchDocuments,
+  searchAssociationsMeilisearch,
+} from '@/lib/meilisearch/search';
+import { INDEXES } from '@/lib/search/indexes';
 
 export interface EntityInfo {
   id: string;
@@ -158,6 +162,33 @@ export async function fetchEntitiesByIds(entityIds: string[]): Promise<Map<strin
   } catch (error) {
     console.error('Error fetching entities by IDs:', error);
     return new Map();
+  }
+}
+
+export async function searchAssociations(
+  query: string,
+  filters: MeilisearchFilters,
+  limit: number = 20,
+  offset: number = 0,
+) {
+  try {
+    return await searchAssociationsMeilisearch({
+      query,
+      limit,
+      offset,
+      index: INDEXES.ASSOCIATIONS,
+      filters,
+    });
+  } catch (error) {
+    console.error('Error searching associations:', error);
+    return {
+      hits: [],
+      estimatedTotalHits: 0,
+      limit,
+      offset,
+      processingTimeMs: 0,
+      query,
+    };
   }
 }
 

@@ -8,7 +8,7 @@ import {
   searchAssociationsMeilisearch
 } from "@/lib/meilisearch/search";
 import type { MeilisearchFilters } from "@/types/meilisearch";
-import { INDEXES } from "@/lib/meilisearch/client";
+import { INDEXES } from "@/lib/search/indexes";
 import { getApiServiceUrl } from "@/lib/api/config";
 
 

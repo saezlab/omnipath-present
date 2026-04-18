@@ -1,5 +1,6 @@
+import 'server-only';
 import { Pool } from 'pg';
-import type { SearchResponse } from '@/lib/meilisearch/search';
+import type { SearchResponse } from '@/lib/search/types';
 import type {
   IdentifierEntry,
   MeilisearchAssociation,
@@ -21,12 +22,6 @@ function getPool(): Pool {
     pool = new Pool({ connectionString: DATABASE_URL });
   }
   return pool;
-}
-
-export function shouldUsePostgresSearch(): boolean {
-  const backend = (process.env.SEARCH_BACKEND || '').toLowerCase();
-  if (backend === 'meili' || backend === 'meilisearch') return false;
-  return Boolean(DATABASE_URL);
 }
 
 type SqlParams = unknown[];

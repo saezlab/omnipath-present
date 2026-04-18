@@ -2,8 +2,8 @@
 
 
 import { useQuery } from "@tanstack/react-query"
-import { fetchMeilisearchDocuments } from "@/lib/meilisearch/search"
-import { INDEXES } from "@/lib/meilisearch/client"
+import { fetchSearchDocuments } from "@/features/search/api/queries"
+import { INDEXES } from "@/lib/search/indexes"
 import { useEntityDataSource } from "@/contexts/entity-data-source-context"
 import type { SearchResult } from "@/features/search/components/result-card"
 
@@ -17,7 +17,7 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
   const entityDataSource = useEntityDataSource()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["entity", entityId, entityDataSource ? "custom-source" : "meilisearch"],
+    queryKey: ["entity", entityId, entityDataSource ? "custom-source" : "postgres"],
     queryFn: async () => {
       if (!entityId) return null
 
@@ -28,10 +28,9 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
         return entityDataSource.getEntity(normalizedId)
       }
 
-      const { documents } = await fetchMeilisearchDocuments(
+      const { documents } = await fetchSearchDocuments(
         INDEXES.ENTITIES,
         [normalizedId],
-        "entity_id",
       )
 
       const hits = (documents as unknown as SearchResult[]) || []

@@ -31,8 +31,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import Image from "next/image"
-import { SidebarContentProvider, useSidebarContent } from "@/contexts/sidebar-content-context"
-
+import { useSidebarContent } from "@/contexts/sidebar-content-context"
 
 const navigationItems = [
   {
@@ -77,7 +76,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link href="/" className="flex items-center gap-2">
+              <Link href="/explore" className="flex items-center gap-2">
                 <Image
                   src="/omnipath-logo-gradient.svg"
                   alt="OmniPath Logo"
@@ -121,7 +120,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {(pathname === '/search' || pathname === '/selection' || pathname.startsWith('/explore') || pathname === '/sources' || pathname === '/resources') && sidebarContent && (
+        {((pathname === '/selection' || pathname.startsWith('/explore') || pathname === '/resources') && sidebarContent) && (
           <>
             <div className="px-3">
               <SidebarSeparator />

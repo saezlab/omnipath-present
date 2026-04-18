@@ -1,7 +1,11 @@
 "use server";
 
-import { searchMeilisearch as meilisearchDirectSearch, type SearchResponse } from '@/lib/meilisearch/search';
-import type { IndexName } from '@/lib/meilisearch/client';
+import {
+  fetchMeilisearchDocuments as fetchDocumentsDirect,
+  searchMeilisearch as meilisearchDirectSearch,
+} from '@/lib/meilisearch/search';
+import type { SearchResponse } from '@/lib/search/types';
+import type { IndexName } from '@/lib/search/indexes';
 import type { MeilisearchFilters } from '@/types/meilisearch';
 
 export async function searchMeilisearch({
@@ -39,6 +43,15 @@ export async function searchMeilisearch({
       query,
       facetDistribution: {},
     };
+  }
+}
+
+export async function fetchSearchDocuments(index: IndexName, documentIds: string[]) {
+  try {
+    return await fetchDocumentsDirect(index, documentIds);
+  } catch (e) {
+    console.error("Error fetching documents:", e);
+    return { documents: [] };
   }
 }
 

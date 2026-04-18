@@ -4,13 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ResourceRecord } from "@/lib/resources";
 import { downloadResourceSelection } from "@/lib/resource-downloads";
-import { resourceSupportsAnnotations, resourceSupportsInteractions } from "@/lib/resource-capabilities";
 import { cn, formatNumber } from "@/lib/utils";
 import {
   Check,
   ChevronDown,
   ChevronUp,
-  CirclePlus,
   Copy,
   Database,
   Download,
@@ -127,7 +125,6 @@ function ResourceCard({
     { label: "Annotations", value: resource.annotation_count },
     { label: "Ontology Terms", value: resource.ontology_term_count },
   ].filter((stat) => stat.value > 0);
-  const compactStats = stats.slice(0, 3);
   const canDownloadArchive = resource.build_status === "success" && resource.download_archive_exists;
 
   return (
@@ -179,105 +176,85 @@ function ResourceCard({
         </p>
       </div>
 
-      {compactStats.length > 0 ? (
-        <div className="mt-3 grid grid-cols-2 gap-2.5 border-t border-border/50 pt-3 sm:grid-cols-3">
-          {compactStats.map((stat) => (
-            <div key={`${resource.resource_id}-${stat.label}`} className="rounded-lg bg-muted/15 px-3 py-2">
-              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
-              <div className="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
-            </div>
-          ))}
+      <div className="mt-auto flex flex-col pt-3">
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3">
+          <button
+            type="button"
+            onClick={() => setExpanded((current) => !current)}
+            className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          >
+            {expanded ? (
+              <>
+                Hide details
+                <ChevronUp className="h-4 w-4" />
+              </>
+            ) : (
+              <>
+                More details
+                <ChevronDown className="h-4 w-4" />
+              </>
+            )}
+          </button>
+
+          {canDownloadArchive ? (
+            <Button asChild className="rounded-full">
+              <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
+                Download
+                <Download className="h-4 w-4" />
+              </a>
+            </Button>
+          ) : (
+            <Button className="rounded-full" variant="outline" disabled>
+              Download
+              <Download className="h-4 w-4" />
+            </Button>
+          )}
         </div>
-      ) : null}
 
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/50 pt-3">
-        <button
-          type="button"
-          onClick={() => setExpanded((current) => !current)}
-          className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        >
-          {expanded ? (
-            <>
-              Hide details
-              <ChevronUp className="h-4 w-4" />
-            </>
-          ) : (
-            <>
-              More details
-              <ChevronDown className="h-4 w-4" />
-            </>
-          )}
-        </button>
+        {expanded ? (
+          <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
+            {resource.annotation_ontologies.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {resource.annotation_ontologies.map((ontology) => (
+                  <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
+                ))}
+              </div>
+            ) : null}
 
-        <button
-          type="button"
-          onClick={onToggle}
-          className={cn(
-            "inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
-            selected
-              ? "bg-primary text-primary-foreground"
-              : "border border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground",
-          )}
-        >
-          {selected ? (
-            <>
-              Selected
-              <Check className="h-4 w-4" />
-            </>
-          ) : (
-            <>
-              Select
-              <CirclePlus className="h-4 w-4" />
-            </>
-          )}
-        </button>
-      </div>
+            {stats.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                {stats.map((stat) => (
+                  <div key={`${resource.resource_id}-${stat.label}`} className="rounded-lg bg-muted/15 px-3 py-2">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
+                    <div className="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
-      {expanded ? (
-        <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
-          {resource.annotation_ontologies.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {resource.annotation_ontologies.map((ontology) => (
-                <MiniTag key={`${resource.resource_id}-${ontology}`}>{ontology}</MiniTag>
-              ))}
-            </div>
-          ) : null}
+            <dl className="grid gap-2 text-sm">
+              <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Resource ID</dt>
+                <dd className="max-w-[65%] text-right font-mono text-foreground/90 break-words">{resource.resource_id}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">License</dt>
+                <dd className="max-w-[65%] text-right text-foreground/90 break-words">{resource.license || "—"}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Built</dt>
+                <dd className="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
+                <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
+                <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
+              </div>
+            </dl>
 
-          {stats.length > compactStats.length ? (
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-              {stats.slice(compactStats.length).map((stat) => (
-                <div key={`${resource.resource_id}-${stat.label}`} className="rounded-lg bg-muted/15 px-3 py-2">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</div>
-                  <div className="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <dl className="grid gap-2 text-sm">
-            <div className="flex items-start justify-between gap-4">
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Resource ID</dt>
-              <dd className="max-w-[65%] text-right font-mono text-foreground/90 break-words">{resource.resource_id}</dd>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">License</dt>
-              <dd className="max-w-[65%] text-right text-foreground/90 break-words">{resource.license || "—"}</dd>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Built</dt>
-              <dd className="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
-              <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
-              <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
-            </div>
-          </dl>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1">
               {resource.homepage_url ? (
                 <Link
@@ -302,23 +279,9 @@ function ResourceCard({
                 </Link>
               ) : null}
             </div>
-
-            {canDownloadArchive ? (
-              <Button asChild variant="outline" size="sm">
-                <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
-                  Download
-                  <Download className="h-4 w-4" />
-                </a>
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" disabled>
-                Download
-                <Download className="h-4 w-4" />
-              </Button>
-            )}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -371,26 +334,6 @@ export default function ResourcesPage({
 
   const selectedTotalBytes = useMemo(
     () => selectedResources.reduce((sum, item) => sum + (item.total_size_bytes || 0), 0),
-    [selectedResources],
-  );
-
-  const openInteractionWorkspaceHref = useMemo(() => {
-    const params = new URLSearchParams({ resources: selectedIds.join(",") });
-    return `/duckdb/resources/workspace?${params.toString()}`;
-  }, [selectedIds]);
-
-  const openAnnotationWorkspaceHref = useMemo(() => {
-    const params = new URLSearchParams({ resources: selectedIds.join(",") });
-    return `/duckdb/annotations/workspace?${params.toString()}`;
-  }, [selectedIds]);
-
-  const canOpenInteractionWorkspace = useMemo(
-    () => selectedResources.some((resource) => resourceSupportsInteractions(resource)),
-    [selectedResources],
-  );
-
-  const canOpenAnnotationWorkspace = useMemo(
-    () => selectedResources.some((resource) => resourceSupportsAnnotations(resource)),
     [selectedResources],
   );
 
@@ -519,32 +462,6 @@ export default function ResourcesPage({
                   {downloadingSelection ? "Preparing bundle…" : "Download selection"}
                   <Download className="h-4 w-4" />
                 </Button>
-                {canOpenAnnotationWorkspace ? (
-                  <Button asChild variant="outline">
-                    <Link href={openAnnotationWorkspaceHref}>
-                      Open annotation workspace
-                      <Layers3 className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                ) : (
-                  <Button variant="outline" disabled>
-                    Open annotation workspace
-                    <Layers3 className="h-4 w-4" />
-                  </Button>
-                )}
-                {canOpenInteractionWorkspace ? (
-                  <Button asChild>
-                    <Link href={openInteractionWorkspaceHref}>
-                      Open interaction workspace
-                      <Database className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                ) : (
-                  <Button disabled>
-                    Open interaction workspace
-                    <Database className="h-4 w-4" />
-                  </Button>
-                )}
               </div>
             </div>
           </div>

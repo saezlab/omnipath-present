@@ -1,8 +1,11 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getSiteUrl } from "@/lib/api/config"
-import { INDEXES, meilisearchClient } from "@/lib/meilisearch/client"
 import { headers } from "next/headers"
 import { ExportTryNow, JsonTryNow } from "./try-now"
+import {
+  getEntityFilterFacetDistributionPostgres,
+  getInteractionFilterFacetDistributionPostgres,
+} from "@/lib/postgres-search/search"
 
 export const dynamic = "force-dynamic"
 
@@ -82,99 +85,44 @@ const filters: Record<"entities" | "interactions" | "associations", FilterRow[]>
 
 type FacetOption = { value: string; count?: number }
 
-function mergeFacetOptions(limit: number, ...lists: FacetOption[][]): FacetOption[] {
-  const merged = new Map<string, number>()
-  for (const list of lists) {
-    for (const item of list) {
-      merged.set(item.value, (merged.get(item.value) || 0) + (item.count || 0))
-    }
-  }
-  return Array.from(merged.entries())
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit)
-}
-
 type FacetExamples = {
   entities: Record<string, FacetOption[]>
   interactions: Record<string, FacetOption[]>
   associations: Record<string, FacetOption[]>
 }
 
-async function getFacetExamples(indexName: string, facetName: string, limit = 10): Promise<FacetOption[]> {
-  try {
-    const index = meilisearchClient.index(indexName)
-    const result = await index.searchForFacetValues({
-      facetName,
-      facetQuery: "",
-      limit,
-    })
-
-    return (result.facetHits || [])
-      .map((hit) => ({
-        value: hit.value,
-        count: hit.count,
-      }))
-      .sort((a, b) => (b.count || 0) - (a.count || 0))
-  } catch {
-    return []
-  }
-}
-
-async function getIndexCount(indexName: string, filter?: string): Promise<number> {
-  try {
-    const index = meilisearchClient.index(indexName)
-    const result = await index.search("", {
-      limit: 0,
-      ...(filter ? { filter } : {}),
-    })
-    return result.estimatedTotalHits || 0
-  } catch {
-    return 0
-  }
+function facetMapToOptions(
+  distribution: Record<string, Record<string, number>>,
+  facetName: string,
+  limit = 10,
+): FacetOption[] {
+  return Object.entries(distribution[facetName] || {})
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => (b.count || 0) - (a.count || 0))
+    .slice(0, limit)
 }
 
 async function getAllFacetExamples(): Promise<FacetExamples> {
-  const [
-    entityTypes,
-    entitySources,
-    entityTaxonomy,
-    entityOntologyTerms,
-    interactionTypes,
-    interactionSources,
-    interactionAnnotationTerms,
-    interactionParticipantTerms,
-    associationParentTypes,
-    associationMemberTypes,
-    associationSources,
-    associationAnnotationTerms,
-  ] = await Promise.all([
-    getFacetExamples(INDEXES.ENTITIES, "entity_type"),
-    getFacetExamples(INDEXES.ENTITIES, "sources"),
-    getFacetExamples(INDEXES.ENTITIES, "ncbi_tax_id"),
-    getFacetExamples(INDEXES.ENTITIES, "ontology_terms"),
-    getFacetExamples(INDEXES.INTERACTIONS, "interaction_type"),
-    getFacetExamples(INDEXES.INTERACTIONS, "sources"),
-    getFacetExamples(INDEXES.INTERACTIONS, "interaction_annotation_terms"),
-    getFacetExamples(INDEXES.INTERACTIONS, "participant_annotation_terms"),
-    getFacetExamples(INDEXES.ASSOCIATIONS, "parent_entity_type"),
-    getFacetExamples(INDEXES.ASSOCIATIONS, "member_entity_type"),
-    getFacetExamples(INDEXES.ASSOCIATIONS, "sources"),
-    getFacetExamples(INDEXES.ASSOCIATIONS, "association_annotation_terms"),
+  const [entityFacets, interactionFacets] = await Promise.all([
+    getEntityFilterFacetDistributionPostgres(),
+    getInteractionFilterFacetDistributionPostgres(),
   ])
+
+  const interactionTypes = facetMapToOptions(interactionFacets, "interaction_type")
+  const interactionAnnotationTerms = facetMapToOptions(interactionFacets, "interaction_annotation_terms")
 
   return {
     entities: {
-      entity_types: entityTypes,
-      sources: entitySources,
-      taxonomy_ids: entityTaxonomy,
-      ontology_terms: entityOntologyTerms,
+      entity_types: facetMapToOptions(entityFacets, "entity_type"),
+      sources: facetMapToOptions(entityFacets, "sources"),
+      taxonomy_ids: facetMapToOptions(entityFacets, "ncbi_tax_id"),
+      ontology_terms: facetMapToOptions(entityFacets, "ontology_terms"),
     },
     interactions: {
       interaction_types: interactionTypes,
-      sources: interactionSources,
+      sources: facetMapToOptions(interactionFacets, "sources"),
       interaction_annotation_terms: interactionAnnotationTerms,
-      participant_annotation_terms: interactionParticipantTerms,
+      participant_annotation_terms: facetMapToOptions(interactionFacets, "participant_annotation_terms"),
       direction: [
         { value: "any" },
         { value: "directed" },
@@ -189,11 +137,11 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
       ontology_terms: interactionAnnotationTerms,
     },
     associations: {
-      parent_entity_types: associationParentTypes,
-      member_entity_types: associationMemberTypes,
-      sources: associationSources,
-      association_annotation_terms: associationAnnotationTerms,
-      ontology_terms: associationAnnotationTerms,
+      parent_entity_types: [],
+      member_entity_types: [],
+      sources: [],
+      association_annotation_terms: [],
+      ontology_terms: [],
     },
   }
 }

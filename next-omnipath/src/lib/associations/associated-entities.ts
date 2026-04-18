@@ -1,4 +1,4 @@
-import { INDEXES } from "@/lib/meilisearch/client";
+import { INDEXES } from "@/lib/search/indexes";
 import { searchAssociationsMeilisearch } from "@/lib/meilisearch/search";
 
 export interface AssociatedEntityScope {

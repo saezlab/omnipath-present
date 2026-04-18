@@ -98,32 +98,42 @@ export function buildWorkspaceUrl(params: {
   tab?: SelectionTab;
   filters?: MeilisearchFilters;
 }): string {
+  const view = params.view || "entities";
   const searchParams = new URLSearchParams();
-  searchParams.set("view", params.view || "entities");
+
+  if (view === "selection") {
+    const entityIds = serializeEntityIdsParam(params.entityIds);
+    if (entityIds) searchParams.set("entities", entityIds);
+
+    const annotationIds = serializeEntityIdsParam(params.annotationIds);
+    if (annotationIds) searchParams.set("annotations", annotationIds);
+
+    if (params.query?.trim()) searchParams.set("q", params.query.trim());
+    if (params.tab && params.tab !== "entities") searchParams.set("tab", params.tab);
+
+    const filters = serializeFiltersParam(params.filters);
+    if (filters) searchParams.set("filters", filters);
+
+    return `/selection${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+  }
+
+  searchParams.set("tab", view === "interactions" ? "interactions" : "entities");
 
   if (params.query?.trim()) searchParams.set("q", params.query.trim());
-  if (params.mode && params.mode !== "full-text") searchParams.set("mode", params.mode);
-  if (params.type && params.type !== "search_entities") searchParams.set("type", params.type);
   if (params.species?.trim()) searchParams.set("species", params.species.trim());
-  if (params.entityWorkflow && params.entityWorkflow !== "direct_lookup") searchParams.set("entity_workflow", params.entityWorkflow);
 
   const normalizedEntityIds = normalizeStringArray(params.entityIds);
-  if ((params.view || "entities") === "interactions" && normalizedEntityIds.length === 1) {
+  if (view === "interactions" && normalizedEntityIds.length === 1) {
     searchParams.set("entity", normalizedEntityIds[0]);
   } else {
     const entityIds = serializeEntityIdsParam(normalizedEntityIds);
     if (entityIds) searchParams.set("entities", entityIds);
   }
 
-  const annotationIds = serializeEntityIdsParam(params.annotationIds);
-  if (annotationIds) searchParams.set("annotations", annotationIds);
-
-  if (params.tab && params.tab !== "entities") searchParams.set("tab", params.tab);
-
   const filters = serializeFiltersParam(params.filters);
   if (filters) searchParams.set("filters", filters);
 
-  return `/workspace?${searchParams.toString()}`;
+  return `/explore?${searchParams.toString()}`;
 }
 
 export function buildSearchUrl(params: {

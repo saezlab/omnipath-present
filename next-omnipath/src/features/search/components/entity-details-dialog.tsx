@@ -10,11 +10,10 @@ import type { SearchResult } from "./result-card";
 import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
 import { MeilisearchFilters, MeilisearchAssociation } from "@/types/meilisearch";
-import { searchInteractionsMeilisearch } from "@/lib/meilisearch/search";
+import { searchAssociations, searchInteractions } from "@/features/interactions-search/api/queries";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import SearchPage from "@/features/search/page";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
-import { INDEXES } from "@/lib/meilisearch/client";
 
 interface EntityDetailsDialogProps {
     open: boolean;
@@ -174,30 +173,11 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
         queryFn: async () => {
             const resolvedEntityId = entityId!;
 
-            const interactionsResponse = await searchInteractionsMeilisearch({
-                query: "",
-                index: INDEXES.INTERACTIONS,
-                limit: 1,
-                offset: 0,
-                filters: { entity_ids: [resolvedEntityId] }
-            });
+            const interactionsResponse = await searchInteractions("", { entity_ids: [resolvedEntityId] }, 1, 0);
 
-            const { searchAssociationsMeilisearch } = await import("@/lib/meilisearch/search");
             const [parentsResponse, membersResponse] = await Promise.all([
-                searchAssociationsMeilisearch({
-                    query: "",
-                    index: INDEXES.ASSOCIATIONS,
-                    limit: 10000,
-                    offset: 0,
-                    filters: { member_entity_ids: [resolvedEntityId] }
-                }),
-                searchAssociationsMeilisearch({
-                    query: "",
-                    index: INDEXES.ASSOCIATIONS,
-                    limit: 10000,
-                    offset: 0,
-                    filters: { parent_entity_ids: [resolvedEntityId] }
-                })
+                searchAssociations("", { member_entity_ids: [resolvedEntityId] }, 10000, 0),
+                searchAssociations("", { parent_entity_ids: [resolvedEntityId] }, 10000, 0)
             ]);
 
             const entityIdSet = new Set<string>();

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { searchInteractionsMeilisearch } from "@/lib/meilisearch/search";
+import { searchInteractions } from "@/features/interactions-search/api/queries";
 import { useEntitySelection, useSelectionUrlState } from "@/lib/navigation/url-state";
 import { formatNumber } from "@/lib/utils";
 import { AnnotationBrowserTab } from "@/features/explore/components/annotation-browser-tab";
@@ -33,13 +33,7 @@ export function SelectionResultsView() {
       }
 
       try {
-        const response = await searchInteractionsMeilisearch({
-          query: "",
-          index: "search_interactions",
-          limit: 1,
-          offset: 0,
-          filters: { ...filters, entity_ids: scopedEntityIds },
-        });
+        const response = await searchInteractions("", { ...filters, entity_ids: scopedEntityIds }, 1, 0);
         setInteractionsCount(response.estimatedTotalHits || 0);
       } catch (error) {
         console.error("Error fetching selection interaction counts:", error);

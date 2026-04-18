@@ -1,6 +1,5 @@
 /**
- * Simplified configuration - removed Django dependencies
- * Now only handles Meilisearch and frontend URLs
+ * Runtime configuration for the Next.js app and API service.
  */
 
 // Core configuration from environment
@@ -20,10 +19,6 @@ const API_CONFIG = {
     ? `${PROTOCOL}://${DOMAIN}`
     : `${PROTOCOL}://${DOMAIN}:${PORT}`,
 
-  // Meilisearch URL - use env var or fall back to Docker/local default
-  meilisearchUrl: process.env.MEILISEARCH_HOST
-    || (IS_DOCKERIZED ? 'http://omnipath-meilisearch:7700' : 'http://localhost:7700'),
-
   // API service URL
   apiServiceUrl: process.env.API_SERVICE_URL
     || (IS_DOCKERIZED ? 'http://api-service:8081' : 'http://localhost:8081'),
@@ -39,13 +34,6 @@ const API_CONFIG = {
  */
 export const getSiteUrl = (): string => {
   return API_CONFIG.siteUrl;
-};
-
-/**
- * Get the Meilisearch URL
- */
-export const getMeilisearchUrl = (): string => {
-  return API_CONFIG.meilisearchUrl;
 };
 
 /**
@@ -75,7 +63,6 @@ if (isDevelopment() && typeof window !== 'undefined') {
     environment: ENVIRONMENT,
     domain: DOMAIN,
     siteUrl: API_CONFIG.siteUrl,
-    meilisearchUrl: API_CONFIG.meilisearchUrl,
   });
 }
 

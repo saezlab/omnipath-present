@@ -4,7 +4,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useEntity } from "@/hooks/use-entity";
 import { ResultCard } from "@/features/search/components/result-card";
-import { ResultCard as DuckDbResultCard } from "@/features/duckdb/components/duckdb-result-card";
 import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle } from "lucide-react";
 
 // Map entity types to icons and colors
@@ -42,7 +41,6 @@ interface EntityBadgeProps {
   uniprotId?: string;   // Keep for backward compatibility
   isFormatted?: boolean; // Whether the text contains <em> tags for highlighting
   showHover?: boolean; // Whether to show hover card with entity details
-  hoverCardVariant?: 'default' | 'duckdb';
 }
 
 export const EntityBadge: React.FC<EntityBadgeProps> = ({
@@ -54,7 +52,6 @@ export const EntityBadge: React.FC<EntityBadgeProps> = ({
   uniprotId,
   isFormatted = false,
   showHover = true,
-  hoverCardVariant = 'default'
 }) => {
   // Use new props if provided, fallback to old props for backward compatibility
   const name = displayName || geneSymbol || '';
@@ -163,7 +160,6 @@ export const EntityBadge: React.FC<EntityBadgeProps> = ({
 
   // Wrap with hover card if enabled
   if (showHover) {
-    const HoverResultCard = hoverCardVariant === 'duckdb' ? DuckDbResultCard : ResultCard;
     const wrappedContent = (
       <HoverCard open={isHoverOpen} onOpenChange={setIsHoverOpen}>
         <HoverCardTrigger asChild>
@@ -171,7 +167,7 @@ export const EntityBadge: React.FC<EntityBadgeProps> = ({
         </HoverCardTrigger>
         <HoverCardContent className="w-[450px] p-0 border-0" align="start">
           {entity ? (
-            <HoverResultCard result={{ ...entity, type: 'entity' }} />
+            <ResultCard result={{ ...entity, type: 'entity' }} />
           ) : null}
         </HoverCardContent>
       </HoverCard>
