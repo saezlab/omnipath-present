@@ -1,5 +1,5 @@
-export interface SearchResponse {
-  hits: Record<string, unknown>[];
+export interface SearchResponse<THit = Record<string, unknown>> {
+  hits: THit[];
   estimatedTotalHits: number;
   limit: number;
   offset: number;

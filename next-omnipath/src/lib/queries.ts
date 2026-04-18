@@ -2,25 +2,45 @@
 
 import "server-only";
 
+import { SEARCH_TARGETS, type SearchTarget } from "@/lib/search/collections";
 import {
-  SEARCH_TARGETS,
-  type SearchTarget,
-} from "@/lib/search/collections";
-import {
-  fetchDocuments,
   getInteractionStats as getInteractionStatsData,
   search,
   searchAssociations as searchAssociationsData,
   searchInteractions as searchInteractionsData,
 } from "@/lib/data/search";
 import { getApiServiceUrl } from "@/lib/api/config";
+import {
+  getAnnotationTermCountsForEntityPublicIds,
+  getAssociatedEntityPublicIdsByMemberPublicIds,
+  getAssociationById,
+  getAssociationEvidence,
+  getEntitiesByPks,
+  getEntitiesByPublicIds,
+  getEntityAnnotations,
+  getEntityByPublicId,
+  getEntityIdentifiers,
+  getEntityIdentifiersByEntityPks,
+  getEntityPublicIdsForAnnotationTerms,
+  getEntitySummary,
+  getInteractionAnnotations,
+  getInteractionById,
+  getInteractionCountForEntityPublicIds,
+  getInteractionEvidence,
+  toPublicEntityId,
+} from "@/lib/db/reads";
+import {
+  classifyEntityIdentifiers,
+  getEntityDisplayName,
+  getEntityPublicId,
+  getEntitySecondaryName,
+  getEntityTypeLabel,
+} from "@/lib/entities/display";
 import type { SearchResponse } from "@/lib/search/types";
-import type {
-  InteractionSearchResponse,
-  SearchFilters,
-} from "@/types/search";
-import type { EntitySearchResult } from "@/types/entities";
-import type { SearchResult } from "@/types/search-results";
+import type { SearchFilters } from "@/types/search";
+import type { InteractionDetailsData, InteractionEvidence, InteractionListRow } from "@/features/interactions-search/types";
+import type { AssociationAnnotation, AssociationDetailsData, AssociationEvidence, AssociationListRow } from "@/features/associations/types";
+import type { EntitySearchRow, SearchResult } from "@/types/search-results";
 
 export interface EntityInfo {
   id: string;
@@ -103,56 +123,22 @@ function normalizeOntologyId(value: string): string {
   return `${match[1].toUpperCase()}:${match[2]}`;
 }
 
-function isSmallMoleculeType(entityTypeName: string | undefined): boolean {
-  if (!entityTypeName) return false;
-  const type = entityTypeName.toLowerCase();
-  return type === "smallmolecule"
-    || type === "small_molecule"
-    || type === "compound"
-    || type === "metabolite"
-    || type === "drug"
-    || type === "lipid";
-}
-
-function getShortestName(names: string[] | undefined): string | undefined {
-  if (!names || names.length === 0) return undefined;
-
-  const validNames = names.filter((name) =>
-    !/^(MLS|SMR|cid_|ZINC|SID_|CID_)/i.test(name) && name.length > 3,
-  );
-
-  if (validNames.length > 0) {
-    return validNames.reduce((shortest, current) =>
-      current.length < shortest.length ? current : shortest,
-    );
-  }
-
-  return names[0];
-}
-
 async function browseOntologyTermsFromEntityHits(species: string | undefined, limit: number): Promise<ExploreOntologyTerm[]> {
   const filters: SearchFilters = species ? { ncbi_tax_id: [species] } : {};
   const response = await searchEntities({
     query: "",
-    limit: Math.max(limit * 10, 250),
+    limit: 0,
     offset: 0,
     filters,
-    facets: [],
+    facets: ["ontology_terms"],
   });
 
-  const counts = new Map<string, number>();
-  for (const hit of response.hits || []) {
-    const rawTerms = (hit.ontology_terms || hit.cv_terms) as unknown;
-    const terms = Array.isArray(rawTerms) ? rawTerms : [];
-    for (const term of terms) {
-      const normalized = normalizeOntologyId(String(term));
-      counts.set(normalized, (counts.get(normalized) || 0) + 1);
-    }
-  }
-
-  const entries = Array.from(counts.entries())
+  const counts = Object.entries(response.facetDistribution?.ontology_terms || {})
+    .map(([termId, count]) => [normalizeOntologyId(termId), Number(count || 0)] as const)
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit);
+
+  const entries = counts;
 
   const resolved = await resolveOntologyTerms(entries.map(([termId]) => termId));
 
@@ -187,9 +173,9 @@ export async function searchEntities({
   trackTotalHits?: boolean;
   includeIdentifiers?: boolean;
   includeOntologyTerms?: boolean;
-}): Promise<SearchResponse> {
+}): Promise<SearchResponse<EntitySearchRow>> {
   try {
-    return await search({
+    return await search<EntitySearchRow>({
       query,
       target: target ?? index ?? SEARCH_TARGETS.ENTITIES,
       limit,
@@ -214,29 +200,91 @@ export async function searchEntities({
   }
 }
 
-export async function getEntityDocumentsByIds(target: SearchTarget, documentIds: string[]) {
-  try {
-    return await fetchDocuments(target, documentIds);
-  } catch (error) {
-    console.error("Error fetching documents:", error);
-    return { documents: [] };
-  }
-}
-
-export async function getEntityById(entityId: string): Promise<EntitySearchResult | null> {
+export async function getEntityRowByPublicId(entityId: string) {
   const normalizedId = entityId.trim();
   if (!normalizedId) {
     return null;
   }
 
   try {
-    const { documents } = await fetchDocuments(SEARCH_TARGETS.ENTITIES, [normalizedId]);
-    const entity = documents[0] as unknown as EntitySearchResult | undefined;
-    return entity ?? null;
+    return await getEntityByPublicId(normalizedId);
   } catch (error) {
-    console.error("Error fetching entity by ID:", error);
+    console.error("Error fetching entity row by public ID:", error);
     return null;
   }
+}
+
+export async function getEntityDetailsByPublicId(entityId: string) {
+  const normalizedId = entityId.trim();
+  if (!normalizedId) {
+    return null;
+  }
+
+  try {
+    const entity = await getEntityByPublicId(normalizedId);
+    if (!entity) {
+      return null;
+    }
+
+    const [identifiers, annotations, summary] = await Promise.all([
+      getEntityIdentifiers(entity.entityPk),
+      getEntityAnnotations(entity.entityPk),
+      getEntitySummary(entity.entityPk),
+    ]);
+
+    return {
+      entity,
+      identifiers,
+      annotations,
+      summary,
+    };
+  } catch (error) {
+    console.error("Error fetching entity details by public ID:", error);
+    return null;
+  }
+}
+
+function parseCvValue(value: string | null | undefined): { accession: string; label: string } {
+  const text = (value || "").trim();
+  const parts = text.split(":");
+  if (parts.length < 3) {
+    return { accession: text, label: text };
+  }
+  return {
+    accession: `${parts[0]}:${parts[1]}`,
+    label: parts.slice(2).join(":").trim(),
+  };
+}
+
+function toLegacyLabeledValue(value: string | null | undefined): string {
+  const { accession, label } = parseCvValue(value);
+  if (!accession || !label) return value || "";
+  return `${label.toLowerCase()}:${accession}`;
+}
+
+function mapEvidenceAttributes(
+  attributes: Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined,
+): AssociationAnnotation[] {
+  return (attributes || []).map((item) => ({
+    term: toLegacyLabeledValue(item.term),
+    value: item.value ?? null,
+    unit: item.unit ? toLegacyLabeledValue(item.unit) : null,
+  }));
+}
+
+function mapInteractionEvidenceRows(rows: Awaited<ReturnType<typeof getInteractionEvidence>>): InteractionEvidence[] {
+  return rows.map((row, index) => ({
+    evidence_serial: index + 1,
+    source: row.source,
+    direction: row.direction === 1 ? "a-b" : row.direction === -1 ? "b-a" : row.direction === 0 ? "undirected" : null,
+    sign: row.sign === 1 || row.sign === -1 || row.sign === 0 ? row.sign : null,
+    interaction_annotations: [
+      ...mapEvidenceAttributes(row.recordAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+      ...mapEvidenceAttributes(row.evidence as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+    ],
+    member_a_annotations: mapEvidenceAttributes(row.entityAAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+    member_b_annotations: mapEvidenceAttributes(row.entityBAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+  }));
 }
 
 export async function searchInteractions(
@@ -244,7 +292,7 @@ export async function searchInteractions(
   filters: SearchFilters,
   limit: number = 20,
   offset: number = 0,
-): Promise<InteractionSearchResponse> {
+): Promise<SearchResponse<InteractionListRow>> {
   try {
     const result = await searchInteractionsData({
       query,
@@ -254,13 +302,13 @@ export async function searchInteractions(
     });
 
     return {
-      hits: (result.hits as InteractionSearchResponse["hits"]) || [],
-      estimatedTotalHits: (result.estimatedTotalHits as number) || 0,
+      hits: result.hits || [],
+      estimatedTotalHits: result.estimatedTotalHits || 0,
       limit,
       offset,
-      processingTimeMs: (result.processingTimeMs as number) || 0,
+      processingTimeMs: result.processingTimeMs || 0,
       query,
-      facetDistribution: result.facetDistribution as Record<string, Record<string, number>> | undefined,
+      facetDistribution: result.facetDistribution,
     };
   } catch (error) {
     console.error("Error searching interactions:", error);
@@ -275,6 +323,45 @@ export async function searchInteractions(
   }
 }
 
+export async function getInteractionDetailsById(interactionId: number): Promise<InteractionDetailsData | null> {
+  if (!Number.isFinite(interactionId)) {
+    return null;
+  }
+
+  try {
+    const interaction = await getInteractionById(interactionId);
+    if (!interaction) {
+      return null;
+    }
+
+    const [entities, evidence, interactionAnnotations] = await Promise.all([
+      getEntitiesByPks([interaction.entityAPk, interaction.entityBPk]),
+      getInteractionEvidence(interaction.interactionPk),
+      getInteractionAnnotations(interaction.interactionPk),
+    ]);
+
+    const entityByPk = new Map(entities.map((entity) => [entity.entityPk, entity]));
+    const entityA = entityByPk.get(interaction.entityAPk);
+    const entityB = entityByPk.get(interaction.entityBPk);
+
+    if (!entityA || !entityB) {
+      return null;
+    }
+
+    return {
+      interaction,
+      entityA,
+      entityB,
+      evidence: mapInteractionEvidenceRows(evidence),
+      interactionAnnotations,
+      rawEvidence: evidence,
+    };
+  } catch (error) {
+    console.error("Error fetching interaction details:", error);
+    return null;
+  }
+}
+
 export async function getEntitiesByIds(entityIds: string[]): Promise<Map<string, EntityInfo>> {
   if (entityIds.length === 0) {
     return new Map();
@@ -282,60 +369,35 @@ export async function getEntitiesByIds(entityIds: string[]): Promise<Map<string,
 
   try {
     const uniqueIds = [...new Set(entityIds)];
-    const data = await fetchDocuments(SEARCH_TARGETS.ENTITIES, uniqueIds);
+    const entities = await getEntitiesByPublicIds(uniqueIds);
+    const identifiers = await getEntityIdentifiersByEntityPks(entities.map((entity) => entity.entityPk));
+    const identifiersByEntityPk = new Map<number, typeof identifiers>();
+
+    for (const identifier of identifiers) {
+      const current = identifiersByEntityPk.get(identifier.entityPk) || [];
+      current.push(identifier);
+      identifiersByEntityPk.set(identifier.entityPk, current);
+    }
+
     const entityMap = new Map<string, EntityInfo>();
 
-    for (const doc of data.documents) {
-      const id = String(doc.entity_id);
-      const names = doc.names as string[] | undefined;
-      const geneSymbols = doc.gene_symbols as string[] | undefined;
-      const entityType = doc.entity_type as string | undefined;
-      const identifiers = doc.identifiers as Array<{ key?: string; value?: string }> | undefined;
-      const entityTypeName = entityType?.split(":")[0];
-
-      const getIdentifierByType = (types: string[]): string | undefined => {
-        if (!identifiers) return undefined;
-        for (const identifier of identifiers) {
-          const identifierType = identifier.key?.split(":")[0].toLowerCase();
-          if (identifierType && identifier.value && types.some((type) => identifierType.includes(type))) {
-            return identifier.value;
-          }
-        }
-        return undefined;
+    for (const entity of entities) {
+      const entityWithIdentifiers = {
+        ...entity,
+        identifiers: (identifiersByEntityPk.get(entity.entityPk) || []).map((identifier) => ({
+          key: identifier.identifierType,
+          value: identifier.identifier,
+        })),
       };
+      const publicId = toPublicEntityId(entity);
+      const { geneSymbols } = classifyEntityIdentifiers(entityWithIdentifiers);
 
-      let displayName: string;
-      let canonicalId: string;
-
-      if (isSmallMoleculeType(entityTypeName)) {
-        const shortName = getShortestName(names);
-        const chemblId = getIdentifierByType(["chembl"]);
-        const pubchemId = getIdentifierByType(["pubchem", "cid"]);
-
-        if (chemblId) {
-          displayName = chemblId;
-        } else if (shortName && !/^\d+$/.test(shortName)) {
-          displayName = shortName;
-        } else {
-          displayName = pubchemId || shortName || String(doc.entity_id);
-        }
-
-        canonicalId = chemblId || pubchemId || names?.[0] || String(doc.entity_id);
-      } else if (entityTypeName?.toLowerCase() === "protein") {
-        const uniprotId = getIdentifierByType(["uniprot", "uniprotkb"]);
-        displayName = geneSymbols?.[0] || uniprotId || names?.[0] || String(doc.entity_id);
-        canonicalId = uniprotId || names?.[0] || String(doc.entity_id);
-      } else {
-        displayName = geneSymbols?.[0] || names?.[0] || String(doc.entity_id);
-        canonicalId = names?.[0] || String(doc.entity_id);
-      }
-
-      entityMap.set(id, {
-        id: String(doc.entity_id),
-        canonical_identifier: canonicalId,
-        display_name: displayName,
-        entity_type_name: entityTypeName,
-        gene_symbol: geneSymbols?.[0],
+      entityMap.set(publicId, {
+        id: publicId,
+        canonical_identifier: getEntitySecondaryName(entityWithIdentifiers) || entity.canonicalIdentifier,
+        display_name: getEntityDisplayName(entityWithIdentifiers),
+        entity_type_name: getEntityTypeLabel(entityWithIdentifiers),
+        gene_symbol: geneSymbols[0],
       });
     }
 
@@ -346,12 +408,27 @@ export async function getEntitiesByIds(entityIds: string[]): Promise<Map<string,
   }
 }
 
+function mapAssociationEvidenceRows(rows: Awaited<ReturnType<typeof getAssociationEvidence>>): AssociationEvidence[] {
+  return rows.map((row, index) => ({
+    evidence_serial: index + 1,
+    source: row.source,
+    role_term_id: row.roleTermId ?? null,
+    stoichiometry: row.stoichiometry ?? null,
+    annotations: [
+      ...mapEvidenceAttributes(row.recordAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+      ...mapEvidenceAttributes(row.evidence as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+    ],
+    parent_annotations: mapEvidenceAttributes(row.parentAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+    member_annotations: mapEvidenceAttributes(row.memberAttributes as Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined),
+  }));
+}
+
 export async function searchAssociations(
   query: string,
   filters: SearchFilters,
   limit: number = 20,
   offset: number = 0,
-) {
+): Promise<SearchResponse<AssociationListRow>> {
   try {
     return await searchAssociationsData({
       query,
@@ -369,6 +446,46 @@ export async function searchAssociations(
       processingTimeMs: 0,
       query,
     };
+  }
+}
+
+export async function getAssociationDetailsById(associationId: number): Promise<AssociationDetailsData | null> {
+  if (!Number.isFinite(associationId)) {
+    return null;
+  }
+
+  try {
+    const association = await getAssociationById(associationId);
+    if (!association) {
+      return null;
+    }
+
+    const [entities, evidence, identifiers] = await Promise.all([
+      getEntitiesByPks([association.parentEntityPk, association.memberEntityPk]),
+      getAssociationEvidence(association.associationPk),
+      getEntityIdentifiersByEntityPks([association.parentEntityPk, association.memberEntityPk]),
+    ]);
+
+    const entityByPk = new Map(entities.map((entity) => [entity.entityPk, entity]));
+    const parent = entityByPk.get(association.parentEntityPk);
+    const member = entityByPk.get(association.memberEntityPk);
+
+    if (!parent || !member) {
+      return null;
+    }
+
+    return {
+      association,
+      parent,
+      member,
+      parentIdentifiers: identifiers.filter((identifier) => identifier.entityPk === association.parentEntityPk),
+      memberIdentifiers: identifiers.filter((identifier) => identifier.entityPk === association.memberEntityPk),
+      evidence: mapAssociationEvidenceRows(evidence),
+      rawEvidence: evidence,
+    };
+  } catch (error) {
+    console.error("Error fetching association details:", error);
+    return null;
   }
 }
 
@@ -568,15 +685,8 @@ export async function getAssociatedEntityScope(entityIds: Array<string | number>
     };
   }
 
-  const response = await searchAssociations("", { member_entity_ids: seedEntityIds }, 10000, 0);
-
-  const associatedEntityIds = Array.from(
-    new Set(
-      response.hits
-        .map((hit) => String(hit.parent_entity_id ?? "").trim())
-        .filter((id) => id && !seedEntityIds.includes(id)),
-    ),
-  );
+  const associatedEntityIds = (await getAssociatedEntityPublicIdsByMemberPublicIds(seedEntityIds))
+    .filter((id) => !seedEntityIds.includes(id));
 
   return {
     seedEntityIds,
@@ -589,34 +699,12 @@ export async function getEntityIdsForAnnotationTerms(annotationIds: string[]): P
   const normalized = normalizeIds(annotationIds);
   if (normalized.length === 0) return [];
 
-  const pageSize = 250;
-  const entityIds = new Set<string>();
-  let offset = 0;
-  let total = Infinity;
-
-  while (offset < total) {
-    const response = await searchEntities({
-      query: "",
-      target: SEARCH_TARGETS.ENTITIES,
-      limit: pageSize,
-      offset,
-      filters: { ontology_terms: normalized },
-    });
-
-    const hits = response.hits || [];
-    for (const hit of hits) {
-      const entityId = String(hit.entity_id ?? "").trim();
-      if (entityId) {
-        entityIds.add(entityId);
-      }
-    }
-
-    total = response.estimatedTotalHits || hits.length;
-    if (hits.length < pageSize) break;
-    offset += pageSize;
+  try {
+    return await getEntityPublicIdsForAnnotationTerms(normalized);
+  } catch (error) {
+    console.error("Error fetching entity IDs for annotation terms:", error);
+    return [];
   }
-
-  return Array.from(entityIds);
 }
 
 export async function getScopedAnnotationTerms(
@@ -625,44 +713,25 @@ export async function getScopedAnnotationTerms(
 ): Promise<ScopedAnnotationTerm[]> {
   if (scopedEntityIds.length === 0) return [];
 
-  const pageSize = 250;
-  const counts = new Map<string, number>();
+  try {
+    const counts = await getAnnotationTermCountsForEntityPublicIds(scopedEntityIds, filters);
+    const termIds = counts.map((entry) => entry.cvTerm);
+    if (termIds.length === 0) return [];
 
-  for (let index = 0; index < scopedEntityIds.length; index += pageSize) {
-    const batch = scopedEntityIds.slice(index, index + pageSize);
-    const response = await searchEntities({
-      query: "",
-      target: SEARCH_TARGETS.ENTITIES,
-      limit: batch.length,
-      offset: 0,
-      filters: { ...filters, entity_ids: batch },
-    });
-
-    for (const hit of response.hits || []) {
-      const rawTerms = Array.isArray(hit.ontology_terms)
-        ? hit.ontology_terms
-        : Array.isArray(hit.cv_terms)
-          ? hit.cv_terms
-          : [];
-
-      const uniqueTerms = new Set(rawTerms.map((term) => String(term).trim()).filter(Boolean));
-      uniqueTerms.forEach((term) => counts.set(term, (counts.get(term) || 0) + 1));
-    }
+    const resolved = await resolveOntologyTerms(termIds);
+    return counts
+      .map((entry) => ({
+        id: entry.cvTerm,
+        label: resolved[entry.cvTerm]?.label || entry.cvTerm,
+        namespace: resolved[entry.cvTerm]?.namespace,
+        definition: resolved[entry.cvTerm]?.definition,
+        entityCount: entry.entityCount,
+      }))
+      .sort((a, b) => b.entityCount - a.entityCount || a.label.localeCompare(b.label));
+  } catch (error) {
+    console.error("Error fetching scoped annotation terms:", error);
+    return [];
   }
-
-  const termIds = Array.from(counts.keys());
-  if (termIds.length === 0) return [];
-
-  const resolved = await resolveOntologyTerms(termIds);
-  return termIds
-    .map((termId) => ({
-      id: termId,
-      label: resolved[termId]?.label || termId,
-      namespace: resolved[termId]?.namespace,
-      definition: resolved[termId]?.definition,
-      entityCount: counts.get(termId) || 0,
-    }))
-    .sort((a, b) => b.entityCount - a.entityCount || a.label.localeCompare(b.label));
 }
 
 export async function getInteractionStats() {
@@ -674,8 +743,12 @@ export async function getSelectionInteractionCount(filters: SearchFilters, scope
     return 0;
   }
 
-  const response = await searchInteractions("", { ...filters, entity_ids: scopedEntityIds }, 1, 0);
-  return response.estimatedTotalHits || 0;
+  try {
+    return await getInteractionCountForEntityPublicIds(scopedEntityIds, filters);
+  } catch (error) {
+    console.error("Error fetching selection interaction count:", error);
+    return 0;
+  }
 }
 
 export async function searchResults(params: Parameters<typeof searchEntities>[0]) {
@@ -685,4 +758,5 @@ export async function searchResults(params: Parameters<typeof searchEntities>[0]
 
 export type SearchEntitiesResponse = Awaited<ReturnType<typeof searchEntities>>;
 export type SearchInteractionsResponse = Awaited<ReturnType<typeof searchInteractions>>;
+export type SearchAssociationsResponse = Awaited<ReturnType<typeof searchAssociations>>;
 export type GetEntitiesByIdsResponse = Awaited<ReturnType<typeof getEntitiesByIds>>;

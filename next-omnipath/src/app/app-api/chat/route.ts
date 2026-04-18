@@ -11,7 +11,10 @@ import {
   searchEntities,
   searchInteractions,
 } from "@/lib/queries";
+import { getEntityDisplayName, getEntityTypeLabel, getEntityPublicId } from "@/lib/entities/display";
 import type { SearchFilters } from "@/types/search";
+import type { AssociationListRow } from "@/features/associations/types";
+import type { InteractionListRow } from "@/features/interactions-search/types";
 import { getApiServiceUrl } from "@/lib/api/config";
 
 
@@ -63,28 +66,8 @@ interface OntologyTreeNode {
 }
 
 
-interface AssociationHit {
-  id?: string | number;
-  association_key?: string;
-  parent_entity_id?: string;
-  parent_name?: string;
-  parent_entity_type?: string;
-  member_entity_id?: string;
-  member_name?: string;
-  member_entity_type?: string;
-  [key: string]: unknown;
-}
-
-interface InteractionHit {
-  id: string | number;
-  entity_a_name?: string;
-  entity_a_canonical_id?: string;
-  entity_b_name?: string;
-  entity_b_canonical_id?: string;
-  interaction_types?: Array<{ name?: string }>;
-  evidence_count?: number;
-  [key: string]: unknown;
-}
+type AssociationHit = AssociationListRow;
+type InteractionHit = InteractionListRow;
 
 const requestSchema = z.object({
   messages: z.array(z.unknown()),
@@ -126,6 +109,21 @@ const getEntityType = (hit: EntityHit): string => {
   return "entity";
 };
 
+const getInteractionParticipantsLabel = (hit: InteractionHit): string => {
+  const left = getEntityDisplayName(hit.entityA) || getEntityPublicId(hit.entityA);
+  const right = getEntityDisplayName(hit.entityB) || getEntityPublicId(hit.entityB);
+  return `${left} - ${right}`;
+};
+
+const getInteractionTypeLabel = (hit: InteractionHit): string => {
+  const leftType = getEntityTypeLabel(hit.entityA);
+  const rightType = getEntityTypeLabel(hit.entityB);
+  if (leftType && rightType) {
+    return `${leftType}-${rightType}`;
+  }
+  return "interaction";
+};
+
 // Define the tools
 const tools = {
   searchEntities: {
@@ -163,7 +161,7 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           filters
         });
 
-        const hits = (data.hits || []) as EntityHit[];
+        const hits = (data.hits || []) as unknown as EntityHit[];
         console.log(`Search returned ${hits.length} results.`);
         console.log('Sample hit for preview:', JSON.stringify(hits[0], null, 2));
 
@@ -501,7 +499,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
 
         const data = await searchInteractions("", apiFilters, 20, 0);
 
-        const hits = (data.hits || []) as unknown as InteractionHit[];
+        const hits = (data.hits || []) as InteractionHit[];
         console.log(`Interaction search returned ${hits.length} results.`);
 
         // Extract and format facet statistics for AI analysis
@@ -549,10 +547,10 @@ Do not use broad entity search as a substitute for identifier resolution when an
             .map(([name, count]) => ({ name, count }))
         };
 
-        const exampleInteractions = hits.slice(0, 2).map((hit: InteractionHit) => ({
-          participants: `${hit.entity_a_name || hit.entity_a_canonical_id} - ${hit.entity_b_name || hit.entity_b_canonical_id}`,
-          type: hit.interaction_types?.[0]?.name || 'interaction',
-          evidences: hit.evidence_count || 0
+        const exampleInteractions = hits.slice(0, 2).map((hit) => ({
+          participants: getInteractionParticipantsLabel(hit),
+          type: getInteractionTypeLabel(hit),
+          evidences: hit.interaction.evidenceCount || 0,
         }));
 
         return {
@@ -625,11 +623,11 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
         const data = await searchAssociations("", apiFilters, 20, 0);
         const hits = (data.hits || []) as AssociationHit[];
 
-        const exampleAssociations = hits.slice(0, 5).map(hit => ({
-          parent: hit.parent_name || hit.parent_entity_id,
-          member: hit.member_name || hit.member_entity_id,
-          parentType: hit.parent_entity_type,
-          memberType: hit.member_entity_type,
+        const exampleAssociations = hits.slice(0, 5).map((hit) => ({
+          parent: getEntityDisplayName(hit.parent) || getEntityPublicId(hit.parent),
+          member: getEntityDisplayName(hit.member) || getEntityPublicId(hit.member),
+          parentType: getEntityTypeLabel(hit.parent),
+          memberType: getEntityTypeLabel(hit.member),
         }));
 
         const facetStats = (data.facetDistribution || {}) as Record<string, Record<string, number>>;

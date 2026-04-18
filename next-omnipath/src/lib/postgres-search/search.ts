@@ -1,14 +1,10 @@
 import 'server-only';
 import type { SearchResponse } from '@/lib/search/types';
-import type {
-  AssociationSearchResult,
-  IdentifierEntry,
-  InteractionSearchResult,
-  SearchFilters,
-} from '@/types/search';
+import type { SearchFilters } from '@/types/search';
+import type { InteractionListRow } from '@/features/interactions-search/types';
+import type { AssociationListRow } from '@/features/associations/types';
 import type { Association, Entity, Identifier, Interaction } from '@next-omnipath/drizzle';
-import type { EntitySearchResult } from '@/types/entities';
-import type { SearchResult } from '@/types/search-results';
+import type { EntitySearchRow } from '@/types/search-results';
 import { getPool, schema } from '@/lib/db/client';
 
 const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || 'public';
@@ -51,10 +47,6 @@ function toPublicEntityId(row: Pick<EntityRecord, 'canonicalIdentifierType' | 'c
   return `${type}|${identifier}`;
 }
 
-function normalizeEntityType(value: string | null | undefined): string {
-  return toLegacyLabeledValue(value);
-}
-
 function normalizeEntityTypeFilterValue(value: string | null | undefined): string {
   const text = (value || '').trim();
   if (!text) return '';
@@ -93,139 +85,46 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return out;
 }
 
-function identifierLabel(identifierType: string): string {
-  const text = (identifierType || '').trim();
-  if (!text) return '';
-  const parts = text.split(':');
-
-  // Legacy normalized identifier keys are stored as "label:ACCESSION",
-  // e.g. "gene name primary:OM:0200" or "uniprot:MI:1097".
-  // Raw CV values are stored as "ACCESSION:LABEL",
-  // e.g. "OM:0200:Gene Name Primary" or "MI:1097:Uniprot".
-  if (parts.length >= 3 && !/^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
-    return parts[0].toLowerCase();
-  }
-
-  return parseCvValue(text).label.toLowerCase();
-}
-
-function classifyEntityIdentifiers(identifiers: Array<IdentifierEntry | Identifier>): {
-  names: string[];
-  synonyms: string[];
-  geneSymbols: string[];
-} {
-  const names: string[] = [];
-  const synonyms: string[] = [];
-  const geneSymbols: string[] = [];
-
-  for (const identifier of identifiers) {
-    const label = identifierLabel(identifier.key);
-    const value = identifier.value?.trim();
-    if (!value) continue;
-
-    if (label.includes('gene name primary')) {
-      geneSymbols.push(value);
-      continue;
-    }
-    if (label.includes('gene name synonym')) {
-      synonyms.push(value);
-      continue;
-    }
-    if (label === 'name' || label.endsWith(':name') || label.includes(' entry name')) {
-      names.push(value);
-      continue;
-    }
-    if (label.includes('synonym')) {
-      synonyms.push(value);
-    }
-  }
+function mapEntitySearchRow(row: {
+  entityPk: number;
+  canonicalIdentifier: string;
+  canonicalIdentifierType: string;
+  entityType: string | null;
+  identifiers: unknown;
+  sources: string[] | null;
+  taxonomyId: string | null;
+  entityAttributes: unknown;
+  matchRank?: number | null;
+}): EntitySearchRow {
+  const publicId = toPublicEntityId({
+    canonicalIdentifierType: row.canonicalIdentifierType,
+    canonicalIdentifier: row.canonicalIdentifier,
+  });
 
   return {
-    names: uniqueStrings(names),
-    synonyms: uniqueStrings(synonyms),
-    geneSymbols: uniqueStrings(geneSymbols),
-  };
-}
-
-function mapEntityAttributesToDescriptions(attributes: Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined): string[] {
-  if (!attributes) return [];
-  const preferredKeywords = [
-    'function',
-    'description',
-    'disease',
-    'subcellular location',
-    'pathway',
-    'activity regulation',
-    'tissue specificity',
-    'developmental stage',
-    'note',
-  ];
-
-  const preferred: string[] = [];
-  const fallback: string[] = [];
-
-  for (const attribute of attributes) {
-    const value = attribute?.value?.trim();
-    if (!value) continue;
-    const label = parseCvValue(attribute.term).label.toLowerCase();
-    if (preferredKeywords.some((keyword) => label.includes(keyword))) {
-      preferred.push(value);
-    } else {
-      fallback.push(value);
-    }
-  }
-
-  return uniqueStrings([...preferred, ...fallback]).slice(0, 20);
-}
-
-function mapEntityRow(row: any): EntitySearchResult {
-  const identifiers = ((row.identifiers || []) as Array<{
-    key?: string;
-    value?: string;
-    identifier_type?: string;
-    identifier?: string;
-  }>)
-    .map((item) => ({
-      key: normalizeIdentifierKey(item.key ?? item.identifier_type),
-      value: item.value ?? item.identifier,
-    }))
-    .filter((item): item is { key: string; value: string } => Boolean(item.key && item.value));
-
-  const classified = classifyEntityIdentifiers(identifiers);
-  const names = uniqueStrings(classified.names);
-  const descriptions = mapEntityAttributesToDescriptions(row.entity_attributes);
-  const ontologyTerms = uniqueStrings((row.ontology_terms || []) as string[]);
-  const publicId = toPublicEntityId(row);
-
-  return {
+    entityPk: row.entityPk,
+    canonicalIdentifier: row.canonicalIdentifier,
+    canonicalIdentifierType: row.canonicalIdentifierType,
+    entityType: row.entityType,
+    identifiers: Array.isArray(row.identifiers)
+      ? row.identifiers
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null;
+          const typedItem = item as { key?: string; value?: string; identifier_type?: string; identifier?: string };
+          const key = normalizeIdentifierKey(typedItem.key ?? typedItem.identifier_type);
+          const value = typedItem.value ?? typedItem.identifier;
+          return key && value ? { key, value } : null;
+        })
+        .filter((item): item is Identifier => Boolean(item))
+      : [],
+    sources: uniqueStrings((row.sources || []) as string[]),
+    taxonomyId: row.taxonomyId,
+    entityAttributes: row.entityAttributes,
     id: publicId,
     entity_id: publicId,
     type: 'entity',
-    entity_type: normalizeEntityType(row.entity_type),
-    names,
-    synonyms: classified.synonyms,
-    gene_symbols: classified.geneSymbols,
-    descriptions,
-    references: [],
-    identifiers,
-    sources: uniqueStrings((row.sources || []) as string[]),
-    num_interactions: Number(row.num_interactions || 0),
-    ontology_terms: ontologyTerms,
-    cv_terms: ontologyTerms,
-    ncbi_tax_id: row.taxonomy_id || null,
-    canonical_identifier: row.canonical_identifier || null,
-    canonical_identifier_type: row.canonical_identifier_type || null,
+    matchRank: row.matchRank ?? null,
   };
-}
-
-function mapEvidenceAttributes(
-  attributes: Array<{ term?: string | null; value?: string | null; unit?: string | null }> | null | undefined,
-) {
-  return (attributes || []).map((item) => ({
-    term: toLegacyLabeledValue(item.term),
-    value: item.value ?? null,
-    unit: item.unit ? toLegacyLabeledValue(item.unit) : null,
-  }));
 }
 
 async function loadFacetDistributionFromMaterializedView(viewName: string): Promise<FacetDistribution> {
@@ -417,7 +316,7 @@ export async function searchEntitiesPostgres(params: {
   trackTotalHits?: boolean;
   includeIdentifiers?: boolean;
   includeOntologyTerms?: boolean;
-}): Promise<SearchResponse> {
+}): Promise<SearchResponse<EntitySearchRow>> {
   const {
     query,
     limit = 20,
@@ -426,7 +325,6 @@ export async function searchEntitiesPostgres(params: {
     facets,
     trackTotalHits = true,
     includeIdentifiers = true,
-    includeOntologyTerms = true,
   } = params;
   const client = await getPool().connect();
 
@@ -482,37 +380,33 @@ export async function searchEntitiesPostgres(params: {
          OFFSET ${offsetPlaceholder}
        )
        SELECT
-         e.entity_pk,
-         e.canonical_identifier,
-         e.canonical_identifier_type,
-         e.entity_type,
-         e.taxonomy_id,
-         e.entity_attributes,
-         e.sources,
-         COALESCE(es.interaction_count, 0) AS num_interactions,
+         e.entity_pk AS "entityPk",
+         e.canonical_identifier AS "canonicalIdentifier",
+         e.canonical_identifier_type AS "canonicalIdentifierType",
+         e.entity_type AS "entityType",
          COALESCE(${includeIdentifiers ? 'e.identifiers' : `'[]'::jsonb`}, '[]'::jsonb) AS identifiers,
-         COALESCE(ann.ontology_terms, ARRAY[]::text[]) AS ontology_terms
+         e.sources,
+         e.taxonomy_id AS "taxonomyId",
+         e.entity_attributes AS "entityAttributes",
+         CASE
+           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${exactPlaceholder})` : 'false'} THEN 0
+           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${prefixPlaceholder})` : 'false'} THEN 1
+           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${containsPlaceholder})` : 'false'} THEN 2
+           ELSE NULL
+         END AS "matchRank"
        FROM paged p
        JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_pk = p.entity_pk
-       LEFT JOIN ${SEARCH_SCHEMA}.entity_summary es ON es.entity_pk = e.entity_pk
-       ${includeOntologyTerms ? `LEFT JOIN LATERAL (
-         SELECT array_agg(ea.cv_term ORDER BY ea.cv_term) AS ontology_terms
-         FROM ${SEARCH_SCHEMA}.entity_annotation ea
-         WHERE ea.entity_pk = e.entity_pk
-       ) ann ON true` : `LEFT JOIN LATERAL (
-         SELECT ARRAY[]::text[] AS ontology_terms
-       ) ann ON true`}
        ORDER BY e.entity_pk`,
       queryParams,
     );
 
-    const hits = rowsResult.rows.map(mapEntityRow);
+    const hits = rowsResult.rows.map(mapEntitySearchRow);
     const facetDistribution = offset === 0
       ? await getEntityFilterFacetDistributionPostgres({ query, filters, facets })
       : undefined;
     const estimatedTotalHits = total ?? (offset + hits.length + (hits.length === limit ? 1 : 0));
     return {
-      hits: hits as unknown as Record<string, unknown>[],
+      hits,
       estimatedTotalHits,
       limit,
       offset,
@@ -525,47 +419,31 @@ export async function searchEntitiesPostgres(params: {
   }
 }
 
-async function fetchEntityRowsByPublicIds(publicIds: string[]): Promise<EntitySearchResult[]> {
+async function fetchEntityRowsByPublicIds(publicIds: string[]): Promise<EntitySearchRow[]> {
   if (publicIds.length === 0) return [];
   const client = await getPool().connect();
   try {
     const result = await client.query(
       `SELECT
-         e.entity_pk,
-         e.canonical_identifier,
-         e.canonical_identifier_type,
-         e.entity_type,
-         e.taxonomy_id,
-         e.entity_attributes,
-         e.sources,
-         COALESCE(es.interaction_count, 0) AS num_interactions,
+         e.entity_pk AS "entityPk",
+         e.canonical_identifier AS "canonicalIdentifier",
+         e.canonical_identifier_type AS "canonicalIdentifierType",
+         e.entity_type AS "entityType",
          COALESCE(e.identifiers, '[]'::jsonb) AS identifiers,
-         COALESCE(ann.ontology_terms, ARRAY[]::text[]) AS ontology_terms
+         e.sources,
+         e.taxonomy_id AS "taxonomyId",
+         e.entity_attributes AS "entityAttributes"
        FROM ${SEARCH_SCHEMA}.entity e
-       LEFT JOIN ${SEARCH_SCHEMA}.entity_summary es ON es.entity_pk = e.entity_pk
-       LEFT JOIN LATERAL (
-         SELECT array_agg(ea.cv_term ORDER BY ea.cv_term) AS ontology_terms
-         FROM ${SEARCH_SCHEMA}.entity_annotation ea
-         WHERE ea.entity_pk = e.entity_pk
-       ) ann ON true
        WHERE (e.canonical_identifier_type || '|' || e.canonical_identifier) = ANY($1::text[])
        ORDER BY e.entity_pk`,
       [publicIds],
     );
-    const mapped = result.rows.map(mapEntityRow);
+    const mapped = result.rows.map(mapEntitySearchRow);
     const order = new Map(publicIds.map((id, index) => [id, index]));
-    return mapped.sort((a, b) => (order.get(String(a.entity_id)) ?? 999999) - (order.get(String(b.entity_id)) ?? 999999));
+    return mapped.sort((a, b) => (order.get(a.entity_id) ?? 999999) - (order.get(b.entity_id) ?? 999999));
   } finally {
     client.release();
   }
-}
-
-export async function fetchDocumentsPostgres(indexName: string, documentIds: string[]): Promise<{ documents: Record<string, unknown>[] }> {
-  if (indexName !== 'search_entities') {
-    return { documents: [] };
-  }
-  const documents = await fetchEntityRowsByPublicIds(documentIds);
-  return { documents: documents as unknown as Record<string, unknown>[] };
 }
 
 function buildInteractionWhere(filters: SearchFilters, query: string, params: SqlParams): string[] {
@@ -637,38 +515,37 @@ function buildInteractionWhere(filters: SearchFilters, query: string, params: Sq
   return where;
 }
 
-function mapInteractionRow(row: any): InteractionSearchResult {
-  const memberAId = toPublicEntityId({
-    canonical_identifier_type: row.member_a_identifier_type,
-    canonical_identifier: row.member_a_identifier,
-  });
-  const memberBId = toPublicEntityId({
-    canonical_identifier_type: row.member_b_identifier_type,
-    canonical_identifier: row.member_b_identifier,
-  });
+function mapInteractionListRow(row: any): InteractionListRow {
   return {
-    interaction_id: Number(row.interaction_pk),
-    interaction_key: String(row.interaction_pk),
-    member_a_id: memberAId,
-    member_b_id: memberBId,
-    member_types: [normalizeEntityType(row.member_a_type), normalizeEntityType(row.member_b_type)],
-    interaction_type: `${normalizeEntityType(row.member_a_type)}|${normalizeEntityType(row.member_b_type)}`,
-    is_directed: Boolean(row.is_directed),
-    sign: (row.sign ?? 0) as -1 | 0 | 1,
-    evidence_count: Number(row.evidence_count || 0),
-    sources: uniqueStrings((row.sources || []) as string[]),
-    interaction_annotation_terms: uniqueStrings((row.interaction_annotation_terms || []) as string[]),
-    participant_annotation_terms: uniqueStrings((row.participant_annotation_terms || []) as string[]),
-    evidence: ((row.evidence_rows || []) as any[]).map((item, index) => ({
-      evidence_serial: index + 1,
-      source: item.source,
-      interaction_annotations: [
-        ...mapEvidenceAttributes(item.record_attributes),
-        ...mapEvidenceAttributes(item.evidence),
-      ],
-      member_a_annotations: mapEvidenceAttributes(item.entity_a_attributes),
-      member_b_annotations: mapEvidenceAttributes(item.entity_b_attributes),
-    })),
+    interaction: {
+      interactionPk: Number(row.interaction_pk),
+      entityAPk: Number(row.entity_a_pk),
+      entityBPk: Number(row.entity_b_pk),
+      direction: row.direction ?? null,
+      sign: row.sign ?? 0,
+      evidenceCount: Number(row.evidence_count || 0),
+      sources: uniqueStrings((row.sources || []) as string[]),
+    },
+    entityA: {
+      entityPk: Number(row.entity_a_pk),
+      canonicalIdentifier: row.entity_a_canonical_identifier,
+      canonicalIdentifierType: row.entity_a_canonical_identifier_type,
+      entityType: row.entity_a_type,
+      taxonomyId: row.entity_a_taxonomy_id ?? null,
+      entityAttributes: row.entity_a_attributes ?? null,
+      sources: uniqueStrings((row.entity_a_sources || []) as string[]),
+      identifiers: Array.isArray(row.entity_a_identifiers) ? row.entity_a_identifiers : [],
+    },
+    entityB: {
+      entityPk: Number(row.entity_b_pk),
+      canonicalIdentifier: row.entity_b_canonical_identifier,
+      canonicalIdentifierType: row.entity_b_canonical_identifier_type,
+      entityType: row.entity_b_type,
+      taxonomyId: row.entity_b_taxonomy_id ?? null,
+      entityAttributes: row.entity_b_attributes ?? null,
+      sources: uniqueStrings((row.entity_b_sources || []) as string[]),
+      identifiers: Array.isArray(row.entity_b_identifiers) ? row.entity_b_identifiers : [],
+    },
   };
 }
 
@@ -677,7 +554,7 @@ export async function searchInteractionsPostgres(params: {
   limit?: number;
   offset?: number;
   filters?: SearchFilters;
-}): Promise<SearchResponse> {
+}): Promise<SearchResponse<InteractionListRow>> {
   const { query, limit = 20, offset = 0, filters = {} } = params;
   const client = await getPool().connect();
   try {
@@ -708,46 +585,30 @@ export async function searchInteractionsPostgres(params: {
        )
        SELECT
          i.interaction_pk,
+         i.entity_a_pk,
+         i.entity_b_pk,
+         i.direction,
          i.sign,
          i.evidence_count,
          i.sources,
-         (i.direction IS NOT NULL AND i.direction <> 0) AS is_directed,
-         ea.entity_type AS member_a_type,
-         eb.entity_type AS member_b_type,
-         ea.canonical_identifier AS member_a_identifier,
-         ea.canonical_identifier_type AS member_a_identifier_type,
-         eb.canonical_identifier AS member_b_identifier,
-         eb.canonical_identifier_type AS member_b_identifier_type,
-         COALESCE(ia.interaction_annotation_terms, ARRAY[]::text[]) AS interaction_annotation_terms,
-         COALESCE(pa.participant_annotation_terms, ARRAY[]::text[]) AS participant_annotation_terms,
-         COALESCE(ev.evidence_rows, '[]'::jsonb) AS evidence_rows
+         ea.canonical_identifier AS entity_a_canonical_identifier,
+         ea.canonical_identifier_type AS entity_a_canonical_identifier_type,
+         ea.entity_type AS entity_a_type,
+         ea.taxonomy_id AS entity_a_taxonomy_id,
+         ea.entity_attributes AS entity_a_attributes,
+         ea.sources AS entity_a_sources,
+         COALESCE(ea.identifiers, '[]'::jsonb) AS entity_a_identifiers,
+         eb.canonical_identifier AS entity_b_canonical_identifier,
+         eb.canonical_identifier_type AS entity_b_canonical_identifier_type,
+         eb.entity_type AS entity_b_type,
+         eb.taxonomy_id AS entity_b_taxonomy_id,
+         eb.entity_attributes AS entity_b_attributes,
+         eb.sources AS entity_b_sources,
+         COALESCE(eb.identifiers, '[]'::jsonb) AS entity_b_identifiers
        FROM paged p
        JOIN ${SEARCH_SCHEMA}.interaction i ON i.interaction_pk = p.interaction_pk
        JOIN ${SEARCH_SCHEMA}.entity ea ON ea.entity_pk = i.entity_a_pk
        JOIN ${SEARCH_SCHEMA}.entity eb ON eb.entity_pk = i.entity_b_pk
-       LEFT JOIN LATERAL (
-         SELECT array_agg(cv_term ORDER BY cv_term) AS interaction_annotation_terms
-         FROM ${SEARCH_SCHEMA}.interaction_annotation ia2
-         WHERE ia2.interaction_pk = i.interaction_pk
-       ) ia ON true
-       LEFT JOIN LATERAL (
-         SELECT array_agg(DISTINCT cv_term ORDER BY cv_term) AS participant_annotation_terms
-         FROM ${SEARCH_SCHEMA}.entity_annotation pea
-         WHERE pea.entity_pk IN (i.entity_a_pk, i.entity_b_pk)
-       ) pa ON true
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(
-           jsonb_build_object(
-             'source', ie.source,
-             'record_attributes', ie.record_attributes,
-             'entity_a_attributes', ie.entity_a_attributes,
-             'entity_b_attributes', ie.entity_b_attributes,
-             'evidence', ie.evidence
-           ) ORDER BY ie.source, ie.interaction_pk
-         ) AS evidence_rows
-         FROM ${SEARCH_SCHEMA}.interaction_evidence ie
-         WHERE ie.interaction_pk = i.interaction_pk
-       ) ev ON true
        ORDER BY i.interaction_pk`,
       [...whereParams, limit, offset],
     );
@@ -756,7 +617,7 @@ export async function searchInteractionsPostgres(params: {
       ? await getInteractionFilterFacetDistributionPostgres()
       : undefined;
     return {
-      hits: rowsResult.rows.map(mapInteractionRow) as unknown as Record<string, unknown>[],
+      hits: rowsResult.rows.map(mapInteractionListRow),
       estimatedTotalHits: total,
       limit,
       offset,
@@ -769,49 +630,36 @@ export async function searchInteractionsPostgres(params: {
   }
 }
 
-function mapAssociationRow(row: any): AssociationSearchResult {
-  const parentEntityId = toPublicEntityId({
-    canonical_identifier_type: row.parent_identifier_type,
-    canonical_identifier: row.parent_identifier,
-  });
-  const memberEntityId = toPublicEntityId({
-    canonical_identifier_type: row.member_identifier_type,
-    canonical_identifier: row.member_identifier,
-  });
-
-  const parentIdentifiers = ((row.parent_identifiers || []) as Array<{ key: string; value: string }>)
-    .map((item) => ({ key: normalizeIdentifierKey(item.key), value: item.value }))
-    .filter((item) => item.value);
-  const memberIdentifiers = ((row.member_identifiers || []) as Array<{ key: string; value: string }>)
-    .map((item) => ({ key: normalizeIdentifierKey(item.key), value: item.value }))
-    .filter((item) => item.value);
-
-  const parentNames = classifyEntityIdentifiers(parentIdentifiers).names;
-  const parentGeneSymbols = classifyEntityIdentifiers(parentIdentifiers).geneSymbols;
-  const memberNames = classifyEntityIdentifiers(memberIdentifiers).names;
-  const memberGeneSymbols = classifyEntityIdentifiers(memberIdentifiers).geneSymbols;
-
+function mapAssociationListRow(row: any): AssociationListRow {
   return {
-    association_id: Number(row.association_pk),
-    association_key: String(row.association_pk),
-    parent_entity_id: parentEntityId,
-    parent_entity_type: normalizeEntityType(row.parent_entity_type),
-    parent_name: parentGeneSymbols[0] || parentNames[0] || row.parent_identifier,
-    parent_identifiers: parentIdentifiers,
-    member_entity_id: memberEntityId,
-    member_entity_type: normalizeEntityType(row.member_entity_type),
-    member_name: memberGeneSymbols[0] || memberNames[0] || row.member_identifier,
-    member_identifiers: memberIdentifiers,
-    sources: uniqueStrings((row.sources || []) as string[]),
-    evidence: ((row.evidence_rows || []) as any[]).map((item, index) => ({
-      evidence_serial: index + 1,
-      source: item.source,
-      annotations: [
-        ...mapEvidenceAttributes(item.record_attributes),
-        ...mapEvidenceAttributes(item.evidence),
-      ],
-    })),
-    association_annotation_terms: [],
+    association: {
+      associationPk: Number(row.association_pk),
+      parentEntityPk: Number(row.parent_entity_pk),
+      memberEntityPk: Number(row.member_entity_pk),
+      roleTermId: row.role_term_id ?? null,
+      stoichiometry: row.stoichiometry ?? null,
+      sources: uniqueStrings((row.sources || []) as string[]),
+    },
+    parent: {
+      entityPk: Number(row.parent_entity_pk),
+      canonicalIdentifier: row.parent_canonical_identifier,
+      canonicalIdentifierType: row.parent_canonical_identifier_type,
+      entityType: row.parent_entity_type,
+      taxonomyId: row.parent_taxonomy_id ?? null,
+      entityAttributes: row.parent_attributes ?? null,
+      sources: uniqueStrings((row.parent_sources || []) as string[]),
+      identifiers: Array.isArray(row.parent_identifiers) ? row.parent_identifiers : [],
+    },
+    member: {
+      entityPk: Number(row.member_entity_pk),
+      canonicalIdentifier: row.member_canonical_identifier,
+      canonicalIdentifierType: row.member_canonical_identifier_type,
+      entityType: row.member_entity_type,
+      taxonomyId: row.member_taxonomy_id ?? null,
+      entityAttributes: row.member_attributes ?? null,
+      sources: uniqueStrings((row.member_sources || []) as string[]),
+      identifiers: Array.isArray(row.member_identifiers) ? row.member_identifiers : [],
+    },
   };
 }
 
@@ -858,7 +706,7 @@ export async function searchAssociationsPostgres(params: {
   limit?: number;
   offset?: number;
   filters?: SearchFilters;
-}): Promise<SearchResponse> {
+}): Promise<SearchResponse<AssociationListRow>> {
   const { query, limit = 20, offset = 0, filters = {} } = params;
   const client = await getPool().connect();
   try {
@@ -889,47 +737,35 @@ export async function searchAssociationsPostgres(params: {
        )
        SELECT
          a.association_pk,
+         a.parent_entity_pk,
+         a.member_entity_pk,
+         a.role_term_id,
+         a.stoichiometry,
          a.sources,
+         ep.canonical_identifier AS parent_canonical_identifier,
+         ep.canonical_identifier_type AS parent_canonical_identifier_type,
          ep.entity_type AS parent_entity_type,
-         ep.canonical_identifier AS parent_identifier,
-         ep.canonical_identifier_type AS parent_identifier_type,
+         ep.taxonomy_id AS parent_taxonomy_id,
+         ep.entity_attributes AS parent_attributes,
+         ep.sources AS parent_sources,
+         COALESCE(ep.identifiers, '[]'::jsonb) AS parent_identifiers,
+         em.canonical_identifier AS member_canonical_identifier,
+         em.canonical_identifier_type AS member_canonical_identifier_type,
          em.entity_type AS member_entity_type,
-         em.canonical_identifier AS member_identifier,
-         em.canonical_identifier_type AS member_identifier_type,
-         COALESCE(pid.parent_identifiers, '[]'::jsonb) AS parent_identifiers,
-         COALESCE(mid.member_identifiers, '[]'::jsonb) AS member_identifiers,
-         COALESCE(ev.evidence_rows, '[]'::jsonb) AS evidence_rows
+         em.taxonomy_id AS member_taxonomy_id,
+         em.entity_attributes AS member_attributes,
+         em.sources AS member_sources,
+         COALESCE(em.identifiers, '[]'::jsonb) AS member_identifiers
        FROM paged p
        JOIN ${SEARCH_SCHEMA}.association a ON a.association_pk = p.association_pk
        JOIN ${SEARCH_SCHEMA}.entity ep ON ep.entity_pk = a.parent_entity_pk
        JOIN ${SEARCH_SCHEMA}.entity em ON em.entity_pk = a.member_entity_pk
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(jsonb_build_object('key', ei.identifier_type, 'value', ei.identifier) ORDER BY ei.identifier_type, ei.identifier) AS parent_identifiers
-         FROM ${SEARCH_SCHEMA}.entity_identifier ei
-         WHERE ei.entity_pk = ep.entity_pk
-       ) pid ON true
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(jsonb_build_object('key', ei.identifier_type, 'value', ei.identifier) ORDER BY ei.identifier_type, ei.identifier) AS member_identifiers
-         FROM ${SEARCH_SCHEMA}.entity_identifier ei
-         WHERE ei.entity_pk = em.entity_pk
-       ) mid ON true
-       LEFT JOIN LATERAL (
-         SELECT jsonb_agg(
-           jsonb_build_object(
-             'source', ae.source,
-             'record_attributes', ae.record_attributes,
-             'evidence', ae.evidence
-           ) ORDER BY ae.source, ae.association_pk
-         ) AS evidence_rows
-         FROM ${SEARCH_SCHEMA}.association_evidence ae
-         WHERE ae.association_pk = a.association_pk
-       ) ev ON true
        ORDER BY a.association_pk`,
       [...whereParams, limit, offset],
     );
 
     return {
-      hits: rowsResult.rows.map(mapAssociationRow) as unknown as Record<string, unknown>[],
+      hits: rowsResult.rows.map(mapAssociationListRow),
       estimatedTotalHits: total,
       limit,
       offset,

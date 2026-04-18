@@ -3,12 +3,13 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Search, ArrowRight, Minus, Plus, Layers3, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
-import { InteractionSearchResult, InteractionEvidence, InteractionDirection } from "@/types/search"
+import type { InteractionDetailsData, InteractionDirection, InteractionEvidence, InteractionListRow } from "@/features/interactions-search/types"
+import { getEntityDisplayName, getEntityPublicId, getEntitySecondaryName, getEntityTypeLabel } from "@/lib/entities/display"
 import { CvTermHoverCard } from "@/features/search/components/result-card"
 import { EntityBadge } from "@/components/entity-badge"
 
 interface InteractionDetailsProps {
-  selectedInteraction: InteractionSearchResult | null
+  selectedInteraction: InteractionDetailsData | InteractionListRow | null
 }
 
 function extractLabel(value: string): string {
@@ -25,12 +26,11 @@ function splitLabelAndId(value: string): { label: string; id?: string } {
   };
 }
 
-function getInteractionDirections(interaction: InteractionSearchResult | null): InteractionDirection[] {
+function getInteractionDirections(interaction: InteractionDetailsData | InteractionListRow | null): InteractionDirection[] {
   if (!interaction) return [];
-  if (interaction.directions?.length) return interaction.directions;
   return [{
-    direction: interaction.is_directed ? 'a-b' : 'undirected',
-    sign: interaction.sign,
+    direction: interaction.interaction.direction === 1 ? 'a-b' : interaction.interaction.direction === -1 ? 'b-a' : 'undirected',
+    sign: (interaction.interaction.sign ?? 0) as -1 | 0 | 1,
   }];
 }
 
@@ -178,18 +178,15 @@ const INHIBITORY_PARAMETER_ACCESSIONS = new Set(['MI:0641', 'MI:0643']);
 type EvidenceCombo = { direction: EvidenceDirection; sign: EvidenceSign };
 
 function getEvidenceDirection(evidence: InteractionEvidence): EvidenceDirection {
-  const raw = (evidence as InteractionEvidence & { direction?: unknown }).direction;
+  const raw = evidence.direction;
   if (raw === 'a-b' || raw === 'b-a') return raw;
   if (raw === 'undirected') return 'undirected';
   return null;
 }
 
 function getEvidenceSign(evidence: InteractionEvidence): EvidenceSign {
-  const raw = (evidence as InteractionEvidence & { sign?: unknown }).sign;
+  const raw = evidence.sign;
   if (raw === 1 || raw === -1 || raw === 0) return raw;
-  if (raw === 'positive') return 1;
-  if (raw === 'negative') return -1;
-  if (raw === 'mixed') return 0;
   return null;
 }
 
@@ -210,9 +207,9 @@ function getAnnotationAccessions(
     .filter((value): value is string => Boolean(value));
 }
 
-function getInteractionTypeDirection(interaction: InteractionSearchResult): EvidenceDirection {
-  const typeA = extractLabel(interaction.member_types[0] || '').trim().toLowerCase();
-  const typeB = extractLabel(interaction.member_types[1] || '').trim().toLowerCase();
+function getInteractionTypeDirection(interaction: InteractionDetailsData | InteractionListRow): EvidenceDirection {
+  const typeA = getEntityTypeLabel(interaction.entityA).trim().toLowerCase();
+  const typeB = getEntityTypeLabel(interaction.entityB).trim().toLowerCase();
 
   if (typeA === 'small molecule' && typeB === 'protein') return 'a-b';
   if (typeB === 'small molecule' && typeA === 'protein') return 'b-a';
@@ -229,7 +226,7 @@ function collapseSigns(signs: Set<-1 | 1>, fallbackSign: EvidenceSign = null): E
 }
 
 function inferEvidenceCombos(
-  interaction: InteractionSearchResult,
+  interaction: InteractionDetailsData | InteractionListRow,
   evidence: InteractionEvidence,
 ): EvidenceCombo[] {
   const explicitDirection = getEvidenceDirection(evidence);
@@ -277,12 +274,10 @@ function inferEvidenceCombos(
     return [];
   })));
 
-  const inferred = Array.from(byDirection.entries()).map(([direction, signs]) => ({
+  return Array.from(byDirection.entries()).map(([direction, signs]) => ({
     direction,
     sign: collapseSigns(signs, interactionFallbackSign),
   }));
-
-  return inferred;
 }
 
 function getFallbackCombos(directions: InteractionDirection[]): EvidenceCombo[] {
@@ -335,10 +330,10 @@ function extractAnnotationTerms(evidence: InteractionEvidence[]): string[] {
 }
 
 function buildEvidenceGroups(
-  interaction: InteractionSearchResult,
+  interaction: InteractionDetailsData,
   swap: boolean,
 ): AggregatedEvidenceGroup[] {
-  if (!interaction.evidence?.length) return [];
+  if (!interaction.evidence.length) return [];
 
   const groups = new Map<string, {
     direction: EvidenceDirection;
@@ -418,27 +413,28 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
     if (!selectedInteraction) return "text-gray-500";
     if (overallSign === 'positive') return "text-green-500";
     if (overallSign === 'negative') return "text-red-500";
-    if (overallSign === 'mixed') return "text-orange-500";
     return "text-gray-500";
   }
 
-  const evidenceStats = useMemo(() => {
-    if (!selectedInteraction?.evidence) return null;
+  const detailedInteraction = selectedInteraction && 'evidence' in selectedInteraction ? selectedInteraction : null;
 
-    const allTerms = extractAnnotationTerms(selectedInteraction.evidence);
+  const evidenceStats = useMemo(() => {
+    if (!detailedInteraction?.evidence) return null;
+
+    const allTerms = extractAnnotationTerms(detailedInteraction.evidence);
 
     return {
-      total: selectedInteraction.evidence.length,
+      total: detailedInteraction.evidence.length,
       annotationTerms: allTerms.length,
     };
-  }, [selectedInteraction]);
+  }, [detailedInteraction]);
 
   const swap = shouldSwapMembers(directions);
 
   const evidenceGroups = useMemo(() => {
-    if (!selectedInteraction) return [] as AggregatedEvidenceGroup[];
-    return buildEvidenceGroups(selectedInteraction, swap);
-  }, [selectedInteraction, swap]);
+    if (!detailedInteraction) return [] as AggregatedEvidenceGroup[];
+    return buildEvidenceGroups(detailedInteraction, swap);
+  }, [detailedInteraction, swap]);
 
   if (!selectedInteraction) {
     return (
@@ -454,14 +450,12 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
     )
   }
 
-  const sourceId = swap ? selectedInteraction.member_b_id : selectedInteraction.member_a_id;
-  const targetId = swap ? selectedInteraction.member_a_id : selectedInteraction.member_b_id;
-  const sourceType = swap
-    ? (selectedInteraction.member_types[1] ? extractLabel(selectedInteraction.member_types[1]) : 'Unknown')
-    : (selectedInteraction.member_types[0] ? extractLabel(selectedInteraction.member_types[0]) : 'Unknown');
-  const targetType = swap
-    ? (selectedInteraction.member_types[0] ? extractLabel(selectedInteraction.member_types[0]) : 'Unknown')
-    : (selectedInteraction.member_types[1] ? extractLabel(selectedInteraction.member_types[1]) : 'Unknown');
+  const sourceEntity = swap ? selectedInteraction.entityB : selectedInteraction.entityA;
+  const targetEntity = swap ? selectedInteraction.entityA : selectedInteraction.entityB;
+  const sourceId = getEntityPublicId(sourceEntity);
+  const targetId = getEntityPublicId(targetEntity);
+  const sourceType = getEntityTypeLabel(sourceEntity);
+  const targetType = getEntityTypeLabel(targetEntity);
 
   return (
     <div className="space-y-6 p-4 pb-8">
@@ -469,16 +463,16 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-6">
           <div className="min-w-0">
             <EntityBadge
-              displayName={String(sourceId)}
-              canonicalIdentifier={String(sourceId)}
-              entityId={String(sourceId)}
+              displayName={getEntityDisplayName(sourceEntity)}
+              canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
+              entityId={sourceId}
               entityType={sourceType}
             />
           </div>
 
           <div className="flex flex-col items-center gap-2">
             <div className={cn("flex items-center", getInteractionColor())}>
-              {selectedInteraction.is_directed ? (
+              {selectedInteraction.interaction.direction !== null && selectedInteraction.interaction.direction !== 0 ? (
                 <ArrowRight className="h-8 w-8" />
               ) : (
                 <Minus className="h-8 w-8" />
@@ -495,26 +489,24 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
 
           <div className="min-w-0">
             <EntityBadge
-              displayName={String(targetId)}
-              canonicalIdentifier={String(targetId)}
-              entityId={String(targetId)}
+              displayName={getEntityDisplayName(targetEntity)}
+              canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
+              entityId={targetId}
               entityType={targetType}
             />
           </div>
         </div>
 
-        {evidenceStats && (
-          <div className="grid grid-cols-2 gap-4 border-t pt-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{evidenceStats.total}</div>
-              <div className="text-xs text-muted-foreground">Evidence{evidenceStats.total !== 1 ? 's' : ''}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">{evidenceStats.annotationTerms}</div>
-              <div className="text-xs text-muted-foreground">Annotation Term{evidenceStats.annotationTerms !== 1 ? 's' : ''}</div>
-            </div>
+        <div className="grid grid-cols-2 gap-4 border-t pt-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-primary">{selectedInteraction.interaction.evidenceCount}</div>
+            <div className="text-xs text-muted-foreground">Evidence{selectedInteraction.interaction.evidenceCount !== 1 ? 's' : ''}</div>
           </div>
-        )}
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-600">{evidenceStats?.annotationTerms || 0}</div>
+            <div className="text-xs text-muted-foreground">Annotation Term{(evidenceStats?.annotationTerms || 0) !== 1 ? 's' : ''}</div>
+          </div>
+        </div>
       </div>
 
       <Accordion type="multiple" defaultValue={["evidence"]} className="space-y-4">
@@ -524,85 +516,79 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
               <Layers3 className="h-5 w-5" />
               <span className="font-medium">Aggregated evidence</span>
               <Badge variant="secondary" className="ml-2">
-                {selectedInteraction.evidence?.length || 0}
+                {detailedInteraction?.evidence.length || 0}
               </Badge>
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-4 pb-4">
-            <div className="space-y-4">
-              {evidenceGroups.map((group) => (
-                <div key={group.key} className="rounded-lg border bg-muted/20 p-4">
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary" className="text-xs">
-                        {group.evidenceCount} evidence{group.evidenceCount !== 1 ? 's' : ''}
-                      </Badge>
-                    </div>
-
-                    {group.sourceDatabase && (
-                      <Badge variant="secondary" className="text-xs">
-                        {group.sourceDatabase}
-                      </Badge>
-                    )}
-                  </div>
-
-                  <div className="grid gap-4 lg:grid-cols-3">
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium uppercase tracking-wide text-blue-700">
-                        Source ({sourceId})
+            {detailedInteraction ? (
+              <div className="space-y-4">
+                {evidenceGroups.map((group) => (
+                  <div key={group.key} className="rounded-lg border bg-muted/20 p-4">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {group.evidenceCount} evidence{group.evidenceCount !== 1 ? 's' : ''}
+                        </Badge>
                       </div>
-                      <AnnotationChips
-                        annotations={group.sourceAnnotations}
-                        emptyLabel="No source annotations"
-                      />
+
+                      {group.sourceDatabase && (
+                        <Badge variant="secondary" className="text-xs">
+                          {group.sourceDatabase}
+                        </Badge>
+                      )}
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interaction</div>
-                      <AnnotationChips
-                        annotations={group.interactionAnnotations}
-                        emptyLabel="No interaction-level annotations"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium uppercase tracking-wide text-purple-700">
-                        Target ({targetId})
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium uppercase tracking-wide text-blue-700">
+                          Source ({sourceId})
+                        </div>
+                        <AnnotationChips annotations={group.sourceAnnotations} emptyLabel="No source annotations" />
                       </div>
-                      <AnnotationChips
-                        annotations={group.targetAnnotations}
-                        emptyLabel="No target annotations"
-                      />
+
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interaction</div>
+                        <AnnotationChips annotations={group.interactionAnnotations} emptyLabel="No interaction-level annotations" />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium uppercase tracking-wide text-purple-700">
+                          Target ({targetId})
+                        </div>
+                        <AnnotationChips annotations={group.targetAnnotations} emptyLabel="No target annotations" />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 border-t pt-4">
+                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">PubMed</div>
+                      {group.pubmedIds.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {group.pubmedIds.map((pubmedId) => (
+                            <a
+                              key={pubmedId}
+                              href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs hover:bg-muted"
+                            >
+                              PMID:{pubmedId}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground">No PubMed references available</div>
+                      )}
                     </div>
                   </div>
-
-                  <div className="mt-4 border-t pt-4">
-                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">PubMed</div>
-                    {group.pubmedIds.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {group.pubmedIds.map((pubmedId) => (
-                          <a
-                            key={pubmedId}
-                            href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs hover:bg-muted"
-                          >
-                            PMID:{pubmedId}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">No PubMed references available</div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Loading evidence…</div>
+            )}
           </AccordionContent>
         </AccordionItem>
-
       </Accordion>
     </div>
   )

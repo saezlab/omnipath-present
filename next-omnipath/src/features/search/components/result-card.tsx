@@ -19,8 +19,21 @@ import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { MoleculeStructure } from "./molecule_structure";
 import { EntityDetailsDialog } from "./entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
+import {
+  classifyEntityIdentifiers,
+  getEntityDescriptions,
+  getEntityDisplayName,
+  getEntityIdentifiers,
+  getEntityPublicId,
+  getEntitySecondaryName,
+  getEntitySmiles,
+  getEntityTypeLabel,
+  getEntityTypeValue,
+  isSmallMoleculeEntity,
+  type EntityLike,
+} from "@/lib/entities/display";
 import { useEntity } from "@/hooks/use-entity";
-import type { EntitySearchResult, Identifier } from "@/types/entities";
+import type { Identifier } from "@/types/entities";
 import type { SearchResult } from "@/types/search-results";
 
 // Component that shows a ResultCardContent in a HoverCard for entities
@@ -226,21 +239,9 @@ const getDescriptionSections = (definition: string | undefined, descriptions: st
     .map(([label, items]) => ({ label, items }));
 };
 
-// Helper to detect if entity is a small molecule or lipid (displayed similarly)
-const isSmallMolecule = (result: SearchResult): boolean => {
-  const entityType = result.entity_type || '';
-  // Extract type label from "Label:Accession" format and normalize (remove spaces/underscores)
-  const typeLabel = entityType.split(':')[0].toLowerCase().replace(/[\s_]/g, '');
-  return typeLabel === 'smallmolecule' ||
-    typeLabel === 'compound' ||
-    typeLabel === 'metabolite' ||
-    typeLabel === 'drug' ||
-    typeLabel === 'lipid' ||
-    // Also check if we have molecule-specific data
-    !!(result.canonical_smiles || result.formula || result.molecular_weight);
-};
+const isSmallMolecule = (result: SearchResult): boolean => isSmallMoleculeEntity(result as EntityLike);
 
-export type { EntitySearchResult, Identifier } from "@/types/entities";
+export type { Identifier } from "@/types/entities";
 export type { SearchResult } from "@/types/search-results";
 
 // Single identifier badge with copy functionality
@@ -333,62 +334,14 @@ function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
 
 // Molecule-specific result card
 function MoleculeResultCard({ result }: { result: SearchResult }) {
-  const entityType = result.entity_type;
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Small Molecule";
-
-  // Memoize identifiers for stable reference in JSX
-  const identifiers = useMemo(() => result.identifiers || [], [result.identifiers]);
-
-  // Get primary name from names or identifiers, prefer the shortest meaningful name
-  const primaryName = useMemo(() => {
-    const names = result.names || [];
-    const identifiers = result.identifiers || [];
-    const validNames: string[] = [];
-
-    // Collect valid names (skip ID-like names)
-    for (const name of names) {
-      if (!/^(MLS|SMR|cid_|ZINC|SID_|CID_)/i.test(name) && name.length > 3) {
-        validNames.push(name);
-      }
-    }
-
-    // Try to find names from identifiers
-    for (const id of identifiers) {
-      const idType = id.key?.split(':')[0].toLowerCase();
-      if (idType && ['name', 'common_name', 'preferred_name'].includes(idType) && typeof id.value === 'string') {
-        validNames.push(id.value);
-      }
-    }
-
-    // Return the shortest valid name
-    if (validNames.length > 0) {
-      return validNames.reduce((shortest, current) =>
-        current.length < shortest.length ? current : shortest
-      );
-    }
-
-    // Fallback to first name if all look like IDs
-    if (names.length > 0) {
-      return names[0];
-    }
-
-    return `Compound ${result.entity_id || result.id}`;
-  }, [result.names, result.identifiers, result.entity_id, result.id]);
-
-  // Extract SMILES from identifiers (stored in "biotin tag" identifier type)
-  const smiles = useMemo(() => {
-    const identifiers = result.identifiers || [];
-    for (const id of identifiers) {
-      const idType = id.key?.split(':')[0].toLowerCase().trim();
-      if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
-        return id.value;
-      }
-    }
-    return result.canonical_smiles || null;
-  }, [result.identifiers, result.canonical_smiles]);
+  const entity = result as EntityLike;
+  const entityTypeLabel = getEntityTypeLabel(entity) || "Small Molecule";
+  const identifiers = useMemo(() => getEntityIdentifiers(entity), [entity]);
+  const primaryName = useMemo(() => getEntityDisplayName(entity), [entity]);
+  const smiles = useMemo(() => getEntitySmiles(entity), [entity]);
 
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
-  const entityId = (result.entity_id ?? result.id)?.toString();
+  const entityId = getEntityPublicId(entity);
   const selected = entityId ? isSelected(entityId) : false;
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -448,7 +401,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       <EntityDetailsDialog
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        entity={result as EntitySearchResult}
+        entity={entity}
       />
 
       {/* Molecule structure visualization */}
@@ -511,14 +464,15 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
   );
 }
 
-export function ResultCard({ result }: { result: SearchResult }) {
+export function ResultCard({ result }: { result: SearchResult | EntityLike }) {
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
-  const type = result.type || "entity";
+  const type = ('type' in result && result.type) || "entity";
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [descriptionsOpen, setDescriptionsOpen] = useState(false);
 
   if (type === "source") {
-    const visibleFunctionRecords = (result.function_records || []).filter(
+    const sourceResult = result as SearchResult;
+    const visibleFunctionRecords = (sourceResult.function_records || []).filter(
       (fn) => fn.function?.toLowerCase() !== "resource"
     );
     const cvLabel = (value?: string) => {
@@ -530,12 +484,12 @@ export function ResultCard({ result }: { result: SearchResult }) {
     return (
       <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card">
         <CardHeader className="relative space-y-0 p-3 border-b shrink-0">
-          <CardTitle className="text-lg line-clamp-2">{result.source_name || result.name || result.source_ref}</CardTitle>
+          <CardTitle className="text-lg line-clamp-2">{sourceResult.source_name || sourceResult.name || sourceResult.source_ref}</CardTitle>
         </CardHeader>
 
-        {result.resource_description && (
+        {sourceResult.resource_description && (
           <CardContent className="px-4 py-3 flex-grow min-h-0">
-            <p className="text-sm text-muted-foreground line-clamp-4">{result.resource_description}</p>
+            <p className="text-sm text-muted-foreground line-clamp-4">{sourceResult.resource_description}</p>
           </CardContent>
         )}
 
@@ -543,7 +497,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
           <div className="border-t px-3 py-2 bg-muted/30">
             <div className="flex flex-wrap gap-1.5 text-xs">
               {visibleFunctionRecords.map((fn) => (
-                <Badge key={`${result.id}-${fn.function}`} variant="outline" className="text-xs">
+                <Badge key={`${sourceResult.id}-${fn.function}`} variant="outline" className="text-xs">
                   {fn.function} ({fn.records})
                 </Badge>
               ))}
@@ -553,15 +507,15 @@ export function ResultCard({ result }: { result: SearchResult }) {
 
         <CardFooter className="flex items-center justify-between shrink-0 p-2.5 border-t">
           <div className="flex items-center gap-3 text-sm flex-wrap">
-            {result.total_records !== undefined && (
+            {sourceResult.total_records !== undefined && (
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Database className="h-4 w-4" />
-                <span>{result.total_records}</span>
+                <span>{sourceResult.total_records}</span>
               </div>
             )}
           </div>
           <Badge variant="secondary" className="text-xs">
-            {cvLabel(result.license_cv) || "Source"}
+            {cvLabel(sourceResult.license_cv) || "Source"}
           </Badge>
         </CardFooter>
       </Card>
@@ -569,18 +523,15 @@ export function ResultCard({ result }: { result: SearchResult }) {
   }
 
   // Check if this is a small molecule and render specialized card
-  if (isSmallMolecule(result)) {
-    return <MoleculeResultCard result={result} />;
+  if (isSmallMolecule(result as SearchResult)) {
+    return <MoleculeResultCard result={result as SearchResult} />;
   }
 
-  // Get display name for selection
-  const getDisplayName = () => {
-    const geneSymbols = result.gene_symbols || [];
-    const names = result.names || [];
-    return geneSymbols[0] || names[0] || `Entity ${result.entity_id || result.id}`;
-  };
+  const searchResult = result as SearchResult;
+  const entity = type === 'entity' ? result as EntityLike : null;
+  const getDisplayName = () => entity ? getEntityDisplayName(entity) : `Entity ${searchResult.id}`;
 
-  const entityId = (result.entity_id ?? result.id)?.toString();
+  const entityId = entity ? getEntityPublicId(entity) : (searchResult.entity_id ?? searchResult.id)?.toString();
   const selected = entityId ? isSelected(entityId) : false;
 
   const handleAddToSelection = (e: React.MouseEvent) => {
@@ -593,33 +544,32 @@ export function ResultCard({ result }: { result: SearchResult }) {
     } else {
       addEntity({
         id: entityId,
-        entityId: result.entity_id,
+        entityId: searchResult.entity_id,
         name: getDisplayName(),
-        type: result.entity_type?.split(':')[0] || result.type,
-        cv_terms: getUnifiedCvTerms(result),
-        references: result.references,
-        fullResult: result,
+        type: (entity ? getEntityTypeLabel(entity) : searchResult.entity_type?.split(':')[0]) || searchResult.type,
+        cv_terms: getUnifiedCvTerms(searchResult),
+        references: searchResult.references,
+        fullResult: searchResult,
       });
     }
   };
 
   // Extract data based on type
-  const descriptions = result.descriptions || [];
-  const names = result.names || [];
-  const geneSymbols = result.gene_symbols || [];
-  const identifiers = result.identifiers || [];
-  const synonyms = result.synonyms || [];
-  const references = result.references || [];
-  const sources = result.sources || [];
-  const complexes = result.complexes || [];
-  const cvTerms = getUnifiedCvTerms(result);
-  const entityType = result.entity_type;
-  const namespaceName = result.namespace_name;
-  const definition = result.definition;
+  const descriptions = entity ? getEntityDescriptions(entity) : (searchResult.descriptions || []);
+  const { names, geneSymbols, synonyms } = entity
+    ? classifyEntityIdentifiers(entity)
+    : { names: searchResult.names || [], geneSymbols: searchResult.gene_symbols || [], synonyms: searchResult.synonyms || [] };
+  const identifiers: Identifier[] = entity ? getEntityIdentifiers(entity) : (searchResult.identifiers || []);
+  const references = searchResult.references || [];
+  const sources = searchResult.sources || entity?.sources || [];
+  const complexes = searchResult.complexes || [];
+  const cvTerms = getUnifiedCvTerms(searchResult);
+  const entityType = entity ? getEntityTypeValue(entity) : searchResult.entity_type;
+  const namespaceName = searchResult.namespace_name;
+  const definition = searchResult.definition;
   const descriptionSections = getDescriptionSections(definition, descriptions);
 
-  // Extract entity type label (e.g., "Protein" from "Protein:385235")
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
+  const entityTypeLabel = entity ? getEntityTypeLabel(entity) : (entityType ? entityType.split(':')[0] : "Entity");
   const hasMiddleContent = descriptionSections.length > 0;
 
   // Helper function to truncate text to max characters
@@ -633,62 +583,32 @@ export function ResultCard({ result }: { result: SearchResult }) {
   let subtitle = "";
   let primaryIdentifier = "";
 
-  if (type === 'entity') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
-    const firstIdentifier = identifiers.length > 0 ? identifiers[0].value : undefined;
-
-    // For proteins: prefer gene symbol, then UniProt identifier
-    // For other entities: gene_symbols > names > first identifier
-    const isProtein = entityTypeLabel.toLowerCase() === 'protein';
-
-    let displayName: string;
-    let secondaryName: string | undefined;
-
-    if (isProtein) {
-      const canonicalIdentifier = typeof result.canonical_identifier === 'string' ? result.canonical_identifier : undefined;
-
-      // For proteins: primary gene symbol first, canonical identifier as support/fallback
-      displayName = geneSymbol || name || canonicalIdentifier || firstIdentifier || `Entity ${result.id}`;
-      if (geneSymbol && canonicalIdentifier && geneSymbol !== canonicalIdentifier) {
-        secondaryName = canonicalIdentifier;
-      }
-    } else {
-      // Original logic for non-proteins
-      displayName = geneSymbol || name || firstIdentifier || `Entity ${result.id}`;
-      if (geneSymbol && name && geneSymbol !== name) {
-        secondaryName = name;
-      }
-    }
-
-    // Truncate the display name to 8 characters
+  if (type === 'entity' && entity) {
+    const displayName = getEntityDisplayName(entity);
+    const secondaryName = getEntitySecondaryName(entity);
     const truncatedDisplayName = truncateText(displayName);
-    const formattedDisplayName = truncatedDisplayName;
 
-    // Show secondary name in parentheses if available
     if (secondaryName) {
       primaryIdentifier = secondaryName;
       const truncatedPrimaryId = truncateText(primaryIdentifier);
-      title = `${formattedDisplayName} <span class="text-sm text-muted-foreground">(${truncatedPrimaryId})</span>`;
+      title = `${truncatedDisplayName} <span class="text-sm text-muted-foreground">(${truncatedPrimaryId})</span>`;
     } else {
-      title = formattedDisplayName;
+      title = truncatedDisplayName;
     }
 
-    // Create subtitle from entity type
     subtitle = entityTypeLabel;
   } else if (type === 'cv_term') {
-    const displayName = result.name || `Term ${result.id}`;
+    const displayName = searchResult.name || `Term ${searchResult.id}`;
     const truncatedDisplayName = truncateText(displayName);
     title = truncatedDisplayName;
     subtitle = namespaceName || "Ontology Term";
-    primaryIdentifier = result.id;
+    primaryIdentifier = searchResult.id;
   }
 
   // Stats
-  const interactionCount = result.num_interactions || 0;
-  const entityCount = result.associated_entity_ids?.length || 0;
-
-
+  const interactionCount = searchResult.num_interactions || 0;
+  const entityCount = searchResult.associated_entity_ids?.length || 0;
+  const resultKey = entity ? getEntityPublicId(entity) : searchResult.id;
 
   return (
     <Card className="flex flex-col hover:shadow-md transition-shadow h-full result-card group relative">
@@ -724,7 +644,7 @@ export function ResultCard({ result }: { result: SearchResult }) {
       <EntityDetailsDialog
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        entity={type === 'entity' ? result as EntitySearchResult : null}
+        entity={entity}
       />
 
       {/* Full-screen descriptions dialog */}
@@ -736,13 +656,13 @@ export function ResultCard({ result }: { result: SearchResult }) {
           <ScrollArea className="flex-1 px-6 py-4">
             <div className="space-y-6">
               {descriptionSections.map((section) => (
-                <section key={`${result.id}-description-section-${section.label}`} className="space-y-2">
+                <section key={`${resultKey}-description-section-${section.label}`} className="space-y-2">
                   <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                     {section.label}
                   </h3>
                   <div className="space-y-2">
                     {section.items.map((item, idx) => (
-                      <p key={`${result.id}-description-section-item-${section.label}-${idx}`} className="text-sm leading-relaxed text-foreground">
+                      <p key={`${resultKey}-description-section-item-${section.label}-${idx}`} className="text-sm leading-relaxed text-foreground">
                         <span dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
                       </p>
                     ))}
@@ -772,12 +692,12 @@ export function ResultCard({ result }: { result: SearchResult }) {
               >
                 <div className="min-w-0 max-w-full space-y-3 pr-1 text-sm text-muted-foreground">
                   {descriptionSections.map((section) => (
-                    <div key={`${result.id}-description-preview-${section.label}`} className="min-w-0 max-w-full space-y-1">
+                    <div key={`${resultKey}-description-preview-${section.label}`} className="min-w-0 max-w-full space-y-1">
                       <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
                         {section.label}
                       </h4>
                       {section.items.map((item, index) => (
-                        <p key={`${result.id}-description-preview-item-${section.label}-${index}`} className="max-w-full whitespace-normal break-words">
+                        <p key={`${resultKey}-description-preview-item-${section.label}-${index}`} className="max-w-full whitespace-normal break-words">
                           <span className="whitespace-normal break-words" dangerouslySetInnerHTML={{ __html: convertEmToHighlight(item) }} />
                         </p>
                       ))}
@@ -852,29 +772,26 @@ export function ResultCard({ result }: { result: SearchResult }) {
  * Compact content version of ResultCard for use in hover cards.
  * Displays title, definition/description, and entity type without Card wrapper.
  */
-export function ResultCardContent({ result }: { result: SearchResult }) {
-  const type = result.type || "entity";
+export function ResultCardContent({ result }: { result: SearchResult | EntityLike }) {
+  const type = ('type' in result && result.type) || "entity";
+  const entity = type === 'entity' ? result as EntityLike : null;
 
-  // Extract data
-  const descriptions = result.descriptions || [];
-  const names = result.names || [];
-  const geneSymbols = result.gene_symbols || [];
-  const entityType = result.entity_type;
-  const namespaceName = result.namespace_name;
-  const definition = result.definition;
+  const descriptions = entity ? getEntityDescriptions(entity) : ((result as SearchResult).descriptions || []);
+  const namespaceName = 'namespace_name' in result ? result.namespace_name : undefined;
+  const definition = 'definition' in result ? result.definition : undefined;
   const descriptionSections = getDescriptionSections(definition, descriptions);
+  const entityTypeLabel = entity ? getEntityTypeLabel(entity) : "Entity";
 
-  const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
-
-  // Determine title
   let title = "";
   let subtitle = "";
+  const resultKey = entity ? getEntityPublicId(entity) : ('id' in result ? result.id : 'entity');
 
-  if (type === 'entity' || type === 'cv_term') {
-    const geneSymbol = geneSymbols.length > 0 ? geneSymbols[0] : undefined;
-    const name = names.length > 0 ? names[0] : undefined;
-    const displayName = result.name || geneSymbol || name || `Entity ${result.entity_id || result.id}`;
-    title = displayName;
+  if (type === 'entity' && entity) {
+    title = getEntityDisplayName(entity);
+    subtitle = entityTypeLabel;
+  } else if (type === 'cv_term') {
+    const searchResult = result as SearchResult;
+    title = searchResult.name || `Term ${searchResult.id}`;
     subtitle = namespaceName || entityTypeLabel;
   }
 
@@ -895,10 +812,10 @@ export function ResultCardContent({ result }: { result: SearchResult }) {
         <div className="h-24 overflow-y-auto">
           <div className="space-y-2 pr-2">
             {descriptionSections.map((section) => (
-              <div key={`${result.id}-hover-description-section-${section.label}`} className="space-y-1">
+              <div key={`${resultKey}-hover-description-section-${section.label}`} className="space-y-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground/70">{section.label}</p>
                 {section.items.slice(0, 1).map((item, index) => (
-                  <p key={`${result.id}-hover-description-${section.label}-${index}`} className="text-xs text-muted-foreground">
+                  <p key={`${resultKey}-hover-description-${section.label}-${index}`} className="text-xs text-muted-foreground">
                     {item}
                   </p>
                 ))}

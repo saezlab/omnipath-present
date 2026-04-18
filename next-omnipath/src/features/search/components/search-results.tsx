@@ -1,10 +1,12 @@
 "use client"
 import React from "react";
-import { ResultCard, type SearchResult } from "./result-card";
 import Link from "next/link";
+import { getEntityPublicId, type EntityLike } from "@/lib/entities/display";
+import type { SearchResult } from "@/types/search-results";
+import { ResultCard } from "./result-card";
 
 interface SearchResultsProps {
-  results: Array<SearchResult>;
+  results: Array<SearchResult | EntityLike>;
   loading?: boolean;
   loadingMore?: boolean;
   hasMore?: boolean;
@@ -39,20 +41,21 @@ export function SearchResults({
     <div className="w-full">
       <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }} id="resultsGrid">
         {results.map((result, i) => {
-          const resultType = result.type ?? 'entity';
+          const resultType = ('type' in result ? result.type : undefined) ?? 'entity';
+          const resultId = 'id' in result ? result.id : getEntityPublicId(result);
+          const entityId = ('entity_id' in result ? result.entity_id : undefined) ?? resultId;
           let href: string | undefined;
 
           if (resultType === 'cv_term') {
-            href = `/cv_term/${result.id}`;
+            href = resultId ? `/cv_term/${resultId}` : undefined;
           } else if (resultType === 'entity') {
             href = undefined;
           } else {
             // Fallback to explore with entity filter
-            const entityId = result.entity_id ?? result.id;
             href = entityId ? `/explore?entity=${entityId}` : `/explore`;
           }
 
-          const key = (result.entity_id || result.id || i)?.toString();
+          const key = (entityId || resultId || i)?.toString();
 
           if (!href) {
             return (

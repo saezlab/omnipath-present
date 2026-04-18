@@ -4,52 +4,40 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { InteractionDetails } from "@/features/interactions-search/components/interaction-details"
-import { InteractionSearchResult, InteractionEvidence } from "@/types/search"
+import type { InteractionDetailsData, InteractionListRow } from "@/features/interactions-search/types"
 
 interface InteractionDetailsSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  interaction: InteractionSearchResult | null
-}
-
-interface InteractionEvidenceResponse {
-  id: number
-  key: string
-  evidence: InteractionEvidence[]
+  interaction: InteractionListRow | null
 }
 
 export function InteractionDetailsSheet({ open, onOpenChange, interaction }: InteractionDetailsSheetProps) {
-  const [resolvedInteraction, setResolvedInteraction] = useState<InteractionSearchResult | null>(interaction)
+  const [resolvedInteraction, setResolvedInteraction] = useState<InteractionListRow | null>(interaction)
 
   useEffect(() => {
     setResolvedInteraction(interaction)
   }, [interaction])
 
-  const interactionId = interaction?.interaction_id
+  const interactionId = interaction?.interaction.interactionPk
 
-  const { data: evidence, isLoading } = useQuery({
-    queryKey: ["interaction-evidence", interactionId],
-    enabled: open && !!interactionId && !interaction?.evidence,
+  const { data: details, isLoading } = useQuery({
+    queryKey: ["interaction-details", interactionId],
+    enabled: open && !!interactionId,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const response = await fetch(`/api/interactions/${interactionId}/evidence`)
+      const response = await fetch(`/api/interactions/${interactionId}`)
       if (!response.ok) {
-        throw new Error(`Failed to load interaction evidence (${response.status})`)
+        throw new Error(`Failed to load interaction details (${response.status})`)
       }
-      const data = await response.json() as InteractionEvidenceResponse
-      return data.evidence || []
+      return await response.json() as InteractionDetailsData | null
     },
   })
 
   const displayInteraction = useMemo(() => {
-    if (!interaction) return null
-    if (interaction.evidence) return interaction
-    if (!evidence) return resolvedInteraction
-    return {
-      ...interaction,
-      evidence,
-    }
-  }, [evidence, interaction, resolvedInteraction])
+    if (details) return details
+    return resolvedInteraction
+  }, [details, resolvedInteraction])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -62,7 +50,7 @@ export function InteractionDetailsSheet({ open, onOpenChange, interaction }: Int
         </SheetHeader>
 
         <div className="mt-6 mb-6">
-          {isLoading && !displayInteraction?.evidence ? (
+          {isLoading && !details ? (
             <div className="p-4 text-sm text-muted-foreground">Loading evidence…</div>
           ) : (
             <InteractionDetails selectedInteraction={displayInteraction} />

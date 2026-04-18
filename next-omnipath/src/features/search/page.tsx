@@ -4,8 +4,9 @@ import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
 import { searchEntities } from "@/lib/queries";
+import type { EntityLike } from "@/lib/entities/display";
+import type { SearchResult } from "@/types/search-results";
 import { EntityFilterSidebar } from "./components/entity-filter-sidebar";
-import type { EntitySearchResult, SearchResult } from "./components/result-card";
 import { SearchBar } from "./components/search-bar";
 import { SearchResults } from "./components/search-results";
 import { IdentifierMatches, type IdentifierMatch } from "./components/identifier-matches";
@@ -92,7 +93,7 @@ export default function SearchPage({
   const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; ontology_terms?: Record<string, number> }>({});
   const [ontologyFacetCountsByPrefix, setOntologyFacetCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
-  const [lookupEntities, setLookupEntities] = useState<EntitySearchResult[]>([]);
+  const [lookupEntities, setLookupEntities] = useState<EntityLike[]>([]);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [identifierInput, setIdentifierInput] = useState(
@@ -196,7 +197,7 @@ export default function SearchPage({
           : Promise.resolve(null)
       ]);
 
-      const hits = response.hits as unknown as SearchResult[] || [];
+      const hits: SearchResult[] = response.hits || [];
 
       // Update filter counts from backend-provided facet distribution (only on first page)
       if (facetResponse && initialSearchType === "search_entities") {
@@ -480,9 +481,12 @@ export default function SearchPage({
         throw new Error(payload.error || `Lookup failed with status ${response.status}`);
       }
 
-      const data = await response.json();
-      setLookupMatches((data.matches || []) as IdentifierMatch[]);
-      setLookupEntities((data.entities || []) as EntitySearchResult[]);
+      const data = await response.json() as {
+        matches?: IdentifierMatch[];
+        entities?: EntityLike[];
+      };
+      setLookupMatches(data.matches || []);
+      setLookupEntities(data.entities || []);
     } catch (err) {
       console.error("Identifier lookup error", err);
       setLookupMatches([]);

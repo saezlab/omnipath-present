@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { EntitySearchResult } from "@/types/entities";
+import type { EntityLike } from "@/lib/entities/display";
 
 export interface EntityDataSource {
-  getEntity: (entityId: string) => Promise<EntitySearchResult | null>;
+  getEntity: (entityId: string) => Promise<EntityLike | null>;
 }
 
 const EntityDataSourceContext = createContext<EntityDataSource | null>(null);

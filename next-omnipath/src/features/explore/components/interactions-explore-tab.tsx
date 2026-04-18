@@ -7,14 +7,21 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { EntityInfo, getEntitiesByIds, searchInteractions } from "@/lib/queries";
+import type { InteractionListRow } from "@/features/interactions-search/types";
+import {
+  getEntityDisplayName,
+  getEntityPublicId,
+  getEntitySecondaryName,
+  getEntityTypeLabel,
+} from "@/lib/entities/display";
+import { searchInteractions } from "@/lib/queries";
 import { DataCard } from "@/features/interactions-search/components/data-card";
 import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatNumber } from "@/lib/utils";
-import { SearchFilters, InteractionSearchResult } from "@/types/search";
+import { SearchFilters } from "@/types/search";
 import { ArrowRight, Filter, Minus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -32,15 +39,9 @@ interface InteractionsExploreTabProps {
   scopedEntityIds?: string[];
 }
 
-// Helper function to extract type label from "TypeLabel:ID" format
-function extractTypeLabel(memberType: string): string {
-  const colonIndex = memberType.indexOf(':');
-  return colonIndex > 0 ? memberType.substring(0, colonIndex) : memberType;
-}
-
-function getConsensusSign(interaction: InteractionSearchResult): 'positive' | 'negative' | null {
-  if (interaction.sign === 1) return 'positive';
-  if (interaction.sign === -1) return 'negative';
+function getConsensusSign(interaction: InteractionListRow): 'positive' | 'negative' | null {
+  if (interaction.interaction.sign === 1) return 'positive';
+  if (interaction.interaction.sign === -1) return 'negative';
   return null;
 }
 
@@ -76,7 +77,7 @@ export function InteractionsExploreTab({
     error: infiniteScrollError,
     totalResults,
     sentinelRef
-  } = useInfiniteScroll<InteractionSearchResult>({
+  } = useInfiniteScroll<InteractionListRow>({
     fetchData: useCallback(async (offset: number, limit: number) => {
       const response = await searchInteractions("", effectiveFilters, limit, offset);
 
@@ -105,13 +106,12 @@ export function InteractionsExploreTab({
     root: rootElement
   });
 
-  const [selectedInteraction, setSelectedInteraction] = useState<InteractionSearchResult | null>(null);
+  const [selectedInteraction, setSelectedInteraction] = useState<InteractionListRow | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
-  const [allInteractions, setAllInteractions] = useState<InteractionSearchResult[]>([]);
+  const [allInteractions, setAllInteractions] = useState<InteractionListRow[]>([]);
   const [isLoadingAll, setIsLoadingAll] = useState(false);
   const [hasLoadedGraphData, setHasLoadedGraphData] = useState(false);
-  const [entityMap, setEntityMap] = useState<Map<string, EntityInfo>>(new Map());
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("search");
 
   // Check if there are ontology terms available
@@ -124,33 +124,6 @@ export function InteractionsExploreTab({
   useEffect(() => {
     setError(infiniteScrollError?.message || null);
   }, [infiniteScrollError]);
-
-  // Fetch entity details when results change
-  useEffect(() => {
-    async function loadEntityDetails() {
-      if (results.length === 0) return;
-
-      // Collect all unique entity IDs from results
-      const entityIds = new Set<string>();
-      for (const interaction of results) {
-        entityIds.add(interaction.member_a_id);
-        entityIds.add(interaction.member_b_id);
-      }
-
-      // Only fetch entities we don't already have
-      const idsToFetch = [...entityIds].filter(id => !entityMap.has(id));
-      if (idsToFetch.length === 0) return;
-
-      const newEntities = await getEntitiesByIds(idsToFetch);
-      console.log('Fetched entities:', Object.fromEntries(newEntities));
-      if (newEntities.size > 0) {
-        setEntityMap(prev => new Map([...prev, ...newEntities]));
-      }
-    }
-
-    loadEntityDetails();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results]);
 
   // Function to load all interactions for graph view
   const loadAllInteractions = useCallback(async () => {
@@ -188,7 +161,7 @@ export function InteractionsExploreTab({
     onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {});
   };
 
-  const handleRowClick = (row: InteractionSearchResult) => {
+  const handleRowClick = (row: InteractionListRow) => {
     setSelectedInteraction(row);
     setDetailsOpen(true);
   };
@@ -232,10 +205,10 @@ export function InteractionsExploreTab({
   }, [effectiveFilters]);
 
   // Helper to render sign indicator
-  const renderSignIndicator = (interaction: InteractionSearchResult) => {
+  const renderSignIndicator = (interaction: InteractionListRow) => {
     const consensusSign = getConsensusSign(interaction);
 
-    if (interaction.is_directed) {
+    if (interaction.interaction.direction !== null && interaction.interaction.direction !== 0) {
       return (
         <ArrowRight className={cn(
           "h-4 w-4",
@@ -346,28 +319,23 @@ export function InteractionsExploreTab({
                 <Table>
                   <TableBody>
                     {results.map((row) => {
-                      const sourceId = row.member_a_id;
-                      const targetId = row.member_b_id;
-                      const sourceEntity = entityMap.get(sourceId);
-                      const targetEntity = entityMap.get(targetId);
-                      // Directed rows are already ordered source->target in the backend
-                      const sourceTypeRaw = row.member_types[0];
-                      const targetTypeRaw = row.member_types[1];
-                      const sourceType = sourceTypeRaw ? extractTypeLabel(sourceTypeRaw) : undefined;
-                      const targetType = targetTypeRaw ? extractTypeLabel(targetTypeRaw) : undefined;
+                      const sourceEntity = row.entityA;
+                      const targetEntity = row.entityB;
+                      const sourceId = getEntityPublicId(sourceEntity);
+                      const targetId = getEntityPublicId(targetEntity);
 
                       return (
                         <TableRow
-                          key={row.interaction_key}
+                          key={String(row.interaction.interactionPk)}
                           onClick={() => handleRowClick(row)}
                           className="cursor-pointer hover:bg-muted/50"
                         >
                           <TableCell className="w-[35%] max-w-0">
                             <EntityBadge
-                              displayName={sourceEntity?.display_name || String(sourceId)}
-                              canonicalIdentifier={sourceEntity?.canonical_identifier || String(sourceId)}
-                              entityId={sourceEntity?.id || String(sourceId)}
-                              entityType={sourceEntity?.entity_type_name || sourceType}
+                              displayName={getEntityDisplayName(sourceEntity)}
+                              canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
+                              entityId={sourceId}
+                              entityType={getEntityTypeLabel(sourceEntity)}
                             />
                           </TableCell>
                           <TableCell className="w-[50px] text-center">
@@ -377,15 +345,15 @@ export function InteractionsExploreTab({
                           </TableCell>
                           <TableCell className="w-[35%] max-w-0">
                             <EntityBadge
-                              displayName={targetEntity?.display_name || String(targetId)}
-                              canonicalIdentifier={targetEntity?.canonical_identifier || String(targetId)}
-                              entityId={targetEntity?.id || String(targetId)}
-                              entityType={targetEntity?.entity_type_name || targetType}
+                              displayName={getEntityDisplayName(targetEntity)}
+                              canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
+                              entityId={targetId}
+                              entityType={getEntityTypeLabel(targetEntity)}
                             />
                           </TableCell>
                           <TableCell className="w-[20%] text-center">
                             <Badge variant="outline">
-                              {formatNumber(row.evidence_count || 0)}
+                              {formatNumber(row.interaction.evidenceCount || 0)}
                             </Badge>
                           </TableCell>
                         </TableRow>

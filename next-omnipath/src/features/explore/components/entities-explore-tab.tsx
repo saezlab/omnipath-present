@@ -110,7 +110,7 @@ export function EntitiesExploreTab({
       });
 
       return {
-        results: (response.hits as unknown as SearchResult[]) || [],
+        results: response.hits,
         totalResults: response.estimatedTotalHits || 0,
       };
     }, [effectiveFilters, query]),

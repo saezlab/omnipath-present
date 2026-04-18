@@ -1,4 +1,4 @@
-import type { EntitySearchResult, Identifier } from "@/types/entities";
+import type { Entity, Identifier } from "@next-omnipath/drizzle";
 
 export interface CvTermSearchResult {
   id: string;
@@ -32,36 +32,43 @@ export interface SourceSearchResult {
   name?: string;
 }
 
-// Transitional UI type for mixed result rendering.
-// Entity-specific code should prefer EntitySearchResult.
+export interface EntitySearchRow extends Entity {
+  identifiers: Identifier[];
+  id: string;
+  entity_id: string;
+  type: "entity";
+  matchRank?: number | null;
+}
+
 export interface SearchResult {
   id: string;
   type?: "entity" | "cv_term" | "source";
 
   entity_id?: string | number;
-  entity_type?: EntitySearchResult["entity_type"];
+  entity_type?: Entity["entityType"] | null;
   names?: string[];
   synonyms?: string[];
   gene_symbols?: string[];
   descriptions?: string[];
   references?: string[];
   identifiers?: Identifier[];
-  sources?: EntitySearchResult["sources"];
+  sources?: Entity["sources"];
   complexes?: number[];
   cv_terms?: string[];
   ontology_terms?: string[];
   pathways?: number[];
   reactions?: number[];
   num_interactions?: number;
-  canonical_identifier?: EntitySearchResult["canonical_identifier"];
-  canonical_identifier_type?: EntitySearchResult["canonical_identifier_type"];
-  ncbi_tax_id?: EntitySearchResult["ncbi_tax_id"];
+  canonical_identifier?: Entity["canonicalIdentifier"] | null;
+  canonical_identifier_type?: Entity["canonicalIdentifierType"] | null;
+  ncbi_tax_id?: string | null;
   definition?: string;
   name?: string;
   is_annotated?: boolean;
   canonical_smiles?: string;
   formula?: string;
   molecular_weight?: number;
+  matchRank?: number | null;
 
   namespace_name?: string;
   associated_entity_ids?: string[];

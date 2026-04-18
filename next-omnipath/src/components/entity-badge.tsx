@@ -167,7 +167,7 @@ export const EntityBadge: React.FC<EntityBadgeProps> = ({
         </HoverCardTrigger>
         <HoverCardContent className="w-[450px] p-0 border-0" align="start">
           {entity ? (
-            <ResultCard result={{ ...entity, type: 'entity' }} />
+            <ResultCard result={entity} />
           ) : null}
         </HoverCardContent>
       </HoverCard>

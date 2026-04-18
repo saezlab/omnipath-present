@@ -5,301 +5,241 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Network, Tag, Shapes, FileText, Database, Loader2 } from "lucide-react";
-import type { EntitySearchResult } from "./result-card";
+import { Database, Loader2, Network, Shapes, Tag } from "lucide-react";
 import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
-import { SearchFilters, AssociationSearchResult } from "@/types/search";
-import { searchAssociations, searchInteractions } from "@/lib/queries";
-import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
+import type { SearchFilters } from "@/types/search";
 import SearchPage from "@/features/search/page";
-import { getUnifiedCvTerms } from "@/lib/cv-terms";
+import { getAssociatedEntityScope, getEntityDetailsByPublicId } from "@/lib/queries";
+import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
+import {
+  getEntityDescriptions,
+  getEntityDisplayName,
+  getEntityPublicId,
+  getEntitySmiles,
+  getEntityTypeLabel,
+  type EntityLike,
+} from "@/lib/entities/display";
 
 interface EntityDetailsDialogProps {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-    entity: EntitySearchResult | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entity: EntityLike | null;
 }
 
-const getDescriptionEntries = (definition: string | undefined, descriptions: string[] = []): string[] => {
-    const unique = Array.from(
-        new Set([definition, ...descriptions].filter((value): value is string => Boolean(value?.trim())))
-    );
-
-    return unique.sort((a, b) => {
-        const aIsFunction = a.trim().toLowerCase().startsWith("function:");
-        const bIsFunction = b.trim().toLowerCase().startsWith("function:");
-        if (aIsFunction && !bIsFunction) return -1;
-        if (!aIsFunction && bIsFunction) return 1;
-        return 0;
-    });
+const getDescriptionEntries = (descriptions: string[] = []): string[] => {
+  return Array.from(new Set(descriptions.filter((value) => Boolean(value?.trim()))));
 };
 
-// Helper to detect if entity is a small molecule
-const isSmallMolecule = (result: EntitySearchResult): boolean => {
-    const entityType = result.entity_type || '';
-    const typeLabel = entityType.split(':')[0].toLowerCase().replace(/[\s_]/g, '');
-    return typeLabel === 'smallmolecule' ||
-        typeLabel === 'compound' ||
-        typeLabel === 'metabolite' ||
-        typeLabel === 'drug' ||
-        typeLabel === 'lipid' ||
-        !!(result.canonical_smiles || result.formula || result.molecular_weight);
-};
+function EntityCardHeader({
+  entity,
+  interactionsCount,
+  annotationsCount,
+}: {
+  entity: EntityLike;
+  interactionsCount: number;
+  annotationsCount: number;
+}) {
+  const entityTypeLabel = getEntityTypeLabel(entity);
+  const descriptionEntries = getDescriptionEntries(getEntityDescriptions(entity));
+  const displayName = getEntityDisplayName(entity);
+  const smiles = useMemo(() => getEntitySmiles(entity), [entity]);
+  const entityTypeEmoji = getEntityTypeEmoji(entityTypeLabel);
+  const sources = entity.sources || [];
 
-// Entity Card Header Component
-function EntityCardHeader({ entity }: { entity: EntitySearchResult }) {
-    const entityType = entity.entity_type;
-    const entityTypeLabel = entityType ? entityType.split(':')[0] : "Entity";
-    const names = entity.names || [];
-    const geneSymbols = entity.gene_symbols || [];
-    const descriptions = entity.descriptions || [];
-    const definition = entity.definition;
-    const descriptionEntries = getDescriptionEntries(definition, descriptions);
-    // Get display name
-    const displayName = geneSymbols[0] || names[0] || `Entity ${entity.entity_id || entity.id}`;
-
-    // Extract SMILES for molecules
-    const smiles = useMemo(() => {
-        if (!isSmallMolecule(entity)) return null;
-        const identifiers = entity.identifiers || [];
-        for (const id of identifiers) {
-            const idType = id.key?.split(':')[0].toLowerCase().trim();
-            if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
-                return id.value;
-            }
-        }
-        return entity.canonical_smiles || null;
-    }, [entity]);
-
-    const entityTypeEmoji = getEntityTypeEmoji(entityTypeLabel);
-
-    return (
-        <div className="flex gap-4 p-4 bg-muted/20">
-            {/* Molecule structure image if applicable */}
-            {smiles && (
-                <div className="shrink-0">
-                    <MoleculeStructure
-                        smiles={smiles}
-                        width={120}
-                        height={100}
-                        compoundName={displayName}
-                        className="rounded-md"
-                    />
-                </div>
-            )}
-
-            <div className="flex-1 min-w-0">
-                {/* Title and type badge */}
-                <div className="flex items-start justify-between gap-2 mb-2">
-                    <h2 className="text-xl font-semibold truncate">{displayName}</h2>
-                    <Badge variant="secondary" className="flex items-center gap-1 shrink-0">
-                        {entityTypeEmoji && <span>{entityTypeEmoji}</span>}
-                        {entityTypeLabel}
-                    </Badge>
-                </div>
-
-                {/* Description */}
-                {descriptionEntries.length > 0 && (
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                        {descriptionEntries[0]}
-                    </p>
-                )}
-
-                {/* Stats row */}
-                <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
-                    {entity.num_interactions && entity.num_interactions > 0 && (
-                        <div className="flex items-center gap-1">
-                            <Network className="h-4 w-4" />
-                            <span>{entity.num_interactions} interactions</span>
-                        </div>
-                    )}
-                    {entity.complexes && entity.complexes.length > 0 && (
-                        <div className="flex items-center gap-1">
-                            <Shapes className="h-4 w-4" />
-                            <span>{entity.complexes.length} complexes</span>
-                        </div>
-                    )}
-                    {getUnifiedCvTerms(entity).length > 0 && (
-                        <div className="flex items-center gap-1">
-                            <Tag className="h-4 w-4" />
-                            <span>{getUnifiedCvTerms(entity).length} annotations</span>
-                        </div>
-                    )}
-                    {entity.references && entity.references.length > 0 && (
-                        <div className="flex items-center gap-1">
-                            <FileText className="h-4 w-4" />
-                            <span>{entity.references.length} refs</span>
-                        </div>
-                    )}
-                    {entity.sources && entity.sources.length > 0 && (
-                        <div className="flex items-center gap-1">
-                            <Database className="h-4 w-4" />
-                            <span>{entity.sources.length} sources</span>
-                        </div>
-                    )}
-                </div>
-            </div>
+  return (
+    <div className="flex gap-4 p-4 bg-muted/20">
+      {smiles && (
+        <div className="shrink-0">
+          <MoleculeStructure
+            smiles={smiles}
+            width={120}
+            height={100}
+            compoundName={displayName}
+            className="rounded-md"
+          />
         </div>
-    );
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <h2 className="text-xl font-semibold truncate">{displayName}</h2>
+          <Badge variant="secondary" className="flex items-center gap-1 shrink-0">
+            {entityTypeEmoji && <span>{entityTypeEmoji}</span>}
+            {entityTypeLabel}
+          </Badge>
+        </div>
+
+        {descriptionEntries.length > 0 && (
+          <p className="text-sm text-muted-foreground line-clamp-2">
+            {descriptionEntries[0]}
+          </p>
+        )}
+
+        <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
+          {interactionsCount > 0 && (
+            <div className="flex items-center gap-1">
+              <Network className="h-4 w-4" />
+              <span>{interactionsCount} interactions</span>
+            </div>
+          )}
+          {annotationsCount > 0 && (
+            <div className="flex items-center gap-1">
+              <Tag className="h-4 w-4" />
+              <span>{annotationsCount} annotations</span>
+            </div>
+          )}
+          {sources.length > 0 && (
+            <div className="flex items-center gap-1">
+              <Database className="h-4 w-4" />
+              <span>{sources.length} sources</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetailsDialogProps) {
-    const [activeTab, setActiveTab] = useState("interactions");
+  const [activeTab, setActiveTab] = useState("interactions");
 
-    // Get entity ID
-    const entityId = useMemo(() => {
-        if (!entity) return null;
-        const raw = entity.entity_id ?? entity.id;
-        if (raw === undefined || raw === null) return null;
-        return String(raw);
-    }, [entity]);
-    const entityIds = useMemo(() => (entityId ? [entityId] : []), [entityId]);
-
-    // Filters for interactions tab
-    const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
-
-    // Update filters when entity changes
-    useEffect(() => {
-        if (entityIds.length > 0) {
-            setInteractionFilters({ entity_ids: entityIds });
-        }
-    }, [entityIds]);
-
-    const { data: entityCounts, isLoading: loadingCounts } = useQuery({
-        queryKey: ["entity-details-counts", entityId],
-        enabled: open && !!entityId,
-        staleTime: 5 * 60 * 1000,
-        queryFn: async () => {
-            const resolvedEntityId = entityId!;
-
-            const interactionsResponse = await searchInteractions("", { entity_ids: [resolvedEntityId] }, 1, 0);
-
-            const [parentsResponse, membersResponse] = await Promise.all([
-                searchAssociations("", { member_entity_ids: [resolvedEntityId] }, 10000, 0),
-                searchAssociations("", { parent_entity_ids: [resolvedEntityId] }, 10000, 0)
-            ]);
-
-            const entityIdSet = new Set<string>();
-            const parentHits = parentsResponse.hits as AssociationSearchResult[];
-            const memberHits = membersResponse.hits as AssociationSearchResult[];
-
-            parentHits.forEach(hit => {
-                if (hit.parent_entity_id) entityIdSet.add(hit.parent_entity_id);
-            });
-            memberHits.forEach(hit => {
-                if (hit.member_entity_id) entityIdSet.add(hit.member_entity_id);
-            });
-
-            const associatedEntityIds = Array.from(entityIdSet);
-
-            return {
-                interactionsCount: interactionsResponse.estimatedTotalHits || 0,
-                associationsCount: associatedEntityIds.length,
-                associatedEntityIds,
-            };
-        }
-    });
-
-    const interactionsCount = entityCounts?.interactionsCount ?? null;
-    const associationsCount = entityCounts?.associationsCount ?? 0;
-    const associatedEntityIds = entityCounts?.associatedEntityIds ?? [];
-
-    // Set default active tab based on what's available
-    useEffect(() => {
-        if (!loadingCounts) {
-            if ((interactionsCount ?? 0) > 0) {
-                setActiveTab("interactions");
-            } else if (associationsCount > 0) {
-                setActiveTab("associations");
-            }
-        }
-    }, [loadingCounts, interactionsCount, associationsCount]);
-
+  const entityId = useMemo(() => {
     if (!entity) return null;
+    const value = getEntityPublicId(entity).trim();
+    return value || null;
+  }, [entity]);
+  const entityIds = useMemo(() => (entityId ? [entityId] : []), [entityId]);
 
-    const hasInteractions = (interactionsCount ?? 0) > 0;
-    const hasAssociations = associationsCount > 0;
-    const hasAnyTab = hasInteractions || hasAssociations;
+  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
 
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0 gap-0">
-                {/* Visually hidden title for accessibility */}
-                <DialogTitle className="sr-only">
-                    Entity Details
-                </DialogTitle>
+  useEffect(() => {
+    if (entityIds.length > 0) {
+      setInteractionFilters({ entity_ids: entityIds });
+    }
+  }, [entityIds]);
 
-                {/* Entity Card Header */}
-                <EntityCardHeader entity={entity} />
+  const { data: details, isLoading: loadingDetails } = useQuery({
+    queryKey: ["entity-details", entityId],
+    enabled: open && !!entityId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => getEntityDetailsByPublicId(entityId!),
+  });
 
-                {/* Tabs - only show if there's content */}
-                {hasAnyTab ? (
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-                        <div className="px-4">
-                            <TabsList className="h-10">
-                                {hasInteractions && (
-                                    <TabsTrigger value="interactions" className="flex items-center gap-2">
-                                        Interactions
-                                        {loadingCounts ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : (
-                                            <Badge variant="secondary" className="text-xs">
-                                                {interactionsCount?.toLocaleString() || 0}
-                                            </Badge>
-                                        )}
-                                    </TabsTrigger>
-                                )}
-                                {hasAssociations && (
-                                    <TabsTrigger value="associations" className="flex items-center gap-2">
-                                        Associations
-                                        <Badge variant="secondary" className="text-xs">
-                                            {associationsCount}
-                                        </Badge>
-                                    </TabsTrigger>
-                                )}
-                            </TabsList>
-                        </div>
+  const { data: associationScope, isLoading: loadingAssociations } = useQuery({
+    queryKey: ["entity-associated-scope", entityId],
+    enabled: open && !!entityId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => getAssociatedEntityScope([entityId!]),
+  });
 
-                        {hasInteractions && (
-                            <TabsContent value="interactions" className="flex-1 min-h-0 m-0 overflow-hidden">
-                                <div className="h-full overflow-hidden [&>div]:h-full [&>div]:!max-h-full [&_.h-svh]:h-full">
-                                    {entityIds.length > 0 && (
-                                        <InteractionsExploreTab
-                                            filters={interactionFilters}
-                                            onFilterChange={setInteractionFilters}
-                                            onFilterCountsUpdate={() => { }}
-                                        />
-                                    )}
-                                </div>
-                            </TabsContent>
-                        )}
+  const resolvedEntity = details?.entity ?? entity;
+  const interactionsCount = Number(details?.summary?.interactionCount ?? 0);
+  const annotationsCount = details?.annotations?.length ?? 0;
+  const associatedEntityIds = associationScope?.associatedEntityIds ?? [];
+  const associationsCount = associatedEntityIds.length;
+  const loadingCounts = loadingDetails || loadingAssociations;
 
-                        {hasAssociations && (
-                            <TabsContent value="associations" className="flex-1 min-h-0 m-0 overflow-hidden">
-                                <SearchPage
-                                    embedded={true}
-                                    allowOntologyInEmbedded={false}
-                                    showLayoutSwitcherInEmbedded={false}
-                                    showFilters={false}
-                                    initialFilters={{ entity_ids: associatedEntityIds }}
-                                />
-                            </TabsContent>
-                        )}
-                    </Tabs>
-                ) : (
-                    <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                        {loadingCounts ? (
-                            <div className="flex items-center gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Loading...
-                            </div>
-                        ) : (
-                            "No interactions or associations found"
-                        )}
-                    </div>
+  useEffect(() => {
+    if (!loadingCounts) {
+      if (interactionsCount > 0) {
+        setActiveTab("interactions");
+      } else if (associationsCount > 0) {
+        setActiveTab("associations");
+      }
+    }
+  }, [loadingCounts, interactionsCount, associationsCount]);
+
+  if (!resolvedEntity) return null;
+
+  const hasInteractions = interactionsCount > 0;
+  const hasAssociations = associationsCount > 0;
+  const hasAnyTab = hasInteractions || hasAssociations;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0 gap-0">
+        <DialogTitle className="sr-only">Entity Details</DialogTitle>
+
+        <EntityCardHeader
+          entity={resolvedEntity}
+          interactionsCount={interactionsCount}
+          annotationsCount={annotationsCount}
+        />
+
+        {hasAnyTab ? (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+            <div className="px-4">
+              <TabsList className="h-10">
+                {hasInteractions && (
+                  <TabsTrigger value="interactions" className="flex items-center gap-2">
+                    Interactions
+                    {loadingDetails ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">
+                        {interactionsCount.toLocaleString()}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
                 )}
-            </DialogContent>
-        </Dialog>
-    );
+                {hasAssociations && (
+                  <TabsTrigger value="associations" className="flex items-center gap-2">
+                    Associations
+                    {loadingAssociations ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">
+                        {associationsCount}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </div>
+
+            {hasInteractions && (
+              <TabsContent value="interactions" className="flex-1 min-h-0 m-0 overflow-hidden">
+                <div className="h-full overflow-hidden [&>div]:h-full [&>div]:!max-h-full [&_.h-svh]:h-full">
+                  {entityIds.length > 0 && (
+                    <InteractionsExploreTab
+                      filters={interactionFilters}
+                      onFilterChange={setInteractionFilters}
+                      onFilterCountsUpdate={() => {}}
+                    />
+                  )}
+                </div>
+              </TabsContent>
+            )}
+
+            {hasAssociations && (
+              <TabsContent value="associations" className="flex-1 min-h-0 m-0 overflow-hidden">
+                <SearchPage
+                  embedded={true}
+                  allowOntologyInEmbedded={false}
+                  showLayoutSwitcherInEmbedded={false}
+                  showFilters={false}
+                  initialFilters={{ entity_ids: associatedEntityIds }}
+                />
+              </TabsContent>
+            )}
+          </Tabs>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            {loadingCounts ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Shapes className="h-4 w-4" />
+                No interactions or associations found
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 }

@@ -1,12 +1,12 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-import { getEntityById } from "@/lib/queries"
 import { useEntityDataSource } from "@/contexts/entity-data-source-context"
-import type { EntitySearchResult } from "@/types/entities"
+import type { EntityLike } from "@/lib/entities/display"
+import { getEntityRowByPublicId } from "@/lib/queries"
 
 interface UseEntityResult {
-  data: EntitySearchResult | null
+  data: EntityLike | null
   loading: boolean
   error: Error | null
 }
@@ -26,7 +26,7 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
         return entityDataSource.getEntity(normalizedId)
       }
 
-      return await getEntityById(normalizedId)
+      return await getEntityRowByPublicId(normalizedId)
     },
     enabled: !!entityId,
   })

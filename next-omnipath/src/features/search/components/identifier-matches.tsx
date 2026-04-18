@@ -2,8 +2,9 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ResultCard, type EntitySearchResult } from "./result-card";
+import { getEntityPublicId, type EntityLike } from "@/lib/entities/display";
 import { cn } from "@/lib/utils";
+import { ResultCard } from "./result-card";
 
 export interface IdentifierMatch {
   identifier: string;
@@ -12,15 +13,15 @@ export interface IdentifierMatch {
 
 interface IdentifierMatchesProps {
   matches: IdentifierMatch[];
-  entities: EntitySearchResult[];
+  entities: EntityLike[];
   loading?: boolean;
   error?: string | null;
 }
 
 export function IdentifierMatches({ matches, entities, loading = false, error }: IdentifierMatchesProps) {
-  const entityMap = new Map<string, EntitySearchResult>();
+  const entityMap = new Map<string, EntityLike>();
   for (const entity of entities) {
-    const key = (entity.entity_id ?? entity.id)?.toString();
+    const key = getEntityPublicId(entity);
     if (key) {
       entityMap.set(key, entity);
     }
@@ -54,7 +55,7 @@ export function IdentifierMatches({ matches, entities, loading = false, error }:
       {matches.map((match) => {
         const candidates = match.entityIds
           .map((id) => entityMap.get(id.toString()))
-          .filter((result): result is EntitySearchResult => Boolean(result));
+          .filter((result): result is EntityLike => Boolean(result));
 
         const status = (() => {
           if (match.entityIds.length === 0) return "unmapped" as const;
@@ -90,7 +91,7 @@ export function IdentifierMatches({ matches, entities, loading = false, error }:
               {candidates.length > 0 ? (
                 <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
                   {candidates.map((candidate) => {
-                    const key = (candidate.entity_id ?? candidate.id)?.toString();
+                    const key = getEntityPublicId(candidate);
                     return key ? <ResultCard key={key} result={candidate} /> : null;
                   })}
                 </div>
