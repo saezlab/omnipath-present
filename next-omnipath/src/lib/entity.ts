@@ -15,47 +15,34 @@ import {
 } from "drizzle-orm";
 import type { SearchFilters } from "@/types/search";
 import type { EntitySearchRow } from "@/types/search-results";
+import { getAssociatedEntityPublicIdsByMemberPublicIds } from "@/lib/association";
+import { getEntityPublicIdsForAnnotationTerms } from "@/lib/annotation";
 import {
-  getAssociatedEntityPublicIdsByMemberPublicIds,
-  getEntityAnnotations,
-  getEntityByPublicId,
-  getEntityIdentifiers,
-  getEntityPublicIdsForAnnotationTerms,
-  getEntitySummary,
-} from "@/lib/db/reads";
+  normalizeStringValues,
+  parsePublicEntityId,
+  publicEntityIdWhere,
+  toPublicEntityId,
+} from "@/lib/entity-public-id";
+import {
+  normalizeEntityTypeFilterValue,
+  normalizedEntityTypeDrizzleSql,
+} from "@/lib/entity-filter";
 import { getDb } from "@/lib/db/client";
-import { entity, entityAnnotation, entityIdentifier, type Identifier } from "@next-omnipath/drizzle";
+import {
+  entity,
+  entityAnnotation,
+  entityIdentifier,
+  entitySummary,
+  type Entity,
+  type EntityAnnotation,
+  type EntityIdentifier,
+  type EntitySummary,
+  type Identifier,
+} from "@next-omnipath/drizzle";
 import { loadFacetDistributionFromMaterializedView } from "@/lib/postgres-search/search";
 
 function normalizeIds(ids?: Array<string | number>): string[] {
-  return Array.from(new Set((ids || []).map((id) => String(id).trim()).filter(Boolean)));
-}
-
-function parsePublicEntityId(publicId: string): { canonicalIdentifierType: string; canonicalIdentifier: string } | null {
-  const trimmed = publicId.trim();
-  if (!trimmed) return null;
-
-  const separatorIndex = trimmed.indexOf("|");
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    return null;
-  }
-
-  return {
-    canonicalIdentifierType: trimmed.slice(0, separatorIndex),
-    canonicalIdentifier: trimmed.slice(separatorIndex + 1),
-  };
-}
-
-function normalizeEntityTypeFilterValue(value: string | null | undefined): string {
-  const text = (value || "").trim();
-  if (!text) return "";
-  const parts = text.split(":");
-  if (parts.length < 3) return text.toLowerCase();
-  return `${parts[0].toLowerCase()}:${parts[1].toUpperCase()}:${parts.slice(2).join(":").toUpperCase()}`;
-}
-
-function normalizedEntityTypeSql(column: typeof entity.entityType): SQL {
-  return sql`LOWER(split_part(${column}, ':', 3)) || ':' || split_part(${column}, ':', 1) || ':' || split_part(${column}, ':', 2)`;
+  return normalizeStringValues(ids || []);
 }
 
 function toEntitySearchRow(row: typeof entity.$inferSelect): EntitySearchRow {
@@ -95,7 +82,7 @@ function buildEntitySearchConditions(filters: SearchFilters, query: string): SQL
       .filter(Boolean);
 
     if (normalizedTypes.length > 0) {
-      conditions.push(sql`${normalizedEntityTypeSql(entity.entityType)} = ANY(${normalizedTypes})`);
+      conditions.push(sql`${normalizedEntityTypeDrizzleSql(entity.entityType)} = ANY(${normalizedTypes})`);
     }
   }
 
@@ -169,6 +156,67 @@ export interface EntityFilterCounts {
 export interface AssociatedEntityIdsResult {
   seedEntityIds: string[];
   associatedEntityIds: string[];
+}
+
+export async function getEntityByPublicId(publicId: string): Promise<Entity | null> {
+  const rows = await getEntitiesByPublicIds([publicId]);
+  return rows[0] ?? null;
+}
+
+export async function getEntitiesByPublicIds(publicIds: string[]): Promise<Entity[]> {
+  const normalized = normalizeIds(publicIds);
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const where = publicEntityIdWhere(normalized);
+  if (!where) {
+    return [];
+  }
+
+  const rows = await getDb().select().from(entity).where(where);
+  const order = new Map(normalized.map((id, index) => [id, index]));
+  return rows.sort((a, b) => (order.get(toPublicEntityId(a)) ?? Number.MAX_SAFE_INTEGER) - (order.get(toPublicEntityId(b)) ?? Number.MAX_SAFE_INTEGER));
+}
+
+export async function getEntitiesByPks(entityPks: number[]): Promise<Entity[]> {
+  const normalized = Array.from(new Set(entityPks.filter((value) => Number.isFinite(value))));
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  return getDb().select().from(entity).where(inArray(entity.entityPk, normalized));
+}
+
+export async function getEntityIdentifiers(entityPk: number): Promise<EntityIdentifier[]> {
+  return getDb().select().from(entityIdentifier).where(eq(entityIdentifier.entityPk, entityPk));
+}
+
+export async function getEntityIdentifiersByEntityPks(entityPks: number[]): Promise<EntityIdentifier[]> {
+  const normalized = Array.from(new Set(entityPks.filter((value) => Number.isFinite(value))));
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  return getDb().select().from(entityIdentifier).where(inArray(entityIdentifier.entityPk, normalized));
+}
+
+export async function getEntityAnnotations(entityPk: number): Promise<EntityAnnotation[]> {
+  return getDb().select().from(entityAnnotation).where(eq(entityAnnotation.entityPk, entityPk));
+}
+
+export async function getEntityAnnotationsByEntityPks(entityPks: number[]): Promise<EntityAnnotation[]> {
+  const normalized = Array.from(new Set(entityPks.filter((value) => Number.isFinite(value))));
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  return getDb().select().from(entityAnnotation).where(inArray(entityAnnotation.entityPk, normalized));
+}
+
+export async function getEntitySummary(entityPk: number): Promise<EntitySummary | null> {
+  const rows = await getDb().select().from(entitySummary).where(eq(entitySummary.entityPk, entityPk)).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function searchEntities({

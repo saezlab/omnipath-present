@@ -2,11 +2,15 @@
 
 import "server-only";
 
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { entity, entityAnnotation } from "@next-omnipath/drizzle";
 import { getDb } from "@/lib/db/client";
 import { getApiServiceUrl } from "@/lib/api/config";
-import { getAnnotationTermsForEntityPublicIds } from "@/lib/db/reads";
+import { normalizeStringValues, publicEntityIdWhere, toPublicEntityId } from "@/lib/entity-public-id";
+import {
+  normalizeEntityTypeFilterValue,
+  normalizedEntityTypeDrizzleSql,
+} from "@/lib/entity-filter";
 import type { SearchFilters } from "@/types/search";
 
 export interface ExploreOntologyTerm {
@@ -43,6 +47,123 @@ interface TermsResponse {
 }
 
 const ONTOLOGY_ID_PATTERN = /^(GO|MI|OM|HP|KW|CHEBI):\d+$/i;
+
+
+async function getEntityPkMapByPublicIds(publicIds: string[]): Promise<Map<string, number>> {
+  const normalized = normalizeStringValues(publicIds);
+  if (normalized.length === 0) {
+    return new Map();
+  }
+
+  const where = publicEntityIdWhere(normalized);
+  if (!where) {
+    return new Map();
+  }
+
+  const rows = await getDb()
+    .select({
+      entityPk: entity.entityPk,
+      canonicalIdentifier: entity.canonicalIdentifier,
+      canonicalIdentifierType: entity.canonicalIdentifierType,
+    })
+    .from(entity)
+    .where(where);
+
+  return new Map(rows.map((row) => [toPublicEntityId(row), row.entityPk]));
+}
+
+function buildEntityFilterConditions(filters: SearchFilters, scopedEntityPks?: number[]): SQL[] {
+  const conditions: SQL[] = [];
+
+  if (scopedEntityPks?.length) {
+    conditions.push(inArray(entity.entityPk, scopedEntityPks));
+  }
+
+  if (filters.entity_types?.length) {
+    const normalizedTypes = filters.entity_types
+      .map((value) => normalizeEntityTypeFilterValue(String(value)))
+      .filter(Boolean);
+    if (normalizedTypes.length) {
+      conditions.push(sql`${normalizedEntityTypeDrizzleSql(entity.entityType)} = ANY(${normalizedTypes})`);
+    }
+  }
+
+  if (filters.sources?.length) {
+    const sources = normalizeStringValues(filters.sources);
+    if (sources.length) {
+      conditions.push(sql`${entity.sources} && ${sources}`);
+    }
+  }
+
+  if (filters.ncbi_tax_id?.length) {
+    const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id);
+    if (taxonomyIds.length) {
+      conditions.push(inArray(entity.taxonomyId, taxonomyIds));
+    }
+  }
+
+  if (filters.ontology_terms?.length) {
+    const terms = normalizeStringValues(filters.ontology_terms);
+    if (terms.length) {
+      conditions.push(sql`EXISTS (
+        SELECT 1
+        FROM entity_annotation ea_filter
+        WHERE ea_filter.entity_pk = ${entity.entityPk}
+          AND ea_filter.cv_term = ANY(${terms})
+      )`);
+    }
+  }
+
+  return conditions;
+}
+
+export async function getEntityPublicIdsForAnnotationTerms(termIds: string[]): Promise<string[]> {
+  const normalizedTerms = normalizeStringValues(termIds);
+  if (normalizedTerms.length === 0) {
+    return [];
+  }
+
+  const rows = await getDb()
+    .selectDistinct({
+      canonicalIdentifier: entity.canonicalIdentifier,
+      canonicalIdentifierType: entity.canonicalIdentifierType,
+    })
+    .from(entityAnnotation)
+    .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
+    .where(inArray(entityAnnotation.cvTerm, normalizedTerms));
+
+  return rows.map((row) => toPublicEntityId(row));
+}
+
+export async function getAnnotationTermsForEntityPublicIds(
+  publicIds: string[],
+  filters: SearchFilters = {},
+): Promise<string[]> {
+  const entityPkMap = await getEntityPkMapByPublicIds(publicIds);
+  const scopedEntityPks = Array.from(entityPkMap.values());
+  if (scopedEntityPks.length === 0) {
+    return [];
+  }
+
+  const conditions = buildEntityFilterConditions(filters, scopedEntityPks);
+  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+  if (!where) {
+    return [];
+  }
+
+  const rows = await getDb()
+    .selectDistinct({
+      cvTerm: entityAnnotation.cvTerm,
+    })
+    .from(entityAnnotation)
+    .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
+    .where(where);
+
+  return rows
+    .map((row) => row.cvTerm)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
 
 function normalizeOntologyId(value: string): string {
   const trimmed = value.trim();

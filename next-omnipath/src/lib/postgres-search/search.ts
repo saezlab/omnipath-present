@@ -6,6 +6,12 @@ import type { AssociationListRow } from '@/features/associations/types';
 import type { Association, Entity, Identifier, Interaction } from '@next-omnipath/drizzle';
 import type { EntitySearchRow } from '@/types/search-results';
 import { getPool, schema } from '@/lib/db/client';
+import { toPublicEntityId } from '@/lib/entity-public-id';
+import {
+  normalizeEntityTypeFilterValue,
+  normalizeInteractionTypeFilterValue,
+  normalizedEntityTypeSqlExpression,
+} from '@/lib/entity-filter';
 
 const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || 'public';
 
@@ -38,35 +44,6 @@ function toLegacyLabeledValue(value: string | null | undefined): string {
   const { accession, label } = parseCvValue(value);
   if (!accession || !label) return value || '';
   return `${label.toLowerCase()}:${accession}`;
-}
-
-function toPublicEntityId(row: Pick<EntityRecord, 'canonicalIdentifierType' | 'canonicalIdentifier'> | { canonical_identifier_type?: string | null; canonical_identifier?: string | null }): string {
-  const typedRow = row as { canonicalIdentifierType?: string | null; canonicalIdentifier?: string | null; canonical_identifier_type?: string | null; canonical_identifier?: string | null };
-  const type = typedRow.canonicalIdentifierType || typedRow.canonical_identifier_type || '';
-  const identifier = typedRow.canonicalIdentifier || typedRow.canonical_identifier || '';
-  return `${type}|${identifier}`;
-}
-
-function normalizeEntityTypeFilterValue(value: string | null | undefined): string {
-  const text = (value || '').trim();
-  if (!text) return '';
-  const parts = text.split(':');
-  if (parts.length < 3) return text.toLowerCase();
-  return `${parts[0].toLowerCase()}:${parts[1].toUpperCase()}:${parts.slice(2).join(':').toUpperCase()}`;
-}
-
-function normalizeInteractionTypeFilterValue(value: string | null | undefined): string {
-  const text = (value || '').trim();
-  if (!text) return '';
-  return text
-    .split('|')
-    .map((part) => normalizeEntityTypeFilterValue(part))
-    .sort()
-    .join('|');
-}
-
-function normalizedEntityTypeSql(column: string): string {
-  return `LOWER(split_part(${column}, ':', 3)) || ':' || split_part(${column}, ':', 1) || ':' || split_part(${column}, ':', 2)`;
 }
 
 function normalizeIdentifierKey(value: string | null | undefined): string {
@@ -175,7 +152,7 @@ function buildEntityWhere(filters: SearchFilters, query: string, params: SqlPara
 
   if (filters.entity_types?.length) {
     const placeholder = addParam(params, filters.entity_types.map(String).map(normalizeEntityTypeFilterValue));
-    where.push(`${normalizedEntityTypeSql('e.entity_type')} = ANY(${placeholder}::text[])`);
+    where.push(`${normalizedEntityTypeSqlExpression('e.entity_type')} = ANY(${placeholder}::text[])`);
   }
 
   if (filters.sources?.length) {
@@ -384,9 +361,9 @@ function buildInteractionWhere(filters: SearchFilters, query: string, params: Sq
     const placeholder = addParam(params, filters.interaction_types.map(String).map(normalizeInteractionTypeFilterValue));
     where.push(`(
       CASE
-        WHEN ${normalizedEntityTypeSql('ea.entity_type')} <= ${normalizedEntityTypeSql('eb.entity_type')}
-          THEN ${normalizedEntityTypeSql('ea.entity_type')} || '|' || ${normalizedEntityTypeSql('eb.entity_type')}
-        ELSE ${normalizedEntityTypeSql('eb.entity_type')} || '|' || ${normalizedEntityTypeSql('ea.entity_type')}
+        WHEN ${normalizedEntityTypeSqlExpression('ea.entity_type')} <= ${normalizedEntityTypeSqlExpression('eb.entity_type')}
+          THEN ${normalizedEntityTypeSqlExpression('ea.entity_type')} || '|' || ${normalizedEntityTypeSqlExpression('eb.entity_type')}
+        ELSE ${normalizedEntityTypeSqlExpression('eb.entity_type')} || '|' || ${normalizedEntityTypeSqlExpression('ea.entity_type')}
       END
     ) = ANY(${placeholder}::text[])`);
   }
@@ -595,11 +572,11 @@ function buildAssociationWhere(filters: SearchFilters, query: string, params: Sq
   }
   if (filters.parent_entity_types?.length) {
     const placeholder = addParam(params, filters.parent_entity_types.map(String).map(normalizeEntityTypeFilterValue));
-    where.push(`${normalizedEntityTypeSql('ep.entity_type')} = ANY(${placeholder}::text[])`);
+    where.push(`${normalizedEntityTypeSqlExpression('ep.entity_type')} = ANY(${placeholder}::text[])`);
   }
   if (filters.member_entity_types?.length) {
     const placeholder = addParam(params, filters.member_entity_types.map(String).map(normalizeEntityTypeFilterValue));
-    where.push(`${normalizedEntityTypeSql('em.entity_type')} = ANY(${placeholder}::text[])`);
+    where.push(`${normalizedEntityTypeSqlExpression('em.entity_type')} = ANY(${placeholder}::text[])`);
   }
   if (filters.sources?.length) {
     const placeholder = addParam(params, filters.sources.map(String));

@@ -2,16 +2,21 @@
 
 import "server-only";
 
+import { eq } from "drizzle-orm";
 import type { SearchFilters } from "@/types/search";
 import type { InteractionDetailsData, InteractionEvidence, InteractionListRow } from "@/features/interactions-search/types";
 import { searchInteractions as searchInteractionsData } from "@/lib/search_data/search";
 import { loadFacetDistributionFromMaterializedView } from "@/lib/postgres-search/search";
+import { getDb } from "@/lib/db/client";
+import { getEntitiesByPks } from "@/lib/entity";
 import {
-  getEntitiesByPks,
-  getInteractionAnnotations,
-  getInteractionById,
-  getInteractionEvidence,
-} from "@/lib/db/reads";
+  interaction,
+  interactionAnnotation,
+  interactionEvidence,
+  type Interaction,
+  type InteractionAnnotation,
+  type InteractionEvidence as InteractionEvidenceRow,
+} from "@next-omnipath/drizzle";
 
 function parseCvValue(value: string | null | undefined): { accession: string; label: string } {
   const text = (value || "").trim();
@@ -39,6 +44,19 @@ function mapEvidenceAttributes(
     value: item.value ?? null,
     unit: item.unit ? toLegacyLabeledValue(item.unit) : null,
   }));
+}
+
+export async function getInteractionById(interactionPk: number): Promise<Interaction | null> {
+  const rows = await getDb().select().from(interaction).where(eq(interaction.interactionPk, interactionPk)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getInteractionEvidence(interactionPk: number): Promise<InteractionEvidenceRow[]> {
+  return getDb().select().from(interactionEvidence).where(eq(interactionEvidence.interactionPk, interactionPk));
+}
+
+export async function getInteractionAnnotations(interactionPk: number): Promise<InteractionAnnotation[]> {
+  return getDb().select().from(interactionAnnotation).where(eq(interactionAnnotation.interactionPk, interactionPk));
 }
 
 function mapInteractionEvidenceRows(rows: Awaited<ReturnType<typeof getInteractionEvidence>>): InteractionEvidence[] {

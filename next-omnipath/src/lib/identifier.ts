@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { entity, entityIdentifier, type Identifier } from "@next-omnipath/drizzle";
 import { getDb } from "@/lib/db/client";
 import { getEntityDisplayName, getEntityTypeLabel } from "@/lib/entities/display";
+import { toPublicEntityId } from "@/lib/entity-public-id";
 
 interface ResolvedEntityRow {
   matchedIdentifier: string;
@@ -45,10 +46,6 @@ export interface ResolvedEntityLookupResponse {
 
 function normalizeIdentifiers(identifiers: string[]): string[] {
   return Array.from(new Set(identifiers.map((identifier) => identifier.trim()).filter(Boolean)));
-}
-
-function toPublicEntityId(row: Pick<ResolvedEntityRow, "canonicalIdentifierType" | "canonicalIdentifier">): string {
-  return `${row.canonicalIdentifierType}|${row.canonicalIdentifier}`;
 }
 
 export async function resolveEntityIdentifiers(identifiers: string[]): Promise<ResolvedEntityLookupResponse> {
