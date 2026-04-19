@@ -4,7 +4,7 @@ import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
 import { getEntityFilterCounts, searchEntities } from "@/lib/entity";
-import { resolveEntityIdentifiers } from "@/lib/identifier";
+import { resolveEntityIdentifiers, type ResolvedEntityLookupResponse } from "@/lib/identifier";
 import type { EntityLike } from "@/lib/entities/display";
 import type { SearchResult } from "@/types/search-results";
 import { EntityFilterSidebar } from "./entity-filter-sidebar";
@@ -464,12 +464,9 @@ export default function EntitySearchWorkspace({
     setLookupLoading(true);
     setLookupError(null);
     try {
-      const data = await resolveEntityIdentifiers(identifiers) as {
-        matches?: IdentifierMatch[];
-        entities?: EntityLike[];
-      };
-      setLookupMatches(data.matches || []);
-      setLookupEntities(data.entities || []);
+      const data: ResolvedEntityLookupResponse = await resolveEntityIdentifiers(identifiers);
+      setLookupMatches((data.matches || []) as IdentifierMatch[]);
+      setLookupEntities((data.entities || []) as EntityLike[]);
     } catch (err) {
       console.error("Identifier lookup error", err);
       setLookupMatches([]);
