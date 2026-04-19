@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { browseAnnotationTerms, type ExploreOntologyTerm } from "@/lib/annotation";
 import { useEntitySelection } from "@/lib/navigation/url-state";
-import { formatNumber } from "@/lib/utils";
 import type { SearchFilters } from "@/types/search";
 
 interface AnnotationBrowserTabProps {
@@ -79,7 +78,6 @@ function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {term.namespace ? <Badge variant="outline">{term.namespace}</Badge> : null}
-                {typeof term.entityCount === "number" ? <Badge variant="secondary">{formatNumber(term.entityCount)} entities</Badge> : null}
                 {term.matchType ? <Badge variant="secondary">{term.matchType}</Badge> : null}
               </div>
             </CardHeader>

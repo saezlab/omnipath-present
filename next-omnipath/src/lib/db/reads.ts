@@ -2,7 +2,6 @@ import 'server-only';
 
 import {
   and,
-  countDistinct,
   eq,
   inArray,
   or,
@@ -287,10 +286,10 @@ export async function getAssociatedEntityPublicIdsByMemberPublicIds(publicIds: s
   return rows.map((row) => `${row.canonicalIdentifierType}|${row.canonicalIdentifier}`);
 }
 
-export async function getAnnotationTermCountsForEntityPublicIds(
+export async function getAnnotationTermsForEntityPublicIds(
   publicIds: string[],
   filters: SearchFilters = {},
-): Promise<Array<{ cvTerm: string; entityCount: number }>> {
+): Promise<string[]> {
   const entityPkMap = await getEntityPkMapByPublicIds(publicIds);
   const scopedEntityPks = Array.from(entityPkMap.values());
   if (scopedEntityPks.length === 0) {
@@ -304,19 +303,15 @@ export async function getAnnotationTermCountsForEntityPublicIds(
   }
 
   const rows = await getDb()
-    .select({
+    .selectDistinct({
       cvTerm: entityAnnotation.cvTerm,
-      entityCount: countDistinct(entityAnnotation.entityPk),
     })
     .from(entityAnnotation)
     .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
-    .where(where)
-    .groupBy(entityAnnotation.cvTerm);
+    .where(where);
 
   return rows
-    .map((row) => ({
-      cvTerm: row.cvTerm,
-      entityCount: Number(row.entityCount ?? 0),
-    }))
-    .sort((a, b) => b.entityCount - a.entityCount || a.cvTerm.localeCompare(b.cvTerm));
+    .map((row) => row.cvTerm)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
 }

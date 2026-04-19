@@ -2,11 +2,11 @@
 
 import "server-only";
 
-import { countDistinct, desc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { entity, entityAnnotation } from "@next-omnipath/drizzle";
 import { getDb } from "@/lib/db/client";
 import { getApiServiceUrl } from "@/lib/api/config";
-import { getAnnotationTermCountsForEntityPublicIds } from "@/lib/db/reads";
+import { getAnnotationTermsForEntityPublicIds } from "@/lib/db/reads";
 import type { SearchFilters } from "@/types/search";
 
 export interface ExploreOntologyTerm {
@@ -17,7 +17,6 @@ export interface ExploreOntologyTerm {
   matchType?: string;
   matchedText?: string;
   score?: number;
-  entityCount?: number;
 }
 
 interface OntologySearchMatch {
@@ -55,29 +54,26 @@ function normalizeOntologyId(value: string): string {
 async function browseOntologyTermsFromEntityHits(species: string | undefined, limit: number): Promise<ExploreOntologyTerm[]> {
   const db = getDb();
   const rows = await db
-    .select({
+    .selectDistinct({
       termId: entityAnnotation.cvTerm,
-      entityCount: countDistinct(entityAnnotation.entityPk),
     })
     .from(entityAnnotation)
     .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
     .where(species ? inArray(entity.taxonomyId, [species]) : undefined)
-    .groupBy(entityAnnotation.cvTerm)
-    .orderBy(desc(countDistinct(entityAnnotation.entityPk)), entityAnnotation.cvTerm)
+    .orderBy(asc(entityAnnotation.cvTerm))
     .limit(limit);
 
-  const entries = rows
-    .map((row) => [normalizeOntologyId(row.termId), Number(row.entityCount || 0)] as const)
-    .filter(([termId]) => Boolean(termId));
+  const termIds = rows
+    .map((row) => normalizeOntologyId(row.termId))
+    .filter(Boolean);
 
-  const resolved = await resolveOntologyTerms(entries.map(([termId]) => termId));
+  const resolved = await resolveOntologyTerms(termIds);
 
-  return entries.map(([termId, count]) => ({
+  return termIds.map((termId) => ({
     id: termId,
     label: resolved[termId]?.label || termId,
     namespace: resolved[termId]?.namespace,
     definition: resolved[termId]?.definition,
-    entityCount: count,
   }));
 }
 
@@ -196,20 +192,18 @@ export async function browseAnnotationTerms({
 
   if (scopedEntityIds?.length) {
     try {
-      const counts = await getAnnotationTermCountsForEntityPublicIds(scopedEntityIds, entityFilters);
-      const termIds = counts.map((entry) => entry.cvTerm);
+      const termIds = await getAnnotationTermsForEntityPublicIds(scopedEntityIds, entityFilters);
       if (termIds.length === 0) return [];
 
       const resolved = await resolveOntologyTerms(termIds);
-      const results = counts
-        .map((entry) => ({
-          id: entry.cvTerm,
-          label: resolved[entry.cvTerm]?.label || entry.cvTerm,
-          namespace: resolved[entry.cvTerm]?.namespace,
-          definition: resolved[entry.cvTerm]?.definition,
-          entityCount: entry.entityCount,
+      const results = termIds
+        .map((termId) => ({
+          id: termId,
+          label: resolved[termId]?.label || termId,
+          namespace: resolved[termId]?.namespace,
+          definition: resolved[termId]?.definition,
         }))
-        .sort((a, b) => b.entityCount - a.entityCount || a.label.localeCompare(b.label));
+        .sort((a, b) => a.label.localeCompare(b.label));
 
       if (!normalizedQuery) {
         return results.slice(0, limit);
