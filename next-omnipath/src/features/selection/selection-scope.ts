@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { getEntityIdsForAnnotationTerms } from "@/lib/queries";
+import { getEntityIdsForAnnotationTerms } from "@/lib/entity";
 
 export interface DerivedSelectionScope {
   selectedEntityIds: string[];

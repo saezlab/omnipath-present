@@ -2,15 +2,15 @@ import { getChatModel } from "@/ai";
 import { convertToModelMessages, stepCountIs, streamText, validateUIMessages } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
+import { resolveOntologyTerms as resolveOntologyTermsQuery } from "@/lib/annotation";
+import { searchAssociations } from "@/lib/association";
+import { searchEntities } from "@/lib/entity";
+import { resolveEntityIdentifiers as resolveEntityIdentifiersQuery } from "@/lib/identifier";
+import { getInteractionFilterCounts, searchInteractions } from "@/lib/interaction";
 import {
   exploreOntologyTree as exploreOntologyTreeQuery,
   normalizeOntologyFilterValues,
-  resolveEntityIdentifiers as resolveEntityIdentifiersQuery,
-  resolveOntologyTerms as resolveOntologyTermsQuery,
-  searchAssociations,
-  searchEntities,
-  searchInteractions,
-} from "@/lib/queries";
+} from "@/lib/ontology";
 import { getEntityDisplayName, getEntityTypeLabel, getEntityPublicId } from "@/lib/entities/display";
 import type { SearchFilters } from "@/types/search";
 import type { AssociationListRow } from "@/features/associations/types";
@@ -157,8 +157,7 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
 
         const data = await searchEntities({
           query,
-          offset: 0,
-          filters
+          filters,
         });
 
         const hits = (data.hits || []) as unknown as EntityHit[];
@@ -229,11 +228,11 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           },
           preview,
           stats: {
-            totalCount: data.estimatedTotalHits || hits.length,
-            hasMore: hits.length < (typeof data.estimatedTotalHits === 'number' ? data.estimatedTotalHits : hits.length),
+            totalCount: data.total || hits.length,
+            hasMore: hits.length < data.total,
           },
           results: preview,
-          totalCount: data.estimatedTotalHits || hits.length,
+          totalCount: data.total || hits.length,
           searchType: "entities",
           query,
           bestMatchId,
@@ -497,13 +496,13 @@ Do not use broad entity search as a substitute for identifier resolution when an
         if (isNegative) apiFilters.signs = [...(apiFilters.signs || []), -1];
         if (sources?.length) apiFilters.sources = sources;
 
-        const data = await searchInteractions("", apiFilters, 20, 0);
+        const [data, facetStats] = await Promise.all([
+          searchInteractions({ query: "", filters: apiFilters, limit: 20, offset: 0 }),
+          getInteractionFilterCounts({ query: "", filters: apiFilters }),
+        ]);
 
         const hits = (data.hits || []) as InteractionHit[];
         console.log(`Interaction search returned ${hits.length} results.`);
-
-        // Extract and format facet statistics for AI analysis
-        const facetStats = (data.facetDistribution || {}) as Record<string, Record<string, number>>;
 
         // Support both old and new facet keys depending on index version
         const formattedFacets = {
@@ -526,7 +525,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
 
         // Calculate summary statistics from facets
         const summaryStats = {
-          totalInteractions: data.estimatedTotalHits || hits.length,
+          totalInteractions: data.total || hits.length,
           uniqueInteractionTypes: Object.keys(formattedFacets.interactionTypes).length,
           uniqueDataSources: Object.keys(formattedFacets.dataSources).length,
           uniqueDetectionMethods: Object.keys(formattedFacets.detectionMethods).length,
@@ -579,7 +578,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
           exampleInteractions,
           // Keep a generic results field for tool UI compatibility
           results: exampleInteractions,
-          totalCount: data.estimatedTotalHits || hits.length,
+          totalCount: data.total || hits.length,
           entityIds: entityIds?.map((id) => String(id)),
         };
       } catch (error: unknown) {

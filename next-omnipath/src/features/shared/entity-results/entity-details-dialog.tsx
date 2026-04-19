@@ -10,7 +10,7 @@ import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
 import type { SearchFilters } from "@/types/search";
 import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace";
-import { getAssociatedEntityScope, getEntityDetailsByPublicId } from "@/lib/queries";
+import { getAssociatedEntityIds, getEntityDetails } from "@/lib/entity";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import {
   getEntityDescriptions,
@@ -123,14 +123,14 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
     queryKey: ["entity-details", entityId],
     enabled: open && !!entityId,
     staleTime: 5 * 60 * 1000,
-    queryFn: async () => getEntityDetailsByPublicId(entityId!),
+    queryFn: async () => getEntityDetails(entityId!),
   });
 
   const { data: associationScope, isLoading: loadingAssociations } = useQuery({
     queryKey: ["entity-associated-scope", entityId],
     enabled: open && !!entityId,
     staleTime: 5 * 60 * 1000,
-    queryFn: async () => getAssociatedEntityScope([entityId!]),
+    queryFn: async () => getAssociatedEntityIds([entityId!]),
   });
 
   const resolvedEntity = details?.entity ?? entity;

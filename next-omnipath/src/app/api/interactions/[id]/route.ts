@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getInteractionDetailsById } from "@/lib/queries";
+import { getInteractionDetails } from "@/lib/interaction";
 
 export async function GET(
   _request: Request,
@@ -13,7 +13,7 @@ export async function GET(
     return NextResponse.json({ error: "Invalid interaction ID" }, { status: 400 });
   }
 
-  const details = await getInteractionDetailsById(interactionId);
+  const details = await getInteractionDetails(interactionId);
   if (!details) {
     return NextResponse.json({ error: "Interaction not found" }, { status: 404 });
   }

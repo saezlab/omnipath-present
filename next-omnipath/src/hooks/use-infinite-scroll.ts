@@ -1,17 +1,25 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
 
-interface UseInfiniteScrollOptions<T> {
-  fetchData: (offset: number, limit: number) => Promise<{
-    results: T[]
-    totalResults: number
-  }>
+interface InfiniteScrollPage<T, TPageParam> {
+  results: T[]
+  totalResults: number
+  nextPageParam?: TPageParam
+}
+
+interface UseInfiniteScrollOptions<T, TPageParam = number> {
+  fetchData: (pageParam: TPageParam, limit: number) => Promise<InfiniteScrollPage<T, TPageParam>>
   pageSize?: number
   rootMargin?: string
   threshold?: number
   dependencies?: unknown[]
   root?: HTMLElement | null
   queryKey?: readonly unknown[]
+  initialPageParam?: TPageParam
+  getNextPageParam?: (
+    lastPage: InfiniteScrollPage<T, TPageParam>,
+    allPages: Array<InfiniteScrollPage<T, TPageParam>>,
+  ) => TPageParam | undefined
 }
 
 interface UseInfiniteScrollReturn<T> {
@@ -26,7 +34,7 @@ interface UseInfiniteScrollReturn<T> {
   reset: () => void
 }
 
-export function useInfiniteScroll<T>({
+export function useInfiniteScroll<T, TPageParam = number>({
   fetchData,
   pageSize = 50,
   rootMargin = '100px',
@@ -34,7 +42,9 @@ export function useInfiniteScroll<T>({
   dependencies = [],
   root = null,
   queryKey,
-}: UseInfiniteScrollOptions<T>): UseInfiniteScrollReturn<T> {
+  initialPageParam,
+  getNextPageParam,
+}: UseInfiniteScrollOptions<T, TPageParam>): UseInfiniteScrollReturn<T> {
   const instanceId = useId()
   const queryClient = useQueryClient()
   const sentinelRef = useRef<HTMLElement | null>(null)
@@ -47,15 +57,16 @@ export function useInfiniteScroll<T>({
 
   const query = useInfiniteQuery({
     queryKey: resolvedQueryKey,
-    queryFn: async ({ pageParam }) => {
-      const offset = typeof pageParam === 'number' ? pageParam : 0
-      return fetchData(offset, pageSize)
-    },
-    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => fetchData(pageParam as TPageParam, pageSize),
+    initialPageParam: (initialPageParam ?? 0) as TPageParam,
     getNextPageParam: (lastPage, allPages) => {
+      if (getNextPageParam) {
+        return getNextPageParam(lastPage, allPages)
+      }
+
       const loadedCount = allPages.reduce((sum, page) => sum + page.results.length, 0)
       const hasMore = lastPage.results.length === pageSize && loadedCount < lastPage.totalResults
-      return hasMore ? loadedCount : undefined
+      return hasMore ? (loadedCount as TPageParam) : undefined
     },
   })
 

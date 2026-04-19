@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ResourceRecord } from "@/lib/resources";
+import type { ResourceRecord, ResourcesSummary } from "@/lib/resource";
 import { downloadResourceSelection } from "@/lib/resource-downloads";
 import { cn, formatNumber } from "@/lib/utils";
 import {
@@ -20,19 +20,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-
-interface ResourcesSummary {
-  totalResources: number;
-  totalEntities: number;
-  totalInteractions: number;
-  totalAssociations: number;
-  totalAnnotations: number;
-  totalIdentifiers: number;
-  totalOntologyTerms: number;
-  totalBytes: number;
-  buildStatusCounts: Record<string, number>;
-  categoryCounts: Record<string, number>;
-}
 
 function sentenceCase(value: string | null | undefined): string {
   if (!value) return "Unknown";

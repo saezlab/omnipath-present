@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { InteractionDetails } from "@/features/interactions-search/components/interaction-details"
-import type { InteractionDetailsData, InteractionListRow } from "@/features/interactions-search/types"
+import type { InteractionListRow } from "@/features/interactions-search/types"
+import { getInteractionDetails } from "@/lib/interaction"
 
 interface InteractionDetailsSheetProps {
   open: boolean
@@ -26,11 +27,8 @@ export function InteractionDetailsSheet({ open, onOpenChange, interaction }: Int
     enabled: open && !!interactionId,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const response = await fetch(`/api/interactions/${interactionId}`)
-      if (!response.ok) {
-        throw new Error(`Failed to load interaction details (${response.status})`)
-      }
-      return await response.json() as InteractionDetailsData | null
+      if (!interactionId) return null
+      return await getInteractionDetails(interactionId)
     },
   })
 

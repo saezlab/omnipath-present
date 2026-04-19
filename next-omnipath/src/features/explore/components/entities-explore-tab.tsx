@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { searchEntities } from "@/lib/queries";
+import { getEntityFilterCounts, searchEntities } from "@/lib/entity";
 import { EntityFilterSidebar } from "@/features/explore/components/entity-filter-sidebar";
-import type { SearchResult } from "@/types/search-results";
+import type { EntitySearchRow } from "@/types/search-results";
 import { SearchResults } from "@/features/shared/entity-results/search-results";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -94,28 +94,26 @@ export function EntitiesExploreTab({
     loadingMore,
     hasMore,
     sentinelRef,
-  } = useInfiniteScroll<SearchResult>({
+  } = useInfiniteScroll<EntitySearchRow, number | undefined>({
     root: isMobile ? null : scrollRoot,
-    fetchData: useCallback(async (offset: number, limit: number) => {
+    fetchData: useCallback(async (cursor: number | undefined, limit: number) => {
       const response = await searchEntities({
         query: query || "",
-        index: "search_entities",
         limit,
-        offset,
+        cursor,
         filters: effectiveFilters,
-        facets: [],
-        trackTotalHits: false,
-        includeIdentifiers: true,
-        includeOntologyTerms: false,
       });
 
       return {
         results: response.hits,
-        totalResults: response.estimatedTotalHits || 0,
+        totalResults: response.total,
+        nextPageParam: response.nextCursor ?? undefined,
       };
     }, [effectiveFilters, query]),
     pageSize: 20,
     dependencies: [query, effectiveFilters],
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextPageParam,
   });
 
   useEffect(() => {
@@ -127,22 +125,16 @@ export function EntitiesExploreTab({
         const facetFilters = { ...effectiveFilters };
         delete facetFilters.ncbi_tax_id;
 
-        const response = await searchEntities({
+        const response = await getEntityFilterCounts({
           query: query || "",
-          index: "search_entities",
-          limit: 0,
-          offset: 0,
           filters: facetFilters,
-          facets: ["entity_type", "sources"],
-          trackTotalHits: false,
         });
 
         if (cancelled) return;
 
-        const facetDistribution = response.facetDistribution || {};
         setFilterCounts({
-          entity_type: facetDistribution.entity_type || {},
-          sources: facetDistribution.sources || {},
+          entity_type: response.entity_type || {},
+          sources: response.sources || {},
         });
       } finally {
         if (!cancelled) {

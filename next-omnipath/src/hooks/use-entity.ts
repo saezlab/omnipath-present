@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEntityDataSource } from "@/contexts/entity-data-source-context"
 import type { EntityLike } from "@/lib/entities/display"
-import { getEntityRowByPublicId } from "@/lib/queries"
+import { getEntity } from "@/lib/entity"
 
 interface UseEntityResult {
   data: EntityLike | null
@@ -26,7 +26,7 @@ export function useEntity(entityId: string | undefined): UseEntityResult {
         return entityDataSource.getEntity(normalizedId)
       }
 
-      return await getEntityRowByPublicId(normalizedId)
+      return await getEntity(normalizedId)
     },
     enabled: !!entityId,
   })

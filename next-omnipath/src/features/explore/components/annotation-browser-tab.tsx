@@ -6,12 +6,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  browseTopOntologyTerms,
-  getScopedAnnotationTerms,
-  searchOntologyTerms,
-  type ExploreOntologyTerm,
-} from "@/lib/queries";
+import { browseAnnotationTerms, type ExploreOntologyTerm } from "@/lib/annotation";
 import { useEntitySelection } from "@/lib/navigation/url-state";
 import { formatNumber } from "@/lib/utils";
 import type { SearchFilters } from "@/types/search";
@@ -107,12 +102,13 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
     queryKey: isScoped
       ? ["selection-scoped-annotations", scopedEntityIds, entityFilters]
       : ["explore-annotations", query, species],
-    queryFn: () => {
-      if (isScoped) {
-        return getScopedAnnotationTerms(scopedEntityIds || [], entityFilters);
-      }
-      return query.trim().length > 0 ? searchOntologyTerms(query, 30) : browseTopOntologyTerms(species, 30);
-    },
+    queryFn: () => browseAnnotationTerms({
+      query,
+      species,
+      scopedEntityIds,
+      entityFilters,
+      limit: 30,
+    }),
     enabled: !isScoped || (scopedEntityIds?.length || 0) > 0,
     staleTime: 60_000,
   });

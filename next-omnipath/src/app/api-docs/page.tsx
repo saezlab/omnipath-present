@@ -2,10 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getSiteUrl } from "@/lib/api/config"
 import { headers } from "next/headers"
 import { ExportTryNow, JsonTryNow } from "./try-now"
-import {
-  getEntityFilterFacetDistributionPostgres,
-  getInteractionFilterFacetDistributionPostgres,
-} from "@/lib/postgres-search/search"
+import { loadFacetDistributionFromMaterializedView } from "@/lib/postgres-search/search"
 
 export const dynamic = "force-dynamic"
 
@@ -104,8 +101,8 @@ function facetMapToOptions(
 
 async function getAllFacetExamples(): Promise<FacetExamples> {
   const [entityFacets, interactionFacets] = await Promise.all([
-    getEntityFilterFacetDistributionPostgres(),
-    getInteractionFilterFacetDistributionPostgres(),
+    loadFacetDistributionFromMaterializedView("entity_filter_counts"),
+    loadFacetDistributionFromMaterializedView("interaction_filter_counts"),
   ])
 
   const interactionTypes = facetMapToOptions(interactionFacets, "interaction_type")

@@ -14,7 +14,7 @@ import {
   getEntitySecondaryName,
   getEntityTypeLabel,
 } from "@/lib/entities/display";
-import { searchInteractions } from "@/lib/queries";
+import { getInteractionFilterCounts, searchInteractions } from "@/lib/interaction";
 import { DataCard } from "@/features/interactions-search/components/data-card";
 import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
@@ -79,26 +79,19 @@ export function InteractionsExploreTab({
     sentinelRef
   } = useInfiniteScroll<InteractionListRow>({
     fetchData: useCallback(async (offset: number, limit: number) => {
-      const response = await searchInteractions("", effectiveFilters, limit, offset);
+      const [response, counts] = await Promise.all([
+        searchInteractions({ query: "", filters: effectiveFilters, limit, offset }),
+        offset === 0 ? getInteractionFilterCounts({ query: "", filters: effectiveFilters }) : Promise.resolve(null),
+      ]);
 
-      if (offset === 0) {
-        const facetDist = response.facetDistribution || {};
-        const counts: Record<string, Record<string, number>> = {
-          interaction_type: facetDist.interaction_type || {},
-          is_directed: facetDist.is_directed || {},
-          sign: facetDist.sign || {},
-          interaction_annotation_terms: facetDist.interaction_annotation_terms || {},
-          participant_annotation_terms: facetDist.participant_annotation_terms || {},
-          sources: facetDist.sources || {},
-        };
-
+      if (counts) {
         setFilterCounts(counts);
         onFilterCountsUpdate(counts);
       }
 
       return {
         results: response.hits,
-        totalResults: response.estimatedTotalHits || 0
+        totalResults: response.total,
       };
     }, [effectiveFilters, onFilterCountsUpdate]),
     pageSize: RESULTS_PER_PAGE,
@@ -133,7 +126,7 @@ export function InteractionsExploreTab({
     setError(null);
 
     try {
-      const response = await searchInteractions("", effectiveFilters, MAX_GRAPH_INTERACTIONS, 0);
+      const response = await searchInteractions({ query: "", filters: effectiveFilters, limit: MAX_GRAPH_INTERACTIONS, offset: 0 });
       setAllInteractions(response.hits);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load all interactions");

@@ -127,7 +127,7 @@ function mapEntitySearchRow(row: {
   };
 }
 
-async function loadFacetDistributionFromMaterializedView(viewName: string): Promise<FacetDistribution> {
+export async function loadFacetDistributionFromMaterializedView(viewName: string): Promise<FacetDistribution> {
   const client = await getPool().connect();
   try {
     const result = await client.query(
@@ -150,108 +150,19 @@ async function loadFacetDistributionFromMaterializedView(viewName: string): Prom
   }
 }
 
-export async function getEntityFilterFacetDistributionPostgres(params?: {
-  query?: string;
-  filters?: SearchFilters;
-  facets?: string[];
-}): Promise<FacetDistribution> {
-  const query = params?.query || '';
-  const filters = params?.filters || {};
-  const requestedFacets = new Set((params?.facets !== undefined
-    ? params.facets
-    : ['entity_type', 'sources', 'ncbi_tax_id', 'ontology_terms']) as string[]);
+function filterFacetDistribution(
+  facetDistribution: FacetDistribution,
+  requestedFacets?: string[],
+): FacetDistribution {
+  const allowedFacets = new Set(
+    requestedFacets && requestedFacets.length > 0
+      ? requestedFacets
+      : ['entity_type', 'sources', 'ncbi_tax_id', 'ontology_terms'],
+  );
 
-  if (!query.trim() && Object.keys(filters).length === 0) {
-    const facetDistribution = await loadFacetDistributionFromMaterializedView('entity_filter_counts');
-    return Object.fromEntries(Object.entries(facetDistribution).filter(([key]) => requestedFacets.has(key)));
-  }
-
-  const client = await getPool().connect();
-  try {
-    const whereParams: SqlParams = [];
-    const where = buildEntityWhere(filters, query, whereParams);
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-    const facetSelects: string[] = [];
-
-    if (requestedFacets.has('entity_type')) {
-      facetSelects.push(`
-       SELECT
-         'entity_type'::text AS filter_key,
-         CASE
-           WHEN entity_type IS NULL OR btrim(entity_type) = '' THEN NULL
-           ELSE lower(split_part(entity_type, ':', 3)) || ':' || split_part(entity_type, ':', 1) || ':' || split_part(entity_type, ':', 2)
-         END AS filter_value,
-         COUNT(*)::bigint AS doc_count
-       FROM filtered_entities
-       GROUP BY 2`);
-    }
-
-    if (requestedFacets.has('sources')) {
-      facetSelects.push(`
-       SELECT
-         'sources'::text AS filter_key,
-         source AS filter_value,
-         COUNT(DISTINCT entity_pk)::bigint AS doc_count
-       FROM filtered_entities
-       CROSS JOIN LATERAL unnest(sources) AS source
-       WHERE source IS NOT NULL AND btrim(source) <> ''
-       GROUP BY source`);
-    }
-
-    if (requestedFacets.has('ncbi_tax_id')) {
-      facetSelects.push(`
-       SELECT
-         'ncbi_tax_id'::text AS filter_key,
-         taxonomy_id AS filter_value,
-         COUNT(*)::bigint AS doc_count
-       FROM filtered_entities
-       WHERE taxonomy_id IS NOT NULL AND btrim(taxonomy_id) <> ''
-       GROUP BY taxonomy_id`);
-    }
-
-    if (requestedFacets.has('ontology_terms')) {
-      facetSelects.push(`
-       SELECT
-         'ontology_terms'::text AS filter_key,
-         ea.cv_term AS filter_value,
-         COUNT(DISTINCT ea.entity_pk)::bigint AS doc_count
-       FROM filtered_entities fe
-       JOIN ${SEARCH_SCHEMA}.entity_annotation ea ON ea.entity_pk = fe.entity_pk
-       WHERE ea.cv_term IS NOT NULL AND btrim(ea.cv_term) <> ''
-       GROUP BY ea.cv_term`);
-    }
-
-    if (facetSelects.length === 0) {
-      return {};
-    }
-
-    const result = await client.query(
-      `WITH filtered_entities AS (
-         SELECT e.entity_pk, e.entity_type, e.sources, e.taxonomy_id
-         FROM ${SEARCH_SCHEMA}.entity e
-         ${whereSql}
-       )
-       ${facetSelects.join('\n       UNION ALL\n')}
-       ORDER BY filter_key, doc_count DESC, filter_value`,
-      whereParams,
-    );
-
-    const facetDistribution: FacetDistribution = {};
-    for (const row of result.rows) {
-      const key = String(row.filter_key || '').trim();
-      const value = String(row.filter_value || '').trim();
-      if (!key || !value) continue;
-      (facetDistribution[key] ||= {})[value] = Number(row.doc_count || 0);
-    }
-    return facetDistribution;
-  } finally {
-    client.release();
-  }
-}
-
-export async function getInteractionFilterFacetDistributionPostgres(): Promise<FacetDistribution> {
-  return loadFacetDistributionFromMaterializedView('interaction_filter_counts');
+  return Object.fromEntries(
+    Object.entries(facetDistribution).filter(([key]) => allowedFacets.has(key)),
+  );
 }
 
 function buildEntityWhere(filters: SearchFilters, query: string, params: SqlParams): string[] {
@@ -343,7 +254,10 @@ export async function searchEntitiesPostgres(params: {
       : null;
 
     if (limit === 0) {
-      const facetDistribution = await getEntityFilterFacetDistributionPostgres({ query, filters, facets });
+      const facetDistribution = filterFacetDistribution(
+        await loadFacetDistributionFromMaterializedView('entity_filter_counts'),
+        facets,
+      );
       return {
         hits: [],
         estimatedTotalHits: total ?? 0,
@@ -402,7 +316,10 @@ export async function searchEntitiesPostgres(params: {
 
     const hits = rowsResult.rows.map(mapEntitySearchRow);
     const facetDistribution = offset === 0
-      ? await getEntityFilterFacetDistributionPostgres({ query, filters, facets })
+      ? filterFacetDistribution(
+          await loadFacetDistributionFromMaterializedView('entity_filter_counts'),
+          facets,
+        )
       : undefined;
     const estimatedTotalHits = total ?? (offset + hits.length + (hits.length === limit ? 1 : 0));
     return {
@@ -614,7 +531,7 @@ export async function searchInteractionsPostgres(params: {
     );
 
     const facetDistribution = offset === 0
-      ? await getInteractionFilterFacetDistributionPostgres()
+      ? await loadFacetDistributionFromMaterializedView('interaction_filter_counts')
       : undefined;
     return {
       hits: rowsResult.rows.map(mapInteractionListRow),

@@ -3,7 +3,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
-import { searchEntities } from "@/lib/queries";
+import { getEntityFilterCounts, searchEntities } from "@/lib/entity";
+import { resolveEntityIdentifiers } from "@/lib/identifier";
 import type { EntityLike } from "@/lib/entities/display";
 import type { SearchResult } from "@/types/search-results";
 import { EntityFilterSidebar } from "./entity-filter-sidebar";
@@ -172,37 +173,30 @@ export default function EntitySearchWorkspace({
 
   // Fetch function for infinite scroll
   const fetchSearchData = useCallback(
-    async (offset: number, limit: number) => {
+    async (cursor: number | null, limit: number) => {
       if (searchMode !== "full-text") {
         return { results: [], totalResults: 0 };
       }
 
       const [response, facetResponse] = await Promise.all([
         searchEntities({
-          query: query || "", // Allow empty query to fetch all results
-          index: "search_entities",
+          query: query || "",
           limit,
-          offset,
+          cursor: cursor ?? undefined,
           filters,
-          facets: [] // Do not compute facets for the main search hits query
         }),
-        offset === 0 && initialSearchType === "search_entities"
-          ? searchEntities({
-              query: query || "", // Allow empty query to fetch all results
-              index: "search_entities",
-              limit: 0,
+        cursor === null && initialSearchType === "search_entities"
+          ? getEntityFilterCounts({
+              query: query || "",
               filters: { ...filters, ncbi_tax_id: undefined },
-              facets: ["entity_type", "sources", "ontology_terms"]
             })
-          : Promise.resolve(null)
+          : Promise.resolve(null),
       ]);
 
       const hits: SearchResult[] = response.hits || [];
 
-      // Update filter counts from backend-provided facet distribution (only on first page)
       if (facetResponse && initialSearchType === "search_entities") {
-        const facetDistribution = facetResponse.facetDistribution || {};
-        const ontologyCounts = facetDistribution.ontology_terms || {};
+        const ontologyCounts = facetResponse.ontology_terms || {};
         const perOntologyCounts: Record<string, Record<string, number>> = {};
         Object.entries(ontologyCounts).forEach(([value, count]) => {
           const match = value.match(/^([A-Z][A-Z0-9_-]*):/);
@@ -211,18 +205,16 @@ export default function EntitySearchWorkspace({
         });
         setOntologyFacetCountsByPrefix(perOntologyCounts);
         setFilterCounts({
-          entity_type: facetDistribution.entity_type || {},
-          sources: facetDistribution.sources || {},
-          ncbi_tax_id: facetDistribution.ncbi_tax_id || {},
+          entity_type: facetResponse.entity_type || {},
+          sources: facetResponse.sources || {},
+          ncbi_tax_id: facetResponse.ncbi_tax_id || {},
         });
       }
 
-      // The API returns estimatedTotalHits for the total count
-      const estimatedTotalHits = ('estimatedTotalHits' in response ? response.estimatedTotalHits as number : 0) || hits.length || 0;
-
       return {
         results: hits,
-        totalResults: estimatedTotalHits
+        totalResults: response.total,
+        nextPageParam: response.nextCursor ?? undefined,
       };
     },
     [query, searchMode, initialSearchType, filters]
@@ -235,10 +227,12 @@ export default function EntitySearchWorkspace({
     loadingMore,
     hasMore,
     sentinelRef
-  } = useInfiniteScroll<SearchResult>({
+  } = useInfiniteScroll<SearchResult, number | null>({
     fetchData: fetchSearchData,
     pageSize: 20,
-    dependencies: [query, searchMode, initialSearchType, filters]
+    dependencies: [query, searchMode, initialSearchType, filters],
+    initialPageParam: null,
+    getNextPageParam: (lastPage) => lastPage.nextPageParam,
   });
 
   // Keep locked entity IDs enforced
@@ -470,18 +464,7 @@ export default function EntitySearchWorkspace({
     setLookupLoading(true);
     setLookupError(null);
     try {
-      const response = await fetch("/api/entity-lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifiers }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `Lookup failed with status ${response.status}`);
-      }
-
-      const data = await response.json() as {
+      const data = await resolveEntityIdentifiers(identifiers) as {
         matches?: IdentifierMatch[];
         entities?: EntityLike[];
       };
