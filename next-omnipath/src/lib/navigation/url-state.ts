@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import type { SearchFilters } from "@/types/search";
-import type { SearchResult } from "@/features/search/components/result-card";
+import type { SearchResult } from "@/types/search-results";
 import {
   normalizeStringArray,
   parseEntityIdsParam,

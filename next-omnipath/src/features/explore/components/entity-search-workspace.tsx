@@ -6,10 +6,10 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransit
 import { searchEntities } from "@/lib/queries";
 import type { EntityLike } from "@/lib/entities/display";
 import type { SearchResult } from "@/types/search-results";
-import { EntityFilterSidebar } from "./components/entity-filter-sidebar";
-import { SearchBar } from "./components/search-bar";
-import { SearchResults } from "./components/search-results";
-import { IdentifierMatches, type IdentifierMatch } from "./components/identifier-matches";
+import { EntityFilterSidebar } from "./entity-filter-sidebar";
+import { SearchBar } from "./search-bar";
+import { SearchResults } from "@/features/shared/entity-results/search-results";
+import { IdentifierMatches, type IdentifierMatch } from "@/features/shared/entity-results/identifier-matches";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,10 +19,10 @@ import { cn } from "@/lib/utils";
 import type { SearchFilters } from "@/types/search";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useSearchUrlState } from "@/lib/navigation/url-state";
-import { useSearchWorkspaceState, type SearchWorkspacePane } from "./use-search-workspace-state";
+import { useSearchWorkspaceState, type SearchWorkspacePane } from "@/features/explore/use-entity-search-workspace-state";
 import { SearchAssistantPane } from "@/features/chat/search-assistant-pane";
 
-interface SearchPageProps {
+interface EntitySearchWorkspaceProps {
   // Props for embedded mode (like in AI dialogs)
   embedded?: boolean;
   // Allow ontology browser when embedded (e.g. selection tab)
@@ -51,7 +51,7 @@ type LayoutMode = "search" | "split" | "ontology";
 
 const EMPTY_LOCKED_ENTITY_IDS: Array<string | number> = [];
 
-export default function SearchPage({
+export default function EntitySearchWorkspace({
   embedded = false,
   allowOntologyInEmbedded = false,
   showLayoutSwitcherInEmbedded = false,
@@ -62,7 +62,7 @@ export default function SearchPage({
   initialFilters,
   showFilters = false,
   lockedEntityIds = EMPTY_LOCKED_ENTITY_IDS
-}: SearchPageProps = {}) {
+}: EntitySearchWorkspaceProps = {}) {
   const {
     query: urlQuery,
     setQuery: setUrlQuery,

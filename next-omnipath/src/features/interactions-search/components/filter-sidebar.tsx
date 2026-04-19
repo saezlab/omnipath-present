@@ -12,7 +12,7 @@ import { SearchFilters } from "@/types/search"
 import { X, Filter, Search, ArrowRight, Minus, Plus, Ban } from "lucide-react"
 import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { EntityHoverCard, CvTermHoverCard } from "@/features/search/components/result-card"
+import { EntityHoverCard, CvTermHoverCard } from "@/features/shared/entity-results/result-card"
 import { useOntologyTerms } from "@/features/ontology/use-ontology-terms"
 
 interface FilterOption {

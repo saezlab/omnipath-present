@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Filter, X } from "lucide-react"
 import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
 import * as React from "react"
-import { EntityHoverCard, CvTermHoverCard } from "@/features/search/components/result-card"
+import { EntityHoverCard, CvTermHoverCard } from "@/features/shared/entity-results/result-card"
 
 interface FilterOption {
   value: string;

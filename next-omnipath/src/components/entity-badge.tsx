@@ -3,7 +3,7 @@ import React, { useRef, useState } from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useEntity } from "@/hooks/use-entity";
-import { ResultCard } from "@/features/search/components/result-card";
+import { ResultCard } from "@/features/shared/entity-results/result-card";
 import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle } from "lucide-react";
 
 // Map entity types to icons and colors

@@ -8,7 +8,7 @@ import {
   search,
   searchAssociations as searchAssociationsData,
   searchInteractions as searchInteractionsData,
-} from "@/lib/data/search";
+} from "@/lib/search_data/search";
 import { getApiServiceUrl } from "@/lib/api/config";
 import {
   getAnnotationTermCountsForEntityPublicIds,
@@ -25,7 +25,6 @@ import {
   getEntitySummary,
   getInteractionAnnotations,
   getInteractionById,
-  getInteractionCountForEntityPublicIds,
   getInteractionEvidence,
   toPublicEntityId,
 } from "@/lib/db/reads";
@@ -736,19 +735,6 @@ export async function getScopedAnnotationTerms(
 
 export async function getInteractionStats() {
   return getInteractionStatsData();
-}
-
-export async function getSelectionInteractionCount(filters: SearchFilters, scopedEntityIds: string[]): Promise<number> {
-  if (scopedEntityIds.length === 0) {
-    return 0;
-  }
-
-  try {
-    return await getInteractionCountForEntityPublicIds(scopedEntityIds, filters);
-  } catch (error) {
-    console.error("Error fetching selection interaction count:", error);
-    return 0;
-  }
 }
 
 export async function searchResults(params: Parameters<typeof searchEntities>[0]) {

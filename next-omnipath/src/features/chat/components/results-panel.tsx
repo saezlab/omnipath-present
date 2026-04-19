@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { X, Search } from "lucide-react"
 import { ToolResult } from "./dual-mode-interface"
-import SearchPage from "@/features/search/page"
+import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace"
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab"
 import { useState, useCallback, useEffect } from "react"
 import { SearchFilters } from "@/types/search"
@@ -98,7 +98,7 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
         const query = String(toolResult.query.query || "")
 
         return (
-          <SearchPage
+          <EntitySearchWorkspace
             key={toolResult.id}
             embedded={true}
             initialQuery={query}
@@ -114,7 +114,7 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
         const initialSearchMode = identifiers.length > 1 ? "batch" : "identifier"
 
         return (
-          <SearchPage
+          <EntitySearchWorkspace
             key={toolResult.id}
             embedded={true}
             initialSearchType="search_entities"

@@ -9,7 +9,7 @@ import { Database, Loader2, Network, Shapes, Tag } from "lucide-react";
 import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
 import type { SearchFilters } from "@/types/search";
-import SearchPage from "@/features/search/page";
+import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace";
 import { getAssociatedEntityScope, getEntityDetailsByPublicId } from "@/lib/queries";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import {
@@ -214,7 +214,7 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
 
             {hasAssociations && (
               <TabsContent value="associations" className="flex-1 min-h-0 m-0 overflow-hidden">
-                <SearchPage
+                <EntitySearchWorkspace
                   embedded={true}
                   allowOntologyInEmbedded={false}
                   showLayoutSwitcherInEmbedded={false}

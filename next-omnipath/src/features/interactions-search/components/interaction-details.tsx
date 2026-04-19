@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import type { InteractionDetailsData, InteractionDirection, InteractionEvidence, InteractionListRow } from "@/features/interactions-search/types"
 import { getEntityDisplayName, getEntityPublicId, getEntitySecondaryName, getEntityTypeLabel } from "@/lib/entities/display"
-import { CvTermHoverCard } from "@/features/search/components/result-card"
+import { CvTermHoverCard } from "@/features/shared/entity-results/result-card"
 import { EntityBadge } from "@/components/entity-badge"
 
 interface InteractionDetailsProps {
