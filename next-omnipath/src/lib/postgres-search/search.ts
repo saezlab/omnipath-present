@@ -178,17 +178,11 @@ function buildEntityWhere(filters: SearchFilters, query: string, params: SqlPara
   const trimmedQuery = query.trim();
   if (trimmedQuery) {
     const exact = addParam(params, trimmedQuery);
-    const prefix = addParam(params, `${trimmedQuery}%`);
-    const contains = addParam(params, `%${trimmedQuery}%`);
     where.push(`EXISTS (
       SELECT 1
       FROM ${SEARCH_SCHEMA}.entity_identifier ei_filter
       WHERE ei_filter.entity_pk = e.entity_pk
-        AND (
-          ei_filter.identifier ILIKE ${exact}
-          OR ei_filter.identifier ILIKE ${prefix}
-          OR ei_filter.identifier ILIKE ${contains}
-        )
+        AND ei_filter.identifier = ${exact}
     )`);
   }
 
@@ -250,23 +244,13 @@ export async function searchEntitiesPostgres(params: {
     const limitPlaceholder = addParam(queryParams, limit);
     const offsetPlaceholder = addParam(queryParams, offset);
     const trimmedQuery = query.trim();
-    const exactPlaceholder = trimmedQuery ? addParam(queryParams, trimmedQuery) : null;
-    const prefixPlaceholder = trimmedQuery ? addParam(queryParams, `${trimmedQuery}%`) : null;
-    const containsPlaceholder = trimmedQuery ? addParam(queryParams, `%${trimmedQuery}%`) : null;
 
     const rowsResult = await client.query(
       `WITH paged AS (
          SELECT e.entity_pk
          FROM ${SEARCH_SCHEMA}.entity e
          ${whereSql}
-         ORDER BY
-           CASE
-             WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${exactPlaceholder})` : 'false'} THEN 0
-             WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${prefixPlaceholder})` : 'false'} THEN 1
-             WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${containsPlaceholder})` : 'false'} THEN 2
-             ELSE 3
-           END,
-           e.entity_pk
+         ORDER BY e.entity_pk
          LIMIT ${limitPlaceholder}
          OFFSET ${offsetPlaceholder}
        )
@@ -279,12 +263,7 @@ export async function searchEntitiesPostgres(params: {
          e.sources,
          e.taxonomy_id AS "taxonomyId",
          e.entity_attributes AS "entityAttributes",
-         CASE
-           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${exactPlaceholder})` : 'false'} THEN 0
-           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${prefixPlaceholder})` : 'false'} THEN 1
-           WHEN ${trimmedQuery ? `EXISTS (SELECT 1 FROM ${SEARCH_SCHEMA}.entity_identifier ei_rank WHERE ei_rank.entity_pk = e.entity_pk AND ei_rank.identifier ILIKE ${containsPlaceholder})` : 'false'} THEN 2
-           ELSE NULL
-         END AS "matchRank"
+         ${trimmedQuery ? '0' : 'NULL'} AS "matchRank"
        FROM paged p
        JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_pk = p.entity_pk
        ORDER BY e.entity_pk`,

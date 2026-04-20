@@ -114,19 +114,11 @@ function buildEntitySearchConditions(filters: SearchFilters, query: string): SQL
 
   const trimmedQuery = query.trim();
   if (trimmedQuery) {
-    const exact = trimmedQuery;
-    const prefix = `${trimmedQuery}%`;
-    const contains = `%${trimmedQuery}%`;
-
     conditions.push(sql`EXISTS (
       SELECT 1
       FROM ${entityIdentifier} ei_filter
       WHERE ei_filter.entity_pk = ${entity.entityPk}
-        AND (
-          ei_filter.identifier ILIKE ${exact}
-          OR ei_filter.identifier ILIKE ${prefix}
-          OR ei_filter.identifier ILIKE ${contains}
-        )
+        AND ei_filter.identifier = ${trimmedQuery}
     )`);
   }
 

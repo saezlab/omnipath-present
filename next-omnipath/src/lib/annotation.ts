@@ -2,10 +2,9 @@
 
 import "server-only";
 
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { entity, entityAnnotation } from "@next-omnipath/drizzle";
+import { and, asc, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { annotationTerm, annotationTermSearch, entity, entityAnnotation } from "@next-omnipath/drizzle";
 import { getDb } from "@/lib/db/client";
-import { getApiServiceUrl } from "@/lib/api/config";
 import { normalizeStringValues, publicEntityIdWhere, toPublicEntityId } from "@/lib/entity-public-id";
 import {
   normalizeEntityTypeFilterValue,
@@ -21,29 +20,7 @@ export interface ExploreOntologyTerm {
   matchType?: string;
   matchedText?: string;
   score?: number;
-}
-
-interface OntologySearchMatch {
-  id: string;
-  name?: string | null;
-  definition?: string | null;
-  namespace?: string | null;
-  matched_text?: string;
-  match_type?: string;
-  score?: number;
-}
-
-interface OntologySearchResponse {
-  results?: Record<string, OntologySearchMatch[]>;
-}
-
-interface TermsResponse {
-  terms?: Record<string, {
-    id: string;
-    name?: string | null;
-    definition?: string | null;
-    namespace?: string | null;
-  } | null>;
+  annotatedEntityCount?: number;
 }
 
 const ONTOLOGY_ID_PATTERN = /^(GO|MI|OM|HP|KW|CHEBI):\d+$/i;
@@ -138,7 +115,9 @@ export async function getEntityPublicIdsForAnnotationTerms(termIds: string[]): P
 export async function getAnnotationTermsForEntityPublicIds(
   publicIds: string[],
   filters: SearchFilters = {},
-): Promise<string[]> {
+  query = "",
+  limit?: number,
+): Promise<ExploreOntologyTerm[]> {
   const entityPkMap = await getEntityPkMapByPublicIds(publicIds);
   const scopedEntityPks = Array.from(entityPkMap.values());
   if (scopedEntityPks.length === 0) {
@@ -146,23 +125,49 @@ export async function getAnnotationTermsForEntityPublicIds(
   }
 
   const conditions = buildEntityFilterConditions(filters, scopedEntityPks);
+  const normalizedQuery = query.trim();
+
+
   const where = conditions.length === 1 ? conditions[0] : and(...conditions);
   if (!where) {
     return [];
   }
 
   const rows = await getDb()
-    .selectDistinct({
-      cvTerm: entityAnnotation.cvTerm,
+    .select({
+      accession: entityAnnotation.cvTerm,
+      label: annotationTerm.label,
+      namespace: annotationTerm.namespace,
+      definition: annotationTerm.definition,
+      annotatedEntityCount: sql<number>`count(DISTINCT ${entityAnnotation.entityPk})`,
     })
     .from(entityAnnotation)
     .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
-    .where(where);
+    .leftJoin(annotationTerm, eq(annotationTerm.accession, entityAnnotation.cvTerm))
+    .where(and(
+      where,
+      normalizedQuery
+        ? or(
+            sql`${entityAnnotation.cvTerm} ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTerm.label}, '') ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTerm.definition}, '') ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTerm.namespace}, '') ILIKE ${`%${normalizedQuery}%`}`,
+          )
+        : undefined,
+    ))
+    .groupBy(entityAnnotation.cvTerm, annotationTerm.label, annotationTerm.namespace, annotationTerm.definition)
+    .orderBy(desc(sql`count(DISTINCT ${entityAnnotation.entityPk})`), asc(entityAnnotation.cvTerm))
+    .limit(limit ?? 10_000);
 
   return rows
-    .map((row) => row.cvTerm)
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+    .map((row) => ({
+      id: normalizeOntologyId(row.accession),
+      label: row.label || normalizeOntologyId(row.accession),
+      namespace: row.namespace,
+      definition: row.definition,
+      annotatedEntityCount: Number(row.annotatedEntityCount || 0),
+    }))
+    .filter((row) => Boolean(row.id));
 }
 
 function normalizeOntologyId(value: string): string {
@@ -172,30 +177,62 @@ function normalizeOntologyId(value: string): string {
   return `${match[1].toUpperCase()}:${match[2]}`;
 }
 
-async function browseOntologyTermsFromEntityHits(species: string | undefined, limit: number): Promise<ExploreOntologyTerm[]> {
-  const db = getDb();
-  const rows = await db
-    .selectDistinct({
-      termId: entityAnnotation.cvTerm,
+function mapLocalOntologyTerms(
+  rows: Array<{
+    accession: string | null;
+    label?: string | null;
+    namespace?: string | null;
+    definition?: string | null;
+    annotatedEntityCount?: number | null;
+  }>,
+): ExploreOntologyTerm[] {
+  return rows
+    .map((row) => {
+      const id = normalizeOntologyId(row.accession || "");
+      return {
+        id,
+        label: row.label || id,
+        namespace: row.namespace,
+        definition: row.definition,
+        annotatedEntityCount: row.annotatedEntityCount == null ? undefined : Number(row.annotatedEntityCount),
+      };
     })
-    .from(entityAnnotation)
-    .innerJoin(entity, eq(entity.entityPk, entityAnnotation.entityPk))
-    .where(species ? inArray(entity.taxonomyId, [species]) : undefined)
-    .orderBy(asc(entityAnnotation.cvTerm))
+    .filter((row) => Boolean(row.id));
+}
+
+async function browseOntologyTermsFromEntityHits(
+  species: string | undefined,
+  limit: number,
+  query = "",
+): Promise<ExploreOntologyTerm[]> {
+  void species;
+
+  const normalizedQuery = query.trim();
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      accession: annotationTermSearch.accession,
+      label: annotationTermSearch.label,
+      namespace: annotationTermSearch.namespace,
+      definition: annotationTermSearch.definition,
+      annotatedEntityCount: annotationTermSearch.annotatedEntityCount,
+    })
+    .from(annotationTermSearch)
+    .where(
+      normalizedQuery
+        ? or(
+            sql`COALESCE(${annotationTermSearch.accession}, '') ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTermSearch.label}, '') ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTermSearch.definition}, '') ILIKE ${`%${normalizedQuery}%`}`,
+            sql`COALESCE(${annotationTermSearch.namespace}, '') ILIKE ${`%${normalizedQuery}%`}`,
+          )
+        : undefined,
+    )
+    .orderBy(desc(annotationTermSearch.annotatedEntityCount), asc(annotationTermSearch.accession))
     .limit(limit);
 
-  const termIds = rows
-    .map((row) => normalizeOntologyId(row.termId))
-    .filter(Boolean);
-
-  const resolved = await resolveOntologyTerms(termIds);
-
-  return termIds.map((termId) => ({
-    id: termId,
-    label: resolved[termId]?.label || termId,
-    namespace: resolved[termId]?.namespace,
-    definition: resolved[termId]?.definition,
-  }));
+  return mapLocalOntologyTerms(rows);
 }
 
 export async function resolveOntologyTerms(termIds: string[]): Promise<Record<string, ExploreOntologyTerm | null>> {
@@ -203,32 +240,26 @@ export async function resolveOntologyTerms(termIds: string[]): Promise<Record<st
   if (normalized.length === 0) return {};
 
   try {
-    const response = await fetch(`${getApiServiceUrl()}/terms`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ term_ids: normalized }),
-    });
+    const rows = await getDb()
+      .select({
+        accession: annotationTerm.accession,
+        label: annotationTerm.label,
+        namespace: annotationTerm.namespace,
+        definition: annotationTerm.definition,
+      })
+      .from(annotationTerm)
+      .where(inArray(annotationTerm.accession, normalized));
 
-    if (!response.ok) {
-      throw new Error(`Failed to resolve ontology terms (${response.status})`);
-    }
+    const byId = new Map(
+      rows.map((row) => [normalizeOntologyId(row.accession), {
+        id: normalizeOntologyId(row.accession),
+        label: row.label || normalizeOntologyId(row.accession),
+        namespace: row.namespace,
+        definition: row.definition,
+      }]),
+    );
 
-    const data = (await response.json()) as TermsResponse;
-    const resolved: Record<string, ExploreOntologyTerm | null> = {};
-
-    for (const termId of normalized) {
-      const term = data.terms?.[termId];
-      resolved[termId] = term
-        ? {
-            id: term.id,
-            label: term.name || term.id,
-            namespace: term.namespace,
-            definition: term.definition,
-          }
-        : null;
-    }
-
-    return resolved;
+    return Object.fromEntries(normalized.map((termId) => [termId, byId.get(termId) || null]));
   } catch (error) {
     console.error("Error resolving ontology terms", error);
     return Object.fromEntries(normalized.map((termId) => [termId, null]));
@@ -241,59 +272,17 @@ export async function searchOntologyTerms(query: string, limit = 24): Promise<Ex
     return [];
   }
 
+  const results = await browseOntologyTermsFromEntityHits(undefined, limit, normalized);
+  if (results.length > 0) {
+    return results;
+  }
+
   if (ONTOLOGY_ID_PATTERN.test(normalized)) {
     const normalizedId = normalizeOntologyId(normalized);
-    const resolved = await resolveOntologyTerms([normalizedId]);
-    const term = resolved[normalizedId];
-    return term ? [term] : [{ id: normalizedId, label: normalizedId }];
+    return [{ id: normalizedId, label: normalizedId }];
   }
 
-  try {
-    const response = await fetch(`${getApiServiceUrl()}/terms/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queries: [normalized], limit }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to search ontology terms (${response.status})`);
-    }
-
-    const data = (await response.json()) as OntologySearchResponse;
-    const matches = data.results?.[normalized] || [];
-
-    const mapped = matches.map((match) => ({
-      id: normalizeOntologyId(match.id),
-      label: match.name || match.id,
-      namespace: match.namespace,
-      definition: match.definition,
-      matchType: match.match_type,
-      matchedText: match.matched_text,
-      score: match.score,
-    }));
-
-    if (mapped.length > 0) {
-      return mapped;
-    }
-  } catch (error) {
-    console.error("Error searching ontology terms", error);
-  }
-
-  try {
-    const fallback = await browseOntologyTermsFromEntityHits(undefined, Math.max(limit * 3, 120));
-    const lowerQuery = normalized.toLowerCase();
-    return fallback
-      .filter((term) =>
-        term.id.toLowerCase().includes(lowerQuery)
-        || term.label.toLowerCase().includes(lowerQuery)
-        || term.namespace?.toLowerCase().includes(lowerQuery)
-        || term.definition?.toLowerCase().includes(lowerQuery),
-      )
-      .slice(0, limit);
-  } catch (error) {
-    console.error("Error in ontology search fallback", error);
-    return [];
-  }
+  return [];
 }
 
 export async function browseAnnotationTerms({
@@ -313,39 +302,17 @@ export async function browseAnnotationTerms({
 
   if (scopedEntityIds?.length) {
     try {
-      const termIds = await getAnnotationTermsForEntityPublicIds(scopedEntityIds, entityFilters);
-      if (termIds.length === 0) return [];
-
-      const resolved = await resolveOntologyTerms(termIds);
-      const results = termIds
-        .map((termId) => ({
-          id: termId,
-          label: resolved[termId]?.label || termId,
-          namespace: resolved[termId]?.namespace,
-          definition: resolved[termId]?.definition,
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label));
-
-      if (!normalizedQuery) {
-        return results.slice(0, limit);
-      }
-
-      const lowerQuery = normalizedQuery.toLowerCase();
-      return results
-        .filter((term) =>
-          term.id.toLowerCase().includes(lowerQuery)
-          || term.label.toLowerCase().includes(lowerQuery)
-          || term.namespace?.toLowerCase().includes(lowerQuery)
-          || term.definition?.toLowerCase().includes(lowerQuery),
-        )
-        .slice(0, limit);
+      return await getAnnotationTermsForEntityPublicIds(scopedEntityIds, entityFilters, normalizedQuery, limit);
     } catch (error) {
       console.error("Error browsing scoped annotation terms:", error);
       return [];
     }
   }
 
-  return normalizedQuery.length > 0
-    ? searchOntologyTerms(normalizedQuery, limit)
-    : browseOntologyTermsFromEntityHits(species, limit);
+  const annotationResults = await browseOntologyTermsFromEntityHits(species, limit, normalizedQuery);
+  if (annotationResults.length > 0 || !normalizedQuery) {
+    return annotationResults;
+  }
+
+  return searchOntologyTerms(normalizedQuery, limit);
 }

@@ -1,7 +1,47 @@
-import { pgTable, index, foreignKey, bigint, text, jsonb, primaryKey, pgMaterializedView } from "drizzle-orm/pg-core"
+import { pgTable, index, text, foreignKey, bigserial, bigint, jsonb, primaryKey, pgMaterializedView, pgView } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
+
+export const annotationTerm = pgTable("annotation_term", {
+	accession: text().primaryKey().notNull(),
+	ontologyId: text("ontology_id"),
+	label: text(),
+	namespace: text(),
+	definition: text(),
+}, (table) => [
+	index("annotation_term_accession_trgm_idx").using("gin", table.accession.asc().nullsLast().op("gin_trgm_ops")),
+	index("annotation_term_definition_trgm_idx").using("gin", table.definition.asc().nullsLast().op("gin_trgm_ops")),
+	index("annotation_term_label_trgm_idx").using("gin", table.label.asc().nullsLast().op("gin_trgm_ops")),
+]);
+
+export const entityIdentifier = pgTable("entity_identifier", {
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	entityPk: bigint("entity_pk", { mode: "number" }).notNull(),
+	identifier: text().notNull(),
+	identifierType: text("identifier_type").notNull(),
+}, (table) => [
+	index("entity_identifier_entity_pk_idx").using("btree", table.entityPk.asc().nullsLast().op("int8_ops")),
+	index("entity_identifier_value_hash_idx").using("hash", table.identifier.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.entityPk],
+			foreignColumns: [entity.entityPk],
+			name: "entity_identifier_entity_pk_fkey"
+		}),
+]);
+
+export const entity = pgTable("entity", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	entityPk: bigint("entity_pk", { mode: "number" }).primaryKey().notNull(),
+	canonicalIdentifier: text("canonical_identifier").notNull(),
+	canonicalIdentifierType: text("canonical_identifier_type").notNull(),
+	entityType: text("entity_type"),
+	taxonomyId: text("taxonomy_id"),
+	entityAttributes: jsonb("entity_attributes"),
+	sources: text().array().default([""]).notNull(),
+	identifiers: jsonb().default([]).notNull(),
+});
 
 export const association = pgTable("association", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -14,7 +54,6 @@ export const association = pgTable("association", {
 	stoichiometry: text(),
 	sources: text().array().default([""]).notNull(),
 }, (table) => [
-	index("association_sources_gin_idx").using("gin", table.sources.asc().nullsLast().op("array_ops")),
 	foreignKey({
 			columns: [table.parentEntityPk],
 			foreignColumns: [entity.entityPk],
@@ -42,7 +81,6 @@ export const interaction = pgTable("interaction", {
 	evidenceCount: bigint("evidence_count", { mode: "number" }).notNull(),
 	sources: text().array().default([""]).notNull(),
 }, (table) => [
-	index("interaction_sources_gin_idx").using("gin", table.sources.asc().nullsLast().op("array_ops")),
 	foreignKey({
 			columns: [table.entityAPk],
 			foreignColumns: [entity.entityPk],
@@ -55,49 +93,18 @@ export const interaction = pgTable("interaction", {
 		}),
 ]);
 
-export const entity = pgTable("entity", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	entityPk: bigint("entity_pk", { mode: "number" }).primaryKey().notNull(),
-	canonicalIdentifier: text("canonical_identifier").notNull(),
-	canonicalIdentifierType: text("canonical_identifier_type").notNull(),
-	entityType: text("entity_type"),
-	taxonomyId: text("taxonomy_id"),
-	entityAttributes: jsonb("entity_attributes"),
-	sources: text().array().default([""]).notNull(),
-	identifiers: jsonb().default([]).notNull(),
-}, (table) => [
-	index("entity_sources_gin_idx").using("gin", table.sources.asc().nullsLast().op("array_ops")),
-	index("entity_taxonomy_idx").using("btree", table.taxonomyId.asc().nullsLast().op("text_ops")),
-]);
-
-export const entityIdentifier = pgTable("entity_identifier", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	entityPk: bigint("entity_pk", { mode: "number" }).notNull(),
-	identifier: text().notNull(),
-	identifierType: text("identifier_type").notNull(),
-}, (table) => [
-	index("entity_identifier_type_idx").using("btree", table.identifierType.asc().nullsLast().op("text_ops")),
-	foreignKey({
-			columns: [table.entityPk],
-			foreignColumns: [entity.entityPk],
-			name: "entity_identifier_entity_pk_fkey"
-		}),
-	primaryKey({ columns: [table.entityPk, table.identifier, table.identifierType], name: "entity_identifier_pkey"}),
-]);
-
 export const interactionAnnotation = pgTable("interaction_annotation", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	interactionPk: bigint("interaction_pk", { mode: "number" }).notNull(),
 	cvTerm: text("cv_term").notNull(),
 	sources: text().array().default([""]).notNull(),
 }, (table) => [
-	index("interaction_annotation_cv_term_idx").using("btree", table.cvTerm.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.interactionPk],
 			foreignColumns: [interaction.interactionPk],
 			name: "interaction_annotation_interaction_pk_fkey"
 		}),
-	primaryKey({ columns: [table.cvTerm, table.interactionPk], name: "interaction_annotation_pkey"}),
+	primaryKey({ columns: [table.interactionPk, table.cvTerm], name: "interaction_annotation_pkey"}),
 ]);
 
 export const entityAnnotation = pgTable("entity_annotation", {
@@ -106,13 +113,26 @@ export const entityAnnotation = pgTable("entity_annotation", {
 	cvTerm: text("cv_term").notNull(),
 	sources: text().array().default([""]).notNull(),
 }, (table) => [
-	index("entity_annotation_cv_term_idx").using("btree", table.cvTerm.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.entityPk],
 			foreignColumns: [entity.entityPk],
 			name: "entity_annotation_entity_pk_fkey"
 		}),
-	primaryKey({ columns: [table.cvTerm, table.entityPk], name: "entity_annotation_pkey"}),
+	primaryKey({ columns: [table.entityPk, table.cvTerm], name: "entity_annotation_pkey"}),
+]);
+
+export const associationEvidence = pgTable("association_evidence", {
+	source: text().notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	associationPk: bigint("association_pk", { mode: "number" }).notNull(),
+	roleTermId: text("role_term_id"),
+	stoichiometry: text(),
+	recordAttributes: jsonb("record_attributes"),
+	parentAttributes: jsonb("parent_attributes"),
+	memberAttributes: jsonb("member_attributes"),
+	evidence: jsonb(),
+}, (table) => [
+	primaryKey({ columns: [table.source, table.associationPk], name: "association_evidence_pkey"}),
 ]);
 
 export const interactionEvidence = pgTable("interaction_evidence", {
@@ -128,21 +148,7 @@ export const interactionEvidence = pgTable("interaction_evidence", {
 	entityBAttributes: jsonb("entity_b_attributes"),
 	evidence: jsonb(),
 }, (table) => [
-	primaryKey({ columns: [table.interactionPk, table.source], name: "interaction_evidence_pkey"}),
-]);
-
-export const associationEvidence = pgTable("association_evidence", {
-	source: text().notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	associationPk: bigint("association_pk", { mode: "number" }).notNull(),
-	roleTermId: text("role_term_id"),
-	stoichiometry: text(),
-	recordAttributes: jsonb("record_attributes"),
-	parentAttributes: jsonb("parent_attributes"),
-	memberAttributes: jsonb("member_attributes"),
-	evidence: jsonb(),
-}, (table) => [
-	primaryKey({ columns: [table.associationPk, table.source], name: "association_evidence_pkey"}),
+	primaryKey({ columns: [table.source, table.interactionPk], name: "interaction_evidence_pkey"}),
 ]);
 export const entitySummary = pgMaterializedView("entity_summary", {	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityPk: bigint("entity_pk", { mode: "number" }),
@@ -158,6 +164,19 @@ export const entitySummary = pgMaterializedView("entity_summary", {	// You can u
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	annotationCount: bigint("annotation_count", { mode: "number" }),
 }).as(sql`WITH interaction_counts AS ( SELECT endpoints.entity_pk, count(*) AS interaction_count FROM ( SELECT interaction.entity_a_pk AS entity_pk FROM interaction UNION ALL SELECT interaction.entity_b_pk AS entity_pk FROM interaction) endpoints GROUP BY endpoints.entity_pk ), identifier_counts AS ( SELECT entity_identifier.entity_pk, count(*) AS identifier_count FROM entity_identifier GROUP BY entity_identifier.entity_pk ), annotation_counts AS ( SELECT entity_annotation.entity_pk, count(*) AS annotation_count FROM entity_annotation GROUP BY entity_annotation.entity_pk ) SELECT e.entity_pk, e.canonical_identifier, e.canonical_identifier_type, e.entity_type, e.taxonomy_id, e.sources, COALESCE(ic.identifier_count, 0::bigint) AS identifier_count, COALESCE(xc.interaction_count, 0::bigint) AS interaction_count, COALESCE(ac.annotation_count, 0::bigint) AS annotation_count FROM entity e LEFT JOIN identifier_counts ic ON ic.entity_pk = e.entity_pk LEFT JOIN interaction_counts xc ON xc.entity_pk = e.entity_pk LEFT JOIN annotation_counts ac ON ac.entity_pk = e.entity_pk`);
+
+export const entityAnnotationCounts = pgMaterializedView("entity_annotation_counts", {	accession: text(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	annotatedEntityCount: bigint("annotated_entity_count", { mode: "number" }),
+}).as(sql`SELECT cv_term AS accession, count(DISTINCT entity_pk) AS annotated_entity_count FROM entity_annotation GROUP BY cv_term`);
+
+export const annotationTermSearch = pgView("annotation_term_search", {	accession: text(),
+	label: text(),
+	namespace: text(),
+	definition: text(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	annotatedEntityCount: bigint("annotated_entity_count", { mode: "number" }),
+}).as(sql`SELECT t.accession, t.label, t.namespace, t.definition, COALESCE(c.annotated_entity_count, 0::bigint) AS annotated_entity_count FROM annotation_term t LEFT JOIN entity_annotation_counts c ON c.accession = t.accession`);
 
 export const entityFilterCounts = pgMaterializedView("entity_filter_counts", {	filterKey: text("filter_key"),
 	filterValue: text("filter_value"),

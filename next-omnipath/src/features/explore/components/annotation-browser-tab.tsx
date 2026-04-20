@@ -2,7 +2,6 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Check, Tag } from "lucide-react";
-import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +53,11 @@ function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
                 <div className="space-y-1">
                   <CardTitle className="text-base leading-tight">{term.label}</CardTitle>
                   <CardDescription className="font-mono text-xs">{term.id}</CardDescription>
+                  {typeof term.annotatedEntityCount === "number" ? (
+                    <CardDescription className="text-xs">
+                      {term.annotatedEntityCount.toLocaleString()} annotated entities
+                    </CardDescription>
+                  ) : null}
                 </div>
                 <Button
                   size="sm"
@@ -98,7 +102,7 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
 
   const { data, isLoading } = useQuery({
     queryKey: isScoped
-      ? ["selection-scoped-annotations", scopedEntityIds, entityFilters]
+      ? ["selection-scoped-annotations", query, scopedEntityIds, entityFilters]
       : ["explore-annotations", query, species],
     queryFn: () => browseAnnotationTerms({
       query,
@@ -111,20 +115,7 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
     staleTime: 60_000,
   });
 
-  const filteredResults = useMemo(() => {
-    const results = data || [];
-    if (!isScoped) return results;
-
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return results;
-
-    return results.filter((term) =>
-      term.id.toLowerCase().includes(normalizedQuery)
-      || term.label.toLowerCase().includes(normalizedQuery)
-      || term.namespace?.toLowerCase().includes(normalizedQuery)
-      || term.definition?.toLowerCase().includes(normalizedQuery),
-    );
-  }, [data, isScoped, query]);
+  const results = data || [];
 
   if (isScoped && !(scopedEntityIds?.length)) {
     return (
@@ -139,7 +130,7 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
     return <LoadingGrid />;
   }
 
-  if (filteredResults.length === 0) {
+  if (results.length === 0) {
     return (
       <EmptyState
         title={isScoped ? "No annotations found" : "No annotations found"}
@@ -154,7 +145,7 @@ export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFi
 
   return (
     <div className="h-full overflow-y-auto p-1">
-      <AnnotationCards results={filteredResults} />
+      <AnnotationCards results={results} />
     </div>
   );
 }
