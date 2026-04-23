@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { X, Search } from "lucide-react"
 import { ToolResult } from "./dual-mode-interface"
 import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace"
-import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab"
+import { RelationsExploreTab } from "@/features/explore/components/relations-explore-tab"
 import { useState, useCallback, useEffect } from "react"
 import { SearchFilters } from "@/types/search"
 
@@ -122,7 +122,7 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
       case "searchInteractions": {
         return (
           <div className="h-full p-4">
-            <InteractionsExploreTab
+            <RelationsExploreTab
               filters={interactionsFilters}
               onFilterChange={handleInteractionsFilterChange}
             />

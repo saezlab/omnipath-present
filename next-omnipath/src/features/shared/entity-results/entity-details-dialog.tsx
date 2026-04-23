@@ -7,11 +7,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Database, Loader2, Network, Shapes, Tag } from "lucide-react";
 import { MoleculeStructure } from "./molecule_structure";
-import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
+import { RelationsExploreTab } from "@/features/explore/components/relations-explore-tab";
 import type { SearchFilters } from "@/types/search";
 import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace";
 import { getEntityDetails } from "@/lib/queries/entity-details";
-import { getAssociatedEntityIds } from "@/lib/queries/membership-search";
+import { getAssociatedEntityIds } from "@/lib/queries/relation";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import {
   getEntityDescriptions,
@@ -127,14 +127,15 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
     queryFn: async () => getEntityDetails(entityId!),
   });
 
-  const { data: associationScope, isLoading: loadingAssociations } = useQuery({
-    queryKey: ["entity-associated-scope", entityId],
-    enabled: open && !!entityId,
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => getAssociatedEntityIds([entityId!]),
-  });
-
   const resolvedEntity = details?.entity ?? entity;
+  const resolvedEntityPk = resolvedEntity?.entityPk;
+
+  const { data: associationScope, isLoading: loadingAssociations } = useQuery({
+    queryKey: ["entity-associated-scope", resolvedEntityPk],
+    enabled: open && typeof resolvedEntityPk === "number",
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => ({ associatedEntityIds: await getAssociatedEntityIds([resolvedEntityPk!]) }),
+  });
   const interactionsCount = Number(details?.summary?.interactionCount ?? 0);
   const annotationsCount = details?.annotations?.length ?? 0;
   const associatedEntityIds = associationScope?.associatedEntityIds ?? [];
@@ -203,7 +204,7 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
               <TabsContent value="interactions" className="flex-1 min-h-0 m-0 overflow-hidden">
                 <div className="h-full overflow-hidden [&>div]:h-full [&>div]:!max-h-full [&_.h-svh]:h-full">
                   {entityIds.length > 0 && (
-                    <InteractionsExploreTab
+                    <RelationsExploreTab
                       filters={interactionFilters}
                       onFilterChange={setInteractionFilters}
                     />

@@ -11,7 +11,7 @@ import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { AnnotationBrowserTab } from "@/features/explore/components/annotation-browser-tab";
 import { EntitiesExploreTab } from "@/features/explore/components/entities-explore-tab";
 import { ExploreBrowserShell } from "@/features/explore/components/explore-browser-shell";
-import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
+import { RelationsExploreTab } from "@/features/explore/components/relations-explore-tab";
 import type { SearchFilters } from "@/types/search";
 
 const exploreTabParser = parseAsStringLiteral(["entity", "relations", "ontology"] as const).withDefault("entity");
@@ -95,7 +95,7 @@ export default function ExplorePage() {
       />
     ) : tab === "relations"
       ? (
-        <InteractionsExploreTab
+        <RelationsExploreTab
           filters={interactionFilters}
           onFilterChange={setInteractionFilters}
           useInternalRefineLayout={false}

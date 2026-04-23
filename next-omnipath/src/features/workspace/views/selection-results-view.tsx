@@ -9,7 +9,7 @@ import { formatNumber } from "@/lib/utils";
 import { AnnotationBrowserTab } from "@/features/explore/components/annotation-browser-tab";
 import { EntitiesExploreTab } from "@/features/explore/components/entities-explore-tab";
 import { ExploreBrowserShell } from "@/features/explore/components/explore-browser-shell";
-import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
+import { RelationsExploreTab } from "@/features/explore/components/relations-explore-tab";
 import { useSelectionScope } from "@/features/selection/selection-scope";
 
 export function SelectionResultsView() {
@@ -78,7 +78,7 @@ export function SelectionResultsView() {
       />
     ) : tab === "interactions"
       ? (
-        <InteractionsExploreTab
+        <RelationsExploreTab
           filters={filters}
           onFilterChange={setFilters}
           useInternalRefineLayout={false}

@@ -1,44 +1,23 @@
-import { Badge } from "@/components/ui/badge"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Search, ArrowRight, Minus, Plus, Layers3, ExternalLink } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { useMemo } from "react"
-import type { InteractionDetailsData, InteractionDirection, InteractionEvidence, InteractionListRow } from "@/features/interactions-search/types"
-import { getEntityDisplayName, getEntityPublicId, getEntitySecondaryName, getEntityTypeLabel } from "@/lib/entities/display"
-import { CvTermHoverCard } from "@/features/shared/entity-results/result-card"
-import { EntityBadge } from "@/components/entity-badge"
+import { useMemo } from "react";
+import { Search, ArrowRight, Layers3, ExternalLink, Minus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EntityBadge } from "@/components/entity-badge";
+import {
+  getEntityDisplayName,
+  getEntityPublicId,
+  getEntitySecondaryName,
+  getEntityTypeLabel,
+} from "@/lib/entities/display";
+import type { InteractionDetailsData, InteractionListRow } from "@/features/interactions-search/types";
 
 interface InteractionDetailsProps {
-  selectedInteraction: InteractionDetailsData | InteractionListRow | null
+  selectedInteraction: InteractionDetailsData | InteractionListRow | null;
+  evidenceLoading?: boolean;
 }
 
-function extractLabel(value: string): string {
-  const colonIndex = value.indexOf(':');
-  return colonIndex > 0 ? value.substring(0, colonIndex) : value;
-}
-
-function splitLabelAndId(value: string): { label: string; id?: string } {
-  const colonIndex = value.indexOf(':');
-  if (colonIndex <= 0) return { label: value };
-  return {
-    label: value.substring(0, colonIndex),
-    id: value.substring(colonIndex + 1),
-  };
-}
-
-function getInteractionDirections(interaction: InteractionDetailsData | InteractionListRow | null): InteractionDirection[] {
-  if (!interaction) return [];
-  return [{
-    direction: interaction.interaction.direction === 1 ? 'a-b' : interaction.interaction.direction === -1 ? 'b-a' : 'undirected',
-    sign: (interaction.interaction.sign ?? 0) as -1 | 0 | 1,
-  }];
-}
-
-function shouldSwapMembers(_directions: InteractionDirection[]): boolean {
-  return false;
-}
-
-type FormattedAnnotation = {
+type ParsedAnnotation = {
   term: string;
   termId?: string;
   value?: string;
@@ -46,63 +25,99 @@ type FormattedAnnotation = {
   unitId?: string;
 };
 
-type EvidenceSign = -1 | 0 | 1 | null;
-type EvidenceDirection = 'a-b' | 'b-a' | 'undirected' | null;
-
-type AggregatedEvidenceGroup = {
+type EvidenceGroup = {
   key: string;
-  direction: EvidenceDirection;
-  sign: EvidenceSign;
+  source: string;
   evidenceCount: number;
-  sourceDatabase: string | null;
   pubmedIds: string[];
-  sourceAnnotations: FormattedAnnotation[];
-  interactionAnnotations: FormattedAnnotation[];
-  targetAnnotations: FormattedAnnotation[];
+  subjectAnnotations: ParsedAnnotation[];
+  relationAnnotations: ParsedAnnotation[];
+  objectAnnotations: ParsedAnnotation[];
 };
 
-function formatAnnotations(
-  annotations: { term: string; value?: string | null; unit?: string | null }[]
-): FormattedAnnotation[] {
-  return annotations.map((a) => {
-    const term = splitLabelAndId(a.term);
-    const unit = a.unit ? splitLabelAndId(a.unit) : undefined;
+function splitLabelAndId(value: string): { label: string; id?: string } {
+  const colonIndex = value.indexOf(":");
+  if (colonIndex <= 0) return { label: value };
+  return {
+    label: value.substring(0, colonIndex),
+    id: value.substring(colonIndex + 1),
+  };
+}
 
-    return {
+function normalizeAnnotationArray(value: unknown): ParsedAnnotation[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.term !== "string" || !record.term.trim()) return [];
+
+    const term = splitLabelAndId(record.term);
+    const unit = typeof record.unit === "string" ? splitLabelAndId(record.unit) : undefined;
+
+    return [{
       term: term.label,
       termId: term.id,
-      value: a.value ?? undefined,
+      value: typeof record.value === "string" ? record.value : undefined,
       unit: unit?.label,
       unitId: unit?.id,
-    };
+    }];
   });
 }
 
-function dedupeAnnotations(annotations: FormattedAnnotation[]): FormattedAnnotation[] {
+function dedupeAnnotations(values: ParsedAnnotation[]): ParsedAnnotation[] {
   const seen = new Set<string>();
-  const deduped: FormattedAnnotation[] = [];
+  const deduped: ParsedAnnotation[] = [];
 
-  annotations.forEach((annotation) => {
-    const key = [annotation.term, annotation.termId, annotation.value, annotation.unit, annotation.unitId].join('|');
-    if (seen.has(key)) return;
+  for (const value of values) {
+    const key = [value.term, value.termId, value.value, value.unit, value.unitId].join("|");
+    if (seen.has(key)) continue;
     seen.add(key);
-    deduped.push(annotation);
-  });
+    deduped.push(value);
+  }
 
   return deduped.sort((a, b) => {
     const byTerm = a.term.localeCompare(b.term);
     if (byTerm !== 0) return byTerm;
-    const byValue = (a.value || '').localeCompare(b.value || '');
-    if (byValue !== 0) return byValue;
-    return (a.unit || '').localeCompare(b.unit || '');
+    return (a.value || "").localeCompare(b.value || "");
   });
+}
+
+function splitPubmedAnnotations(annotations: ParsedAnnotation[]): {
+  pubmedIds: string[];
+  annotations: ParsedAnnotation[];
+} {
+  const pubmedIds = new Set<string>();
+  const filtered: ParsedAnnotation[] = [];
+
+  for (const annotation of annotations) {
+    const normalizedTerm = annotation.term.trim().toLowerCase();
+    const isPubmed = normalizedTerm === "pubmed" || normalizedTerm === "pmid";
+    if (!isPubmed) {
+      filtered.push(annotation);
+      continue;
+    }
+
+    const matches = `${annotation.value || ""} ${annotation.termId || ""} ${annotation.unitId || ""}`.match(/\b\d{4,9}\b/g);
+    matches?.forEach((id) => pubmedIds.add(id));
+  }
+
+  return {
+    pubmedIds: Array.from(pubmedIds).sort((a, b) => Number(a) - Number(b)),
+    annotations: filtered,
+  };
+}
+
+function formatAnnotationText(annotation: ParsedAnnotation): string {
+  if (!annotation.value) return annotation.term;
+  return `${annotation.term}: ${annotation.value}${annotation.unit ? ` ${annotation.unit}` : ""}`;
 }
 
 function AnnotationChips({
   annotations,
   emptyLabel,
 }: {
-  annotations: FormattedAnnotation[];
+  annotations: ParsedAnnotation[];
   emptyLabel: string;
 }) {
   if (annotations.length === 0) {
@@ -111,330 +126,86 @@ function AnnotationChips({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {annotations.map((annotation, idx) => {
-        const valueText = annotation.value
-          ? `${annotation.term}: ${annotation.value}${annotation.unit ? ` ${annotation.unit}` : ''}`
-          : annotation.term;
-        const meta = [annotation.termId, annotation.unitId].filter(Boolean).join(' · ');
-
-        const chip = (
-          <div className="rounded-md border bg-background px-2.5 py-1.5 text-xs">
-            <div className="font-medium leading-tight">{valueText}</div>
-            {meta && <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{meta}</div>}
-          </div>
-        );
-
-        return annotation.termId ? (
-          <CvTermHoverCard key={idx} termId={annotation.termId}>
-            {chip}
-          </CvTermHoverCard>
-        ) : (
-          <div key={idx}>{chip}</div>
-        );
-      })}
+      {annotations.map((annotation, index) => (
+        <div key={`${annotation.term}-${annotation.value || ""}-${index}`} className="rounded-md border bg-background px-2.5 py-1.5 text-xs">
+          <div className="font-medium leading-tight">{formatAnnotationText(annotation)}</div>
+          {(annotation.termId || annotation.unitId) && (
+            <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+              {[annotation.termId, annotation.unitId].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
 
-function getOverallSign(directions: InteractionDirection[]): 'positive' | 'negative' | null {
-  if (!directions || directions.length === 0) return null;
-  if (directions.some(d => d.sign === 1)) return 'positive';
-  if (directions.some(d => d.sign === -1)) return 'negative';
-  return null;
-}
+function buildEvidenceGroups(evidence: InteractionDetailsData["evidence"]): EvidenceGroup[] {
+  const groups = new Map<string, EvidenceGroup>();
 
-const getSignColor = (sign: 'positive' | 'negative' | null) => {
-  if (sign === 'positive') return 'text-green-600 bg-green-50 border-green-200';
-  if (sign === 'negative') return 'text-red-600 bg-red-50 border-red-200';
-  return 'text-gray-600 bg-gray-50 border-gray-200';
-}
+  for (const row of evidence) {
+    const subjectSplit = splitPubmedAnnotations(normalizeAnnotationArray(row.subjectAttributes));
+    const relationSplit = splitPubmedAnnotations([
+      ...normalizeAnnotationArray(row.recordAttributes),
+      ...normalizeAnnotationArray(row.evidence),
+    ]);
+    const objectSplit = splitPubmedAnnotations(normalizeAnnotationArray(row.objectAttributes));
 
-const getSignLabel = (sign: 'positive' | 'negative' | null) => {
-  if (sign === 'positive') return 'Activation';
-  if (sign === 'negative') return 'Inhibition';
-  return 'Unsigned';
-}
-
-const POSITIVE_SIGN_ACCESSIONS = new Set([
-  'MI:0840', 'MI:2235', 'MI:2236', 'MI:2237', 'MI:2238', 'MI:2239',
-  'OM:0901', 'OM:0902', 'OM:0903', 'OM:0905', 'OM:0930', 'OM:0950',
-  'OM:0952', 'OM:1001', 'OM:1003',
-]);
-
-const NEGATIVE_SIGN_ACCESSIONS = new Set([
-  'MI:0586', 'MI:2240', 'MI:2241', 'MI:2242', 'MI:2243', 'MI:2244',
-  'OM:0904', 'OM:0920', 'OM:0931', 'OM:0932', 'OM:0933', 'OM:0951',
-  'OM:0970', 'OM:1002', 'OM:1004', 'OM:1020', 'OM:1021',
-]);
-
-const SOURCE_ROLE_ACCESSIONS = new Set([
-  'MI:0501', 'MI:0586', 'MI:0840', 'MI:1160', 'MI:2274', 'OM:1001', 'OM:1002', 'OM:1003', 'OM:1004',
-]);
-
-const TARGET_ROLE_ACCESSIONS = new Set(['MI:0502', 'MI:2275']);
-const ACTIVATORY_PARAMETER_ACCESSIONS = new Set(['MI:0642']);
-const INHIBITORY_PARAMETER_ACCESSIONS = new Set(['MI:0641', 'MI:0643']);
-
-type EvidenceCombo = { direction: EvidenceDirection; sign: EvidenceSign };
-
-function getEvidenceDirection(evidence: InteractionEvidence): EvidenceDirection {
-  const raw = evidence.direction;
-  if (raw === 'a-b' || raw === 'b-a') return raw;
-  if (raw === 'undirected') return 'undirected';
-  return null;
-}
-
-function getEvidenceSign(evidence: InteractionEvidence): EvidenceSign {
-  const raw = evidence.sign;
-  if (raw === 1 || raw === -1 || raw === 0) return raw;
-  return null;
-}
-
-function getTermAccession(term: string | undefined): string | null {
-  if (!term) return null;
-  const trimmed = term.trim();
-  if (/^[A-Z]{2}:\d{4,}$/.test(trimmed)) return trimmed;
-  const split = splitLabelAndId(trimmed);
-  if (split.id && /^[A-Z]{2}:\d{4,}$/.test(split.id)) return split.id;
-  return null;
-}
-
-function getAnnotationAccessions(
-  annotations: { term: string; value?: string | null; unit?: string | null }[]
-): string[] {
-  return annotations
-    .map((annotation) => getTermAccession(annotation.term))
-    .filter((value): value is string => Boolean(value));
-}
-
-function getInteractionTypeDirection(interaction: InteractionDetailsData | InteractionListRow): EvidenceDirection {
-  const typeA = getEntityTypeLabel(interaction.entityA).trim().toLowerCase();
-  const typeB = getEntityTypeLabel(interaction.entityB).trim().toLowerCase();
-
-  if (typeA === 'small molecule' && typeB === 'protein') return 'a-b';
-  if (typeB === 'small molecule' && typeA === 'protein') return 'b-a';
-  return null;
-}
-
-function collapseSigns(signs: Set<-1 | 1>, fallbackSign: EvidenceSign = null): EvidenceSign {
-  const hasPos = signs.has(1);
-  const hasNeg = signs.has(-1);
-  if (hasPos && hasNeg) return 0;
-  if (hasPos) return 1;
-  if (hasNeg) return -1;
-  return fallbackSign;
-}
-
-function inferEvidenceCombos(
-  interaction: InteractionDetailsData | InteractionListRow,
-  evidence: InteractionEvidence,
-): EvidenceCombo[] {
-  const explicitDirection = getEvidenceDirection(evidence);
-  const explicitSign = getEvidenceSign(evidence);
-  if (explicitDirection !== null || explicitSign !== null) {
-    return [{ direction: explicitDirection, sign: explicitSign }];
-  }
-
-  const byDirection = new Map<EvidenceDirection, Set<-1 | 1>>();
-  const ensureDirection = (direction: EvidenceDirection) => {
-    if (!direction) return;
-    if (!byDirection.has(direction)) byDirection.set(direction, new Set<-1 | 1>());
-  };
-  const addSignedDirection = (direction: EvidenceDirection, sign: -1 | 1 | null) => {
-    if (!direction) return;
-    ensureDirection(direction);
-    if (sign === 1 || sign === -1) byDirection.get(direction)?.add(sign);
-  };
-
-  const memberASigns = getAnnotationAccessions(evidence.member_a_annotations || []);
-  const memberBSigns = getAnnotationAccessions(evidence.member_b_annotations || []);
-  const interactionSigns = getAnnotationAccessions(evidence.interaction_annotations || []);
-
-  memberASigns.forEach((accession) => {
-    const sign = POSITIVE_SIGN_ACCESSIONS.has(accession) ? 1 : NEGATIVE_SIGN_ACCESSIONS.has(accession) ? -1 : null;
-    if (SOURCE_ROLE_ACCESSIONS.has(accession)) addSignedDirection('a-b', sign);
-    if (TARGET_ROLE_ACCESSIONS.has(accession)) addSignedDirection('b-a', sign);
-  });
-
-  memberBSigns.forEach((accession) => {
-    const sign = POSITIVE_SIGN_ACCESSIONS.has(accession) ? 1 : NEGATIVE_SIGN_ACCESSIONS.has(accession) ? -1 : null;
-    if (SOURCE_ROLE_ACCESSIONS.has(accession)) addSignedDirection('b-a', sign);
-    if (TARGET_ROLE_ACCESSIONS.has(accession)) addSignedDirection('a-b', sign);
-  });
-
-  const paramDirection = getInteractionTypeDirection(interaction);
-  interactionSigns.forEach((accession) => {
-    if (ACTIVATORY_PARAMETER_ACCESSIONS.has(accession)) addSignedDirection(paramDirection, 1);
-    if (INHIBITORY_PARAMETER_ACCESSIONS.has(accession)) addSignedDirection(paramDirection, -1);
-  });
-
-  const interactionFallbackSign = collapseSigns(new Set(interactionSigns.flatMap((accession) => {
-    if (POSITIVE_SIGN_ACCESSIONS.has(accession)) return [1 as const];
-    if (NEGATIVE_SIGN_ACCESSIONS.has(accession)) return [-1 as const];
-    return [];
-  })));
-
-  return Array.from(byDirection.entries()).map(([direction, signs]) => ({
-    direction,
-    sign: collapseSigns(signs, interactionFallbackSign),
-  }));
-}
-
-function getFallbackCombos(directions: InteractionDirection[]): EvidenceCombo[] {
-  const distinct = Array.from(new Set((directions || []).map((dir) => `${dir.direction}|${dir.sign}`)))
-    .map((key) => {
-      const [direction, sign] = key.split('|');
-      return {
-        direction: direction === 'a-b' || direction === 'b-a' ? direction : null,
-        sign: sign === '1' ? 1 : sign === '-1' ? -1 : sign === '0' ? 0 : null,
-      } as EvidenceCombo;
-    });
-
-  return distinct.length > 0 ? distinct : [{ direction: null, sign: null }];
-}
-
-function splitPubmedAnnotations(annotations: FormattedAnnotation[]): {
-  pubmedIds: string[];
-  annotations: FormattedAnnotation[];
-} {
-  const pubmedIds = new Set<string>();
-  const filtered: FormattedAnnotation[] = [];
-
-  annotations.forEach((annotation) => {
-    const normalizedTerm = annotation.term.trim().toLowerCase();
-    const isPubmed = normalizedTerm === 'pubmed' || normalizedTerm === 'pmid';
-
-    if (isPubmed) {
-      const matches = `${annotation.value || ''} ${annotation.termId || ''} ${annotation.unitId || ''}`.match(/\b\d{4,9}\b/g);
-      matches?.forEach((id) => pubmedIds.add(id));
-      return;
-    }
-
-    filtered.push(annotation);
-  });
-
-  return {
-    pubmedIds: Array.from(pubmedIds).sort((a, b) => Number(a) - Number(b)),
-    annotations: filtered,
-  };
-}
-
-function extractAnnotationTerms(evidence: InteractionEvidence[]): string[] {
-  const terms = new Set<string>();
-  evidence.forEach(e => {
-    e.interaction_annotations?.forEach(a => terms.add(a.term));
-    e.member_a_annotations?.forEach(a => terms.add(a.term));
-    e.member_b_annotations?.forEach(a => terms.add(a.term));
-  });
-  return Array.from(terms);
-}
-
-function buildEvidenceGroups(
-  interaction: InteractionDetailsData,
-  swap: boolean,
-): AggregatedEvidenceGroup[] {
-  if (!interaction.evidence.length) return [];
-
-  const groups = new Map<string, {
-    direction: EvidenceDirection;
-    sign: EvidenceSign;
-    evidenceCount: number;
-    sourceDatabase: string | null;
-    pubmedIds: Set<string>;
-    sourceAnnotations: FormattedAnnotation[];
-    interactionAnnotations: FormattedAnnotation[];
-    targetAnnotations: FormattedAnnotation[];
-  }>();
-
-  const fallbackCombos = getFallbackCombos(getInteractionDirections(interaction));
-
-  interaction.evidence.forEach((evidence) => {
-    const inferredCombos = inferEvidenceCombos(interaction, evidence);
-    const combos = inferredCombos.length > 0 ? inferredCombos : fallbackCombos;
-
-    const sourceSplit = splitPubmedAnnotations(formatAnnotations(swap ? evidence.member_b_annotations : evidence.member_a_annotations));
-    const interactionSplit = splitPubmedAnnotations(formatAnnotations(evidence.interaction_annotations || []));
-    const targetSplit = splitPubmedAnnotations(formatAnnotations(swap ? evidence.member_a_annotations : evidence.member_b_annotations));
-
-    combos.forEach(({ direction, sign }) => {
-      const sourceDatabase = evidence.source ? extractLabel(evidence.source) : null;
-      const key = `${sourceDatabase ?? 'unknown'}|${direction ?? 'all'}|${sign ?? 'all'}`;
-
-      if (!groups.has(key)) {
-        groups.set(key, {
-          direction,
-          sign,
-          evidenceCount: 0,
-          sourceDatabase,
-          pubmedIds: new Set<string>(),
-          sourceAnnotations: [],
-          interactionAnnotations: [],
-          targetAnnotations: [],
-        });
-      }
-
-      const group = groups.get(key)!;
-      group.evidenceCount += 1;
-
-      sourceSplit.pubmedIds.forEach((id) => group.pubmedIds.add(id));
-      interactionSplit.pubmedIds.forEach((id) => group.pubmedIds.add(id));
-      targetSplit.pubmedIds.forEach((id) => group.pubmedIds.add(id));
-
-      group.sourceAnnotations.push(...sourceSplit.annotations);
-      group.interactionAnnotations.push(...interactionSplit.annotations);
-      group.targetAnnotations.push(...targetSplit.annotations);
-    });
-  });
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({
+    const key = row.source || "unknown";
+    const existing = groups.get(key) ?? {
       key,
-      direction: group.direction,
-      sign: group.sign,
-      evidenceCount: group.evidenceCount,
-      sourceDatabase: group.sourceDatabase,
-      pubmedIds: Array.from(group.pubmedIds).sort((a, b) => Number(a) - Number(b)),
-      sourceAnnotations: dedupeAnnotations(group.sourceAnnotations),
-      interactionAnnotations: dedupeAnnotations(group.interactionAnnotations),
-      targetAnnotations: dedupeAnnotations(group.targetAnnotations),
-    }))
-    .sort((a, b) => b.evidenceCount - a.evidenceCount || (a.sourceDatabase || '').localeCompare(b.sourceDatabase || '') || a.key.localeCompare(b.key));
-}
+      source: row.source,
+      evidenceCount: 0,
+      pubmedIds: [],
+      subjectAnnotations: [],
+      relationAnnotations: [],
+      objectAnnotations: [],
+    };
 
-export function InteractionDetails({ selectedInteraction }: InteractionDetailsProps) {
-  const directions = useMemo(() => getInteractionDirections(selectedInteraction), [selectedInteraction]);
+    existing.evidenceCount += 1;
+    existing.pubmedIds = Array.from(new Set([
+      ...existing.pubmedIds,
+      ...subjectSplit.pubmedIds,
+      ...relationSplit.pubmedIds,
+      ...objectSplit.pubmedIds,
+    ])).sort((a, b) => Number(a) - Number(b));
+    existing.subjectAnnotations.push(...subjectSplit.annotations);
+    existing.relationAnnotations.push(...relationSplit.annotations);
+    existing.objectAnnotations.push(...objectSplit.annotations);
 
-  const overallSign = useMemo(() => {
-    if (!selectedInteraction) return null;
-    return getOverallSign(directions);
-  }, [directions, selectedInteraction]);
-
-  const getInteractionColor = () => {
-    if (!selectedInteraction) return "text-gray-500";
-    if (overallSign === 'positive') return "text-green-500";
-    if (overallSign === 'negative') return "text-red-500";
-    return "text-gray-500";
+    groups.set(key, existing);
   }
 
-  const detailedInteraction = selectedInteraction && 'evidence' in selectedInteraction ? selectedInteraction : null;
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      subjectAnnotations: dedupeAnnotations(group.subjectAnnotations),
+      relationAnnotations: dedupeAnnotations(group.relationAnnotations),
+      objectAnnotations: dedupeAnnotations(group.objectAnnotations),
+    }))
+    .sort((a, b) => b.evidenceCount - a.evidenceCount || a.source.localeCompare(b.source));
+}
 
-  const evidenceStats = useMemo(() => {
-    if (!detailedInteraction?.evidence) return null;
+function getAnnotationTermCount(evidence: InteractionDetailsData["evidence"]): number {
+  const terms = new Set<string>();
 
-    const allTerms = extractAnnotationTerms(detailedInteraction.evidence);
+  for (const row of evidence) {
+    [row.subjectAttributes, row.recordAttributes, row.evidence, row.objectAttributes].forEach((value) => {
+      for (const annotation of normalizeAnnotationArray(value)) {
+        terms.add(annotation.termId || annotation.term);
+      }
+    });
+  }
 
-    return {
-      total: detailedInteraction.evidence.length,
-      annotationTerms: allTerms.length,
-    };
-  }, [detailedInteraction]);
+  return terms.size;
+}
 
-  const swap = shouldSwapMembers(directions);
+export function InteractionDetails({ selectedInteraction, evidenceLoading = false }: InteractionDetailsProps) {
+  const detailedInteraction = selectedInteraction && "evidence" in selectedInteraction ? selectedInteraction : null;
+  const evidence = detailedInteraction?.evidence ?? [];
 
-  const evidenceGroups = useMemo(() => {
-    if (!detailedInteraction) return [] as AggregatedEvidenceGroup[];
-    return buildEvidenceGroups(detailedInteraction, swap);
-  }, [detailedInteraction, swap]);
+  const evidenceGroups = useMemo(() => buildEvidenceGroups(evidence), [evidence]);
+  const annotationTermCount = useMemo(() => getAnnotationTermCount(evidence), [evidence]);
 
   if (!selectedInteraction) {
     return (
@@ -442,20 +213,18 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
         <div className="rounded-lg border bg-card p-8">
           <div className="flex flex-col items-center justify-center text-center">
             <Search className="mb-4 h-12 w-12 text-muted-foreground" />
-            <p className="mb-2 text-lg font-medium text-muted-foreground">No interaction selected</p>
-            <p className="text-sm text-muted-foreground">Select an interaction to view detailed evidence</p>
+            <p className="mb-2 text-lg font-medium text-muted-foreground">No relation selected</p>
+            <p className="text-sm text-muted-foreground">Select a relation to view detailed evidence</p>
           </div>
         </div>
       </div>
-    )
+    );
   }
 
-  const sourceEntity = swap ? selectedInteraction.entityB : selectedInteraction.entityA;
-  const targetEntity = swap ? selectedInteraction.entityA : selectedInteraction.entityB;
-  const sourceId = getEntityPublicId(sourceEntity);
-  const targetId = getEntityPublicId(targetEntity);
-  const sourceType = getEntityTypeLabel(sourceEntity);
-  const targetType = getEntityTypeLabel(targetEntity);
+  const subjectEntity = selectedInteraction.subjectEntity;
+  const objectEntity = selectedInteraction.objectEntity;
+  const subjectId = getEntityPublicId(subjectEntity);
+  const objectId = getEntityPublicId(objectEntity);
 
   return (
     <div className="space-y-6 p-4 pb-8">
@@ -463,100 +232,128 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-6">
           <div className="min-w-0">
             <EntityBadge
-              displayName={getEntityDisplayName(sourceEntity)}
-              canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
-              entityId={sourceId}
-              entityType={sourceType}
+              displayName={getEntityDisplayName(subjectEntity)}
+              canonicalIdentifier={getEntitySecondaryName(subjectEntity) || subjectEntity.canonicalIdentifier}
+              entityId={subjectId}
+              entityType={getEntityTypeLabel(subjectEntity)}
             />
           </div>
 
-          <div className="flex flex-col items-center gap-2">
-            <div className={cn("flex items-center", getInteractionColor())}>
-              {selectedInteraction.interaction.direction !== null && selectedInteraction.interaction.direction !== 0 ? (
-                <ArrowRight className="h-8 w-8" />
-              ) : (
-                <Minus className="h-8 w-8" />
-              )}
-            </div>
-            {overallSign && (
-              <Badge className={cn("border px-2 py-1 text-xs", getSignColor(overallSign))}>
-                {overallSign === 'positive' && <Plus className="mr-1 h-3 w-3" />}
-                {overallSign === 'negative' && <Minus className="mr-1 h-3 w-3" />}
-                {getSignLabel(overallSign)}
-              </Badge>
-            )}
+          <div className="flex flex-col items-center gap-2 text-muted-foreground">
+            <ArrowRight className="h-8 w-8" />
+            <Badge variant="outline">{selectedInteraction.relation.predicate || "—"}</Badge>
           </div>
 
           <div className="min-w-0">
             <EntityBadge
-              displayName={getEntityDisplayName(targetEntity)}
-              canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
-              entityId={targetId}
-              entityType={targetType}
+              displayName={getEntityDisplayName(objectEntity)}
+              canonicalIdentifier={getEntitySecondaryName(objectEntity) || objectEntity.canonicalIdentifier}
+              entityId={objectId}
+              entityType={getEntityTypeLabel(objectEntity)}
             />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 border-t pt-4">
           <div className="text-center">
-            <div className="text-2xl font-bold text-primary">{selectedInteraction.interaction.evidenceCount}</div>
-            <div className="text-xs text-muted-foreground">Evidence{selectedInteraction.interaction.evidenceCount !== 1 ? 's' : ''}</div>
+            <div className="text-2xl font-bold text-primary">{selectedInteraction.relation.evidenceCount}</div>
+            <div className="text-xs text-muted-foreground">Evidence{selectedInteraction.relation.evidenceCount !== 1 ? "s" : ""}</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">{evidenceStats?.annotationTerms || 0}</div>
-            <div className="text-xs text-muted-foreground">Annotation Term{(evidenceStats?.annotationTerms || 0) !== 1 ? 's' : ''}</div>
+            <div className="text-2xl font-bold text-purple-600">{annotationTermCount}</div>
+            <div className="text-xs text-muted-foreground">Annotation Term{annotationTermCount !== 1 ? "s" : ""}</div>
           </div>
         </div>
       </div>
 
-      <Accordion type="multiple" defaultValue={["evidence"]} className="space-y-4">
+      <Accordion type="multiple" defaultValue={["summary", "evidence"]} className="space-y-4">
+        <AccordionItem value="summary" className="rounded-lg border">
+          <AccordionTrigger className="px-4 py-3 hover:no-underline">
+            <span className="font-medium">Evidence summary table</span>
+          </AccordionTrigger>
+          <AccordionContent className="px-4 pb-4">
+            {evidenceLoading ? (
+              <div className="text-sm text-muted-foreground">Loading evidence…</div>
+            ) : evidenceGroups.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No evidence rows available.</div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="text-center">Evidence</TableHead>
+                      <TableHead className="text-center">Subject ann.</TableHead>
+                      <TableHead className="text-center">Relation ann.</TableHead>
+                      <TableHead className="text-center">Object ann.</TableHead>
+                      <TableHead className="text-center">PubMed</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {evidenceGroups.map((group) => (
+                      <TableRow key={group.key}>
+                        <TableCell className="font-medium">{group.source || "—"}</TableCell>
+                        <TableCell className="text-center">{group.evidenceCount}</TableCell>
+                        <TableCell className="text-center">{group.subjectAnnotations.length}</TableCell>
+                        <TableCell className="text-center">{group.relationAnnotations.length}</TableCell>
+                        <TableCell className="text-center">{group.objectAnnotations.length}</TableCell>
+                        <TableCell className="text-center">{group.pubmedIds.length}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="evidence" className="rounded-lg border">
           <AccordionTrigger className="px-4 py-3 hover:no-underline">
             <div className="flex items-center gap-2">
               <Layers3 className="h-5 w-5" />
               <span className="font-medium">Aggregated evidence</span>
-              <Badge variant="secondary" className="ml-2">
-                {detailedInteraction?.evidence.length || 0}
-              </Badge>
+              <Badge variant="secondary">{evidence.length}</Badge>
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-4 pb-4">
-            {detailedInteraction ? (
+            {evidenceLoading ? (
+              <div className="text-sm text-muted-foreground">Loading evidence…</div>
+            ) : evidenceGroups.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No evidence rows available.</div>
+            ) : (
               <div className="space-y-4">
                 {evidenceGroups.map((group) => (
                   <div key={group.key} className="rounded-lg border bg-muted/20 p-4">
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
-                          {group.evidenceCount} evidence{group.evidenceCount !== 1 ? 's' : ''}
+                          {group.evidenceCount} evidence{group.evidenceCount !== 1 ? "s" : ""}
                         </Badge>
                       </div>
 
-                      {group.sourceDatabase && (
-                        <Badge variant="secondary" className="text-xs">
-                          {group.sourceDatabase}
-                        </Badge>
-                      )}
+                      <Badge variant="secondary" className="text-xs">
+                        {group.source || "Unknown source"}
+                      </Badge>
                     </div>
 
                     <div className="grid gap-4 lg:grid-cols-3">
                       <div className="space-y-2">
                         <div className="text-xs font-medium uppercase tracking-wide text-blue-700">
-                          Source ({sourceId})
+                          Subject ({subjectId})
                         </div>
-                        <AnnotationChips annotations={group.sourceAnnotations} emptyLabel="No source annotations" />
+                        <AnnotationChips annotations={group.subjectAnnotations} emptyLabel="No subject annotations" />
                       </div>
 
                       <div className="space-y-2">
-                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interaction</div>
-                        <AnnotationChips annotations={group.interactionAnnotations} emptyLabel="No interaction-level annotations" />
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Relation</div>
+                        <AnnotationChips annotations={group.relationAnnotations} emptyLabel="No relation-level annotations" />
                       </div>
 
                       <div className="space-y-2">
                         <div className="text-xs font-medium uppercase tracking-wide text-purple-700">
-                          Target ({targetId})
+                          Object ({objectId})
                         </div>
-                        <AnnotationChips annotations={group.targetAnnotations} emptyLabel="No target annotations" />
+                        <AnnotationChips annotations={group.objectAnnotations} emptyLabel="No object annotations" />
                       </div>
                     </div>
 
@@ -578,18 +375,19 @@ export function InteractionDetails({ selectedInteraction }: InteractionDetailsPr
                           ))}
                         </div>
                       ) : (
-                        <div className="text-xs text-muted-foreground">No PubMed references available</div>
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Minus className="h-3 w-3" />
+                          No PubMed references available
+                        </div>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">Loading evidence…</div>
             )}
           </AccordionContent>
         </AccordionItem>
       </Accordion>
     </div>
-  )
+  );
 }

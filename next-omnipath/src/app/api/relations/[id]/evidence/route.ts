@@ -2,6 +2,21 @@ import { NextResponse } from "next/server";
 
 import { getEvidenceByRelationPk } from "@/lib/queries/relation-evidence";
 
+function jsonBigIntSafe(value: unknown, init?: ResponseInit) {
+  return new NextResponse(
+    JSON.stringify(value, (_key, currentValue) =>
+      typeof currentValue === "bigint" ? Number(currentValue) : currentValue,
+    ),
+    {
+      ...init,
+      headers: {
+        "content-type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    },
+  );
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
@@ -14,5 +29,5 @@ export async function GET(
   }
 
   const evidence = await getEvidenceByRelationPk(relationPk);
-  return NextResponse.json({ evidence });
+  return jsonBigIntSafe({ evidence });
 }
