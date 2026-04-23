@@ -5,7 +5,6 @@ import { Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { useEntitySelection, useSelectionUrlState } from "@/lib/navigation/url-state";
-import { formatNumber } from "@/lib/utils";
 import { AnnotationBrowserTab } from "@/features/explore/components/annotation-browser-tab";
 import { EntitiesExploreTab } from "@/features/explore/components/entities-explore-tab";
 import { ExploreBrowserShell } from "@/features/explore/components/explore-browser-shell";
@@ -21,7 +20,6 @@ export function SelectionResultsView() {
     resolveAnnotationEntities: shouldResolveAnnotationEntities,
   });
   const [draftQuery, setDraftQuery] = useState(query);
-  const [interactionsCount, setInteractionsCount] = useState<number | null>(null);
 
   useEffect(() => {
     setDraftQuery(query);
@@ -107,9 +105,9 @@ export function SelectionResultsView() {
       tab={tab}
       onTabChange={setTab}
       tabs={[
-        { value: "entities", label: "Entities", badge: <Badge variant="secondary">{formatNumber(scopedEntityIds.length)}</Badge> },
-        { value: "interactions", label: "Interactions", badge: <Badge variant="secondary">{interactionsCount === null ? "…" : formatNumber(interactionsCount)}</Badge> },
-        { value: "annotations", label: "Annotations", badge: <Badge variant="secondary">{formatNumber(selectedAnnotationIds.length)}</Badge> },
+        { value: "entities", label: "Entities" },
+        { value: "interactions", label: "Interactions" },
+        { value: "annotations", label: "Annotations" },
       ]}
       content={content}
       searchPlaceholder={tab === "annotations" ? "Search scoped annotations…" : tab === "interactions" ? "Search scoped interactions…" : "Search scoped entities…"}

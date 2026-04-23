@@ -5,6 +5,10 @@ import { getDb, getPool } from "@/lib/db/client";
 import { entity, entityRelation, ontologyTerm, type OntologyTerm } from "@next-omnipath/drizzle";
 import { toPublicEntityId } from "@/lib/entity-public-id";
 
+export type ScopedOntologyTerm = OntologyTerm & {
+  annotatedEntityCount: number;
+};
+
 export async function getOntologyTermsByIds(termIds: string[]): Promise<OntologyTerm[]> {
   const normalized = Array.from(new Set(termIds.map((t) => t.trim()).filter(Boolean)));
   if (normalized.length === 0) return [];
@@ -16,10 +20,12 @@ export async function searchOntologyTerms({
   query = "",
   prefixes,
   limit = 24,
+  offset = 0,
 }: {
   query?: string;
   prefixes?: string[];
   limit?: number;
+  offset?: number;
 } = {}): Promise<OntologyTerm[]> {
   const db = getDb();
   const conditions: SQL[] = [];
@@ -46,7 +52,8 @@ export async function searchOntologyTerms({
     .from(ontologyTerm)
     .where(where)
     .orderBy(asc(ontologyTerm.termId))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 let ontologyPrefixesCache: { value: string[]; expiresAt: number } | null = null;
@@ -78,6 +85,96 @@ export async function getOntologyPrefixes(): Promise<string[]> {
   })();
 
   return ontologyPrefixesInFlight;
+}
+
+export async function searchScopedOntologyTerms({
+  entityIds,
+  query = "",
+  prefixes,
+  limit = 24,
+  offset = 0,
+}: {
+  entityIds: string[];
+  query?: string;
+  prefixes?: string[];
+  limit?: number;
+  offset?: number;
+}): Promise<ScopedOntologyTerm[]> {
+  const normalizedEntityIds = Array.from(new Set(entityIds.map((id) => id.trim()).filter(Boolean)));
+  if (normalizedEntityIds.length === 0) return [];
+
+  const normalizedPrefixes = Array.from(new Set((prefixes || []).map((prefix) => prefix.trim()).filter(Boolean)));
+  const trimmedQuery = query.trim();
+  const client = await getPool().connect();
+
+  try {
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const params: unknown[] = [normalizedEntityIds];
+    const whereParts: string[] = [];
+
+    if (trimmedQuery) {
+      params.push(`%${trimmedQuery}%`);
+      const placeholder = `$${params.length}`;
+      whereParts.push(`(
+        ot.term_id ILIKE ${placeholder}
+        OR ot.label ILIKE ${placeholder}
+        OR ot.definition ILIKE ${placeholder}
+        OR ot.ontology_prefix ILIKE ${placeholder}
+      )`);
+    }
+
+    if (normalizedPrefixes.length > 0) {
+      params.push(normalizedPrefixes);
+      whereParts.push(`ot.ontology_prefix = ANY($${params.length}::text[])`);
+    }
+
+    params.push(limit);
+    const limitPlaceholder = `$${params.length}`;
+    params.push(offset);
+    const offsetPlaceholder = `$${params.length}`;
+    const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
+    const result = await client.query<{
+      term_id: string;
+      ontology_prefix: string | null;
+      label: string | null;
+      definition: string | null;
+      synonyms: string[] | null;
+      sources: string[] | null;
+      annotated_entity_count: string | number;
+    }>(
+      `SELECT ot.*, scoped_terms.annotated_entity_count
+       FROM ${SEARCH_SCHEMA}.ontology_term ot
+       JOIN (
+         SELECT
+           eo.canonical_identifier AS term_id,
+           COUNT(DISTINCT er.subject_entity_pk) AS annotated_entity_count
+         FROM ${SEARCH_SCHEMA}.entity_relation er
+         JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_pk = er.subject_entity_pk
+         JOIN ${SEARCH_SCHEMA}.entity eo ON eo.entity_pk = er.object_entity_pk
+         WHERE er.relation_category = 'annotation'
+           AND (es.canonical_identifier_type || '|' || es.canonical_identifier) = ANY($1::text[])
+         GROUP BY eo.canonical_identifier
+       ) scoped_terms ON scoped_terms.term_id = ot.term_id
+       WHERE 1 = 1
+       ${whereClause}
+       ORDER BY scoped_terms.annotated_entity_count DESC, ot.term_id ASC
+       LIMIT ${limitPlaceholder}
+       OFFSET ${offsetPlaceholder}`,
+      params,
+    );
+
+    return result.rows.map((row) => ({
+      termId: row.term_id,
+      ontologyPrefix: row.ontology_prefix,
+      label: row.label,
+      definition: row.definition,
+      synonyms: row.synonyms || [],
+      sources: row.sources || [],
+      annotatedEntityCount: Number(row.annotated_entity_count || 0),
+    }));
+  } finally {
+    client.release();
+  }
 }
 
 export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise<string[]> {

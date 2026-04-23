@@ -5,11 +5,11 @@ import { Check, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { searchOntologyTerms, getOntologyPrefixes } from "@/lib/queries/ontology-term";
+import { searchOntologyTerms, searchScopedOntologyTerms, getOntologyPrefixes, type ScopedOntologyTerm } from "@/lib/queries/ontology-term";
 import type { OntologyTerm } from "@next-omnipath/drizzle";
 import { useEntitySelection } from "@/lib/navigation/url-state";
-import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { useCallback, useState } from "react";
 
 interface AnnotationBrowserTabProps {
   query: string;
@@ -39,7 +39,7 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function AnnotationCards({ results }: { results: OntologyTerm[] }) {
+function AnnotationCards({ results }: { results: Array<OntologyTerm | ScopedOntologyTerm> }) {
   const { addAnnotation, isAnnotationSelected, removeAnnotation } = useEntitySelection();
 
   return (
@@ -78,6 +78,9 @@ function AnnotationCards({ results }: { results: OntologyTerm[] }) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {term.ontologyPrefix ? <Badge variant="outline">{term.ontologyPrefix}</Badge> : null}
+                {"annotatedEntityCount" in term ? (
+                  <Badge variant="secondary">{term.annotatedEntityCount.toLocaleString()} entities</Badge>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent>
@@ -102,32 +105,41 @@ export function AnnotationBrowserTab({ query, scopedEntityIds }: AnnotationBrows
     staleTime: 60_000,
   });
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["explore-annotations", query, selectedPrefixes],
-    queryFn: () => searchOntologyTerms({
-      query,
-      prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
-      limit: 30,
-    }),
-    staleTime: 60_000,
-  });
+  const {
+    data: results,
+    loading: isLoading,
+    loadingMore,
+    hasMore,
+    sentinelRef,
+  } = useInfiniteScroll<OntologyTerm>({
+    fetchData: useCallback(async (offset: number, limit: number) => {
+      const page = isScoped
+        ? await searchScopedOntologyTerms({
+            entityIds: scopedEntityIds || [],
+            query,
+            prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
+            limit,
+            offset,
+          })
+        : await searchOntologyTerms({
+            query,
+            prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
+            limit,
+            offset,
+          });
 
-  const results = data || [];
+      return { results: page };
+    }, [isScoped, query, scopedEntityIds, selectedPrefixes]),
+    pageSize: 30,
+    dependencies: [query, selectedPrefixes, scopedEntityIds, isScoped],
+    queryKey: ["explore-annotations", query, selectedPrefixes, scopedEntityIds],
+  });
 
   const togglePrefix = (prefix: string) => {
     setSelectedPrefixes((prev) =>
       prev.includes(prefix) ? prev.filter((p) => p !== prefix) : [...prev, prefix]
     );
   };
-
-  if (isScoped) {
-    return (
-      <EmptyState
-        title="Scoped annotations"
-        description="Scoped annotation browsing is not yet implemented in the new query layer."
-      />
-    );
-  }
 
   return (
     <div className="h-full flex flex-col gap-4 overflow-hidden">
@@ -150,16 +162,36 @@ export function AnnotationBrowserTab({ query, scopedEntityIds }: AnnotationBrows
 
       {/* Results */}
       <div className="flex-1 min-h-0 overflow-y-auto p-1">
-        {isLoading ? (
+        {isLoading && results.length === 0 ? (
           <LoadingGrid />
         ) : results.length > 0 ? (
-          <AnnotationCards results={results} />
+          <div className="space-y-4">
+            <AnnotationCards results={results} />
+            <div
+              ref={sentinelRef as React.RefObject<HTMLDivElement>}
+              className="flex justify-center py-4"
+              style={{ minHeight: '40px' }}
+            >
+              {loadingMore ? (
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <span className="text-sm text-muted-foreground">Loading more...</span>
+                </div>
+              ) : hasMore ? (
+                <div className="h-4 w-4" />
+              ) : null}
+            </div>
+          </div>
         ) : (
           <EmptyState
             title="No annotations found"
             description={query.trim().length > 0
-              ? "Try a different ontology term, synonym, or ID such as GO:0005634 or MI:0217."
-              : "No annotation terms are available to browse right now."}
+              ? (isScoped
+                  ? "Try a different ontology term, synonym, or ID within the current entity scope."
+                  : "Try a different ontology term, synonym, or ID such as GO:0005634 or MI:0217.")
+              : (isScoped
+                  ? "No annotation terms are available for the current entity scope."
+                  : "No annotation terms are available to browse right now.")}
           />
         )}
       </div>
