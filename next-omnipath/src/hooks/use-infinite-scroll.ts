@@ -3,7 +3,6 @@ import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
 
 interface InfiniteScrollPage<T, TPageParam> {
   results: T[]
-  totalResults: number
   nextPageParam?: TPageParam
 }
 
@@ -65,8 +64,7 @@ export function useInfiniteScroll<T, TPageParam = number>({
       }
 
       const loadedCount = allPages.reduce((sum, page) => sum + page.results.length, 0)
-      const hasMore = lastPage.results.length === pageSize && loadedCount < lastPage.totalResults
-      return hasMore ? (loadedCount as TPageParam) : undefined
+      return lastPage.results.length === pageSize ? (loadedCount as TPageParam) : undefined
     },
   })
 
@@ -75,7 +73,7 @@ export function useInfiniteScroll<T, TPageParam = number>({
     [query.data],
   )
 
-  const totalResults = query.data?.pages[0]?.totalResults ?? 0
+  const totalResults = data.length
   const hasMore = query.hasNextPage ?? false
   const error = query.error instanceof Error ? query.error : query.error ? new Error('Failed to fetch data') : null
 

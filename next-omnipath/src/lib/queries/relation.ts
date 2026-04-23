@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb, getPool } from "@/lib/db/client";
 import { entity, entityRelation, type Entity, type EntityRelation } from "@next-omnipath/drizzle";
@@ -10,6 +10,26 @@ export type RelationWithEntities = EntityRelation & {
   subjectEntity: Entity;
   objectEntity: Entity;
 };
+
+function toRelationRow(row: {
+  relation_pk: string | number;
+  subject_entity_pk: string | number;
+  predicate: string;
+  object_entity_pk: string | number;
+  relation_category: string;
+  evidence_count: string | number;
+  sources: string[];
+}): EntityRelation {
+  return {
+    relationPk: Number(row.relation_pk),
+    subjectEntityPk: Number(row.subject_entity_pk),
+    predicate: row.predicate,
+    objectEntityPk: Number(row.object_entity_pk),
+    relationCategory: row.relation_category,
+    evidenceCount: Number(row.evidence_count),
+    sources: row.sources,
+  };
+}
 
 export async function getRelationByPk(pk: number): Promise<RelationWithEntities | null> {
   const db = getDb();
@@ -50,6 +70,54 @@ export interface RelationFilters {
   sources?: string[];
 }
 
+function normalizeNumberValues(values: number[] | undefined): number[] {
+  return Array.from(new Set((values || []).filter(Number.isFinite)));
+}
+
+function buildRelationSearchWhere(filters: RelationFilters) {
+  const whereParts: string[] = [];
+  const params: unknown[] = [];
+
+  const pushParam = (value: unknown, cast?: string): string => {
+    params.push(value);
+    const placeholder = `$${params.length}`;
+    return cast ? `${placeholder}::${cast}` : placeholder;
+  };
+
+  if (filters.relationCategories?.length) {
+    whereParts.push(`relation_category = ANY(${pushParam(filters.relationCategories, "text[]")})`);
+  }
+
+  if (filters.predicates?.length) {
+    whereParts.push(`predicate = ANY(${pushParam(filters.predicates, "text[]")})`);
+  }
+
+  const subjectEntityPks = normalizeNumberValues(filters.subjectEntityPks);
+  if (subjectEntityPks.length) {
+    whereParts.push(`subject_entity_pk = ANY(${pushParam(subjectEntityPks, "bigint[]")})`);
+  }
+
+  const objectEntityPks = normalizeNumberValues(filters.objectEntityPks);
+  if (objectEntityPks.length) {
+    whereParts.push(`object_entity_pk = ANY(${pushParam(objectEntityPks, "bigint[]")})`);
+  }
+
+  const entityPks = normalizeNumberValues(filters.entityPks);
+  if (entityPks.length) {
+    const placeholder = pushParam(entityPks, "bigint[]");
+    whereParts.push(`(subject_entity_pk = ANY(${placeholder}) OR object_entity_pk = ANY(${placeholder}))`);
+  }
+
+  if (filters.sources?.length) {
+    whereParts.push(`sources && ${pushParam(filters.sources, "text[]")}`);
+  }
+
+  return {
+    whereClause: whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "",
+    params,
+  };
+}
+
 export async function searchRelations({
   filters = {},
   limit = 20,
@@ -58,96 +126,116 @@ export async function searchRelations({
   filters?: RelationFilters;
   limit?: number;
   offset?: number;
-} = {}): Promise<{ relations: EntityRelation[]; total: number }> {
-  const db = getDb();
-  const conditions: SQL[] = [];
+} = {}): Promise<{ relations: EntityRelation[] }> {
+  const client = await getPool().connect();
+  try {
+    const { whereClause, params } = buildRelationSearchWhere(filters);
 
-  if (filters.relationCategories?.length) {
-    conditions.push(inArray(entityRelation.relationCategory, filters.relationCategories));
-  }
-
-  if (filters.predicates?.length) {
-    conditions.push(inArray(entityRelation.predicate, filters.predicates));
-  }
-
-  if (filters.subjectEntityPks?.length) {
-    conditions.push(inArray(entityRelation.subjectEntityPk, filters.subjectEntityPks));
-  }
-
-  if (filters.objectEntityPks?.length) {
-    conditions.push(inArray(entityRelation.objectEntityPk, filters.objectEntityPks));
-  }
-
-  if (filters.entityPks?.length) {
-    conditions.push(
-      sql`(${entityRelation.subjectEntityPk} = ANY(${filters.entityPks}) OR ${entityRelation.objectEntityPk} = ANY(${filters.entityPks}))`,
+    const pageParams = [...params, limit, offset];
+    const relationsResult = await client.query<{
+      relation_pk: string | number;
+      subject_entity_pk: string | number;
+      predicate: string;
+      object_entity_pk: string | number;
+      relation_category: string;
+      evidence_count: string | number;
+      sources: string[];
+    }>(
+      `SELECT *
+       FROM entity_relation
+       ${whereClause}
+       ORDER BY relation_pk
+       LIMIT $${pageParams.length - 1}
+       OFFSET $${pageParams.length}`,
+      pageParams,
     );
+
+    return { relations: relationsResult.rows.map(toRelationRow) };
+  } finally {
+    client.release();
   }
-
-  if (filters.sources?.length) {
-    conditions.push(sql`${entityRelation.sources} && ${filters.sources}`);
-  }
-
-  const where = conditions.length ? and(...conditions) : undefined;
-
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(entityRelation)
-    .where(where);
-  const total = Number(countResult[0]?.count || 0);
-
-  const relations = await db
-    .select()
-    .from(entityRelation)
-    .where(where)
-    .orderBy(entityRelation.relationPk)
-    .limit(limit)
-    .offset(offset);
-
-  return { relations, total };
 }
 
-export async function countRelations(
-  filters: RelationFilters = {},
-): Promise<number> {
-  const { total } = await searchRelations({ filters, limit: 1, offset: 0 });
-  return total;
+export async function countRelations(filters: RelationFilters = {}): Promise<number> {
+  const client = await getPool().connect();
+  try {
+    const { whereClause, params } = buildRelationSearchWhere(filters);
+    const result = await client.query<{ count: string }>(
+      `SELECT count(*) AS count
+       FROM entity_relation
+       ${whereClause}`,
+      params,
+    );
+    return Number(result.rows[0]?.count || 0);
+  } finally {
+    client.release();
+  }
 }
+
+let relationFilterOptionsCache:
+  | { value: { predicatesByCategory: Record<string, string[]>; sources: string[] }; expiresAt: number }
+  | null = null;
+let relationFilterOptionsInFlight:
+  | Promise<{ predicatesByCategory: Record<string, string[]>; sources: string[] }>
+  | null = null;
 
 export async function getRelationFilterOptions(): Promise<{
   predicatesByCategory: Record<string, string[]>;
   sources: string[];
 }> {
-  const client = await getPool().connect();
-  try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const [predicateResult, sourceResult] = await Promise.all([
-      client.query(
-        `SELECT DISTINCT r.relation_category AS category, r.predicate AS value
-         FROM ${SEARCH_SCHEMA}.entity_relation r
-         ORDER BY r.relation_category, r.predicate`,
-      ),
-      client.query(
-        `SELECT DISTINCT source.value AS value
-         FROM ${SEARCH_SCHEMA}.entity_relation r
-         CROSS JOIN LATERAL unnest(r.sources) AS source(value)
-         WHERE source.value <> ''
-         ORDER BY source.value`,
-      ),
-    ]);
-
-    const predicatesByCategory: Record<string, string[]> = {};
-    for (const row of predicateResult.rows) {
-      const category = String(row.category);
-      const predicate = String(row.value);
-      if (!predicatesByCategory[category]) predicatesByCategory[category] = [];
-      predicatesByCategory[category].push(predicate);
-    }
-
-    return { predicatesByCategory, sources: sourceResult.rows.map((r) => String(r.value)).filter(Boolean) };
-  } finally {
-    client.release();
+  const now = Date.now();
+  if (relationFilterOptionsCache && relationFilterOptionsCache.expiresAt > now) {
+    return relationFilterOptionsCache.value;
   }
+  if (relationFilterOptionsInFlight) {
+    return relationFilterOptionsInFlight;
+  }
+
+  relationFilterOptionsInFlight = (async () => {
+    const client = await getPool().connect();
+    try {
+      const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+      const [predicateResult, sourceResult] = await Promise.all([
+        client.query<{ category: string; predicates: string[] | null }>(
+          `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
+           FROM (
+             SELECT DISTINCT r.relation_category AS category, r.predicate AS predicate
+             FROM ${SEARCH_SCHEMA}.entity_relation r
+           ) t
+           GROUP BY category
+           ORDER BY category`,
+        ),
+        client.query<{ values: string[] | null }>(
+          `SELECT array_agg(value ORDER BY value) AS values
+           FROM (
+             SELECT DISTINCT source.value AS value
+             FROM ${SEARCH_SCHEMA}.entity_relation r
+             CROSS JOIN LATERAL unnest(r.sources) AS source(value)
+             WHERE source.value <> ''
+           ) t`,
+        ),
+      ]);
+
+      const value = {
+        predicatesByCategory: Object.fromEntries(
+          predicateResult.rows.map((row) => [row.category, row.predicates?.filter(Boolean) ?? []]),
+        ),
+        sources: sourceResult.rows[0]?.values?.filter(Boolean) ?? [],
+      };
+
+      relationFilterOptionsCache = {
+        value,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      };
+
+      return value;
+    } finally {
+      client.release();
+      relationFilterOptionsInFlight = null;
+    }
+  })();
+
+  return relationFilterOptionsInFlight;
 }
 
 export async function getAssociatedEntityIds(entityPks: number[]): Promise<string[]> {

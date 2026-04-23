@@ -1,12 +1,32 @@
 "use server";
 
-import { and, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, getPool } from "@/lib/db/client";
 import { entity, entityIdentifier, type Entity, type EntityIdentifier } from "@next-omnipath/drizzle";
-import { normalizeEntityTypeFilterValue, normalizedEntityTypeDrizzleSql } from "@/lib/entity-filter";
+import { normalizeEntityTypeFilterValue, normalizedEntityTypeSqlExpression } from "@/lib/entity-filter";
 import { normalizeStringValues, publicEntityIdWhere } from "@/lib/entity-public-id";
 
 export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[] };
+
+function toEntityRow(row: {
+  entity_pk: string | number;
+  canonical_identifier: string;
+  canonical_identifier_type: string;
+  entity_type: string | null;
+  taxonomy_id: string | null;
+  entity_attributes: Entity["entityAttributes"];
+  sources: string[];
+}): Entity {
+  return {
+    entityPk: Number(row.entity_pk),
+    canonicalIdentifier: row.canonical_identifier,
+    canonicalIdentifierType: row.canonical_identifier_type,
+    entityType: row.entity_type,
+    taxonomyId: row.taxonomy_id,
+    entityAttributes: row.entity_attributes,
+    sources: row.sources,
+  };
+}
 
 function aggregateEntityIdentifiers(
   rows: Array<{ entity: Entity; entity_identifier: EntityIdentifier | null }>,
@@ -80,125 +100,166 @@ export async function searchEntities({
   };
   limit?: number;
   cursor?: number;
-} = {}): Promise<{ entities: Entity[]; total: number; nextCursor: number | null }> {
-  const db = getDb();
-  const conditions: SQL[] = [];
-
-  if (filters.entity_ids?.length) {
-    const ids = filters.entity_ids.map(String);
-    conditions.push(sql`(e.canonical_identifier_type || '|' || e.canonical_identifier) = ANY(${ids})`);
-  }
-
-  if (filters.entity_types?.length) {
-    const normalizedTypes = filters.entity_types.map(normalizeEntityTypeFilterValue).filter(Boolean);
-    if (normalizedTypes.length) {
-      conditions.push(sql`${normalizedEntityTypeDrizzleSql(entity.entityType)} = ANY(${normalizedTypes})`);
-    }
-  }
-
-  if (filters.sources?.length) {
-    const sources = normalizeStringValues(filters.sources);
-    if (sources.length) {
-      conditions.push(sql`${entity.sources} && ${sources}`);
-    }
-  }
-
-  if (filters.ncbi_tax_id?.length) {
-    const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id);
-    if (taxonomyIds.length) {
-      conditions.push(inArray(entity.taxonomyId, taxonomyIds));
-    }
-  }
-
-  if (filters.ontology_terms?.length) {
-    const terms = normalizeStringValues(filters.ontology_terms);
-    if (terms.length) {
-      conditions.push(sql`EXISTS (
-        SELECT 1 FROM entity_relation er
-        JOIN entity eo ON eo.entity_pk = er.object_entity_pk
-        WHERE er.subject_entity_pk = ${entity.entityPk}
-          AND er.relation_category = 'annotation'
-          AND eo.canonical_identifier = ANY(${terms})
-      )`);
-    }
-  }
-
-  const trimmedQuery = query.trim();
-  if (trimmedQuery) {
-    const pattern = `%${trimmedQuery}%`;
-    conditions.push(sql`(
-      ${entity.canonicalIdentifier} ILIKE ${pattern}
-      OR EXISTS (
-        SELECT 1 FROM entity_identifier ei
-        WHERE ei.entity_pk = ${entity.entityPk}
-          AND ei.identifier ILIKE ${pattern}
-      )
-      OR EXISTS (
-        SELECT 1 FROM entity_relation er
-        JOIN entity eo ON eo.entity_pk = er.object_entity_pk
-        LEFT JOIN ontology_term ot ON ot.term_id = eo.canonical_identifier
-        WHERE er.subject_entity_pk = ${entity.entityPk}
-          AND er.relation_category = 'annotation'
-          AND (
-            eo.canonical_identifier ILIKE ${pattern}
-            OR COALESCE(ot.label, '') ILIKE ${pattern}
-            OR COALESCE(ot.definition, '') ILIKE ${pattern}
-          )
-      )
-    )`);
-  }
-
-  const where = conditions.length ? and(...conditions) : undefined;
-
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(entity)
-    .where(where);
-  const total = Number(countResult[0]?.count || 0);
-
-  const pageConditions = [...conditions];
-  if (typeof cursor === "number" && Number.isFinite(cursor)) {
-    pageConditions.push(gt(entity.entityPk, cursor));
-  }
-  const pageWhere = pageConditions.length ? and(...pageConditions) : undefined;
-
-  const rows = await db
-    .select()
-    .from(entity)
-    .where(pageWhere)
-    .orderBy(entity.entityPk)
-    .limit(limit);
-
-  const nextCursor = rows.length === limit ? rows[rows.length - 1].entityPk : null;
-
-  return { entities: rows, total, nextCursor };
-}
-
-export async function getEntityFilterOptions(): Promise<{ entity_types: string[]; sources: string[] }> {
+} = {}): Promise<{ entities: Entity[]; nextCursor: number | null }> {
   const client = await getPool().connect();
-  try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const [typeResult, sourceResult] = await Promise.all([
-      client.query(
-        `SELECT DISTINCT LOWER(split_part(entity_type, ':', 3)) || ':' || split_part(entity_type, ':', 1) || ':' || split_part(entity_type, ':', 2) AS value
-         FROM ${SEARCH_SCHEMA}.entity
-         WHERE entity_type IS NOT NULL
-         ORDER BY 1`,
-      ),
-      client.query(
-        `SELECT DISTINCT source.value AS value
-         FROM ${SEARCH_SCHEMA}.entity e
-         CROSS JOIN LATERAL unnest(e.sources) AS source(value)
-         WHERE source.value <> ''
-         ORDER BY source.value`,
-      ),
-    ]);
 
-    return {
-      entity_types: typeResult.rows.map((row) => String(row.value)).filter(Boolean),
-      sources: sourceResult.rows.map((row) => String(row.value)).filter(Boolean),
+  try {
+    const whereParts: string[] = [];
+    const params: unknown[] = [];
+    const trimmedQuery = query.trim();
+
+    const pushParam = (value: unknown): string => {
+      params.push(value);
+      return `$${params.length}`;
     };
+
+    if (trimmedQuery) {
+      const queryParam = pushParam(trimmedQuery);
+      whereParts.push(`ei.identifier = ${queryParam}`);
+    }
+
+    if (filters.entity_ids?.length) {
+      const ids = filters.entity_ids.map(String).filter(Boolean);
+      if (ids.length) {
+        const param = pushParam(ids);
+        whereParts.push(`(e.canonical_identifier_type || '|' || e.canonical_identifier) = ANY(${param}::text[])`);
+      }
+    }
+
+    if (filters.entity_types?.length) {
+      const normalizedTypes = filters.entity_types.map(normalizeEntityTypeFilterValue).filter(Boolean);
+      if (normalizedTypes.length) {
+        const param = pushParam(normalizedTypes);
+        whereParts.push(`${normalizedEntityTypeSqlExpression("e.entity_type")} = ANY(${param}::text[])`);
+      }
+    }
+
+    if (filters.sources?.length) {
+      const sources = normalizeStringValues(filters.sources);
+      if (sources.length) {
+        const param = pushParam(sources);
+        whereParts.push(`e.sources && ${param}::text[]`);
+      }
+    }
+
+    if (filters.ncbi_tax_id?.length) {
+      const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id);
+      if (taxonomyIds.length) {
+        const param = pushParam(taxonomyIds);
+        whereParts.push(`e.taxonomy_id = ANY(${param}::text[])`);
+      }
+    }
+
+    if (filters.ontology_terms?.length) {
+      const terms = normalizeStringValues(filters.ontology_terms);
+      if (terms.length) {
+        const param = pushParam(terms);
+        whereParts.push(`EXISTS (
+          SELECT 1
+          FROM entity_relation er
+          JOIN entity eo ON eo.entity_pk = er.object_entity_pk
+          WHERE er.subject_entity_pk = e.entity_pk
+            AND er.relation_category = 'annotation'
+            AND eo.canonical_identifier = ANY(${param}::text[])
+        )`);
+      }
+    }
+
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const baseFrom = trimmedQuery
+      ? `FROM entity_identifier ei JOIN entity e ON e.entity_pk = ei.entity_pk`
+      : `FROM entity e`;
+
+    const pageParams = [...params];
+    if (typeof cursor === "number" && Number.isFinite(cursor)) {
+      pageParams.push(cursor);
+    }
+    pageParams.push(limit);
+    const limitParam = `$${pageParams.length}`;
+    const pageCursorWhere = typeof cursor === "number" && Number.isFinite(cursor)
+      ? ` AND e.entity_pk > $${pageParams.length - 1}`
+      : "";
+
+    const rowsResult = await client.query<{
+      entity_pk: string | number;
+      canonical_identifier: string;
+      canonical_identifier_type: string;
+      entity_type: string | null;
+      taxonomy_id: string | null;
+      entity_attributes: Entity["entityAttributes"];
+      sources: string[];
+    }>(
+      `SELECT e.*
+       ${baseFrom}
+       ${whereClause}${pageCursorWhere}
+       ORDER BY e.entity_pk
+       LIMIT ${limitParam}`,
+      pageParams,
+    );
+
+    const rows = rowsResult.rows.map(toEntityRow);
+    const nextCursor = rows.length === limit ? rows[rows.length - 1].entityPk : null;
+
+    return { entities: rows, nextCursor };
   } finally {
     client.release();
   }
+}
+
+let entityFilterOptionsCache:
+  | { value: { entity_types: string[]; sources: string[] }; expiresAt: number }
+  | null = null;
+let entityFilterOptionsInFlight: Promise<{ entity_types: string[]; sources: string[] }> | null = null;
+
+export async function getEntityFilterOptions(): Promise<{ entity_types: string[]; sources: string[] }> {
+  const now = Date.now();
+  if (entityFilterOptionsCache && entityFilterOptionsCache.expiresAt > now) {
+    return entityFilterOptionsCache.value;
+  }
+  if (entityFilterOptionsInFlight) {
+    return entityFilterOptionsInFlight;
+  }
+
+  entityFilterOptionsInFlight = (async () => {
+    const client = await getPool().connect();
+    try {
+      const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+      const [typeResult, sourceResult] = await Promise.all([
+        client.query<{ values: string[] | null }>(
+          `SELECT array_agg(value ORDER BY value) AS values
+           FROM (
+             SELECT DISTINCT LOWER(split_part(entity_type, ':', 3)) || ':' || split_part(entity_type, ':', 1) || ':' || split_part(entity_type, ':', 2) AS value
+             FROM ${SEARCH_SCHEMA}.entity
+             WHERE entity_type IS NOT NULL
+           ) t`,
+        ),
+        client.query<{ values: string[] | null }>(
+          `SELECT array_agg(value ORDER BY value) AS values
+           FROM (
+             SELECT DISTINCT source.value AS value
+             FROM ${SEARCH_SCHEMA}.entity e
+             CROSS JOIN LATERAL unnest(e.sources) AS source(value)
+             WHERE source.value <> ''
+           ) t`,
+        ),
+      ]);
+
+      const value = {
+        entity_types: typeResult.rows[0]?.values?.filter(Boolean) ?? [],
+        sources: sourceResult.rows[0]?.values?.filter(Boolean) ?? [],
+      };
+
+      entityFilterOptionsCache = {
+        value,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      };
+
+      return value;
+    } finally {
+      client.release();
+      entityFilterOptionsInFlight = null;
+    }
+  })();
+
+  return entityFilterOptionsInFlight;
 }

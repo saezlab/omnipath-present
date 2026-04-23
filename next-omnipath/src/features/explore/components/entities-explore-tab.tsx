@@ -101,7 +101,6 @@ export function EntitiesExploreTab({
 
       return {
         results: response.entities,
-        totalResults: response.total,
         nextPageParam: response.nextCursor ?? undefined,
       };
     }, [effectiveFilters, query]),

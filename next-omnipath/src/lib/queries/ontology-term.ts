@@ -49,14 +49,35 @@ export async function searchOntologyTerms({
     .limit(limit);
 }
 
+let ontologyPrefixesCache: { value: string[]; expiresAt: number } | null = null;
+let ontologyPrefixesInFlight: Promise<string[]> | null = null;
+
 export async function getOntologyPrefixes(): Promise<string[]> {
-  const db = getDb();
-  const rows = await db
-    .selectDistinct({ prefix: ontologyTerm.ontologyPrefix })
-    .from(ontologyTerm)
-    .where(sql`${ontologyTerm.ontologyPrefix} IS NOT NULL`)
-    .orderBy(asc(ontologyTerm.ontologyPrefix));
-  return rows.map((r) => String(r.prefix)).filter(Boolean);
+  const now = Date.now();
+  if (ontologyPrefixesCache && ontologyPrefixesCache.expiresAt > now) {
+    return ontologyPrefixesCache.value;
+  }
+  if (ontologyPrefixesInFlight) {
+    return ontologyPrefixesInFlight;
+  }
+
+  ontologyPrefixesInFlight = (async () => {
+    const db = getDb();
+    const rows = await db
+      .selectDistinct({ prefix: ontologyTerm.ontologyPrefix })
+      .from(ontologyTerm)
+      .where(sql`${ontologyTerm.ontologyPrefix} IS NOT NULL`)
+      .orderBy(asc(ontologyTerm.ontologyPrefix));
+    const value = rows.map((r) => String(r.prefix)).filter(Boolean);
+    ontologyPrefixesCache = {
+      value,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    };
+    ontologyPrefixesInFlight = null;
+    return value;
+  })();
+
+  return ontologyPrefixesInFlight;
 }
 
 export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise<string[]> {

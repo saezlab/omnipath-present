@@ -174,7 +174,7 @@ export default function EntitySearchWorkspace({
   const fetchSearchData = useCallback(
     async (cursor: number | null, limit: number) => {
       if (searchMode !== "full-text") {
-        return { results: [], totalResults: 0 };
+        return { results: [] };
       }
 
       const response = await searchEntities({
@@ -188,7 +188,6 @@ export default function EntitySearchWorkspace({
 
       return {
         results: entities,
-        totalResults: response.total,
         nextPageParam: response.nextCursor ?? undefined,
       };
     },

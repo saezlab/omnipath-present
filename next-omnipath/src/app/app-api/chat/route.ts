@@ -137,11 +137,11 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           },
           preview,
           stats: {
-            totalCount: data.total || entities.length,
-            hasMore: entities.length < data.total,
+            totalCount: entities.length,
+            hasMore: Boolean(data.nextCursor),
           },
           results: preview,
-          totalCount: data.total || entities.length,
+          totalCount: entities.length,
           searchType: "entities",
           query,
           bestMatchId,
@@ -360,7 +360,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
           entityPks = entities.map((e) => e.entityPk);
         }
 
-        const { relations, total } = await searchRelations({
+        const { relations } = await searchRelations({
           filters: {
             relationCategories: ["interaction"],
             entityPks,
@@ -396,7 +396,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
           },
           exampleInteractions,
           results: exampleInteractions,
-          totalCount: total || hits.length,
+          totalCount: hits.length,
           entityIds: entityIds?.map((id) => String(id)),
         };
       } catch (error: unknown) {
@@ -439,7 +439,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
           objectEntityPks = entities.map((e) => e.entityPk);
         }
 
-        const { relations, total } = await searchRelations({
+        const { relations } = await searchRelations({
           filters: {
             relationCategories: ["membership"],
             subjectEntityPks,
@@ -469,7 +469,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
         }));
 
         return {
-          totalCount: total || hits.length,
+          totalCount: hits.length,
           exampleAssociations,
         };
       } catch (error: unknown) {

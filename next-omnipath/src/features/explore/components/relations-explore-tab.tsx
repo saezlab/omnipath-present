@@ -46,13 +46,13 @@ async function searchInteractionRows({
   filters: SearchFilters;
   limit: number;
   offset: number;
-}): Promise<{ hits: InteractionListRow[]; total: number }> {
+}): Promise<{ hits: InteractionListRow[] }> {
   let entityPks: number[] | undefined;
   if (filters.entity_ids?.length) {
     const entities = await getEntitiesByPublicIds(filters.entity_ids.map(String));
     entityPks = entities.map((entity) => entity.entityPk);
     if (entityPks.length === 0) {
-      return { hits: [], total: 0 };
+      return { hits: [] };
     }
   }
 
@@ -61,7 +61,7 @@ async function searchInteractionRows({
     ...(filters.relation_categories?.length ? filters.relation_categories : []),
   ])).filter((value) => value === "interaction");
 
-  const { relations, total } = await searchRelations({
+  const { relations } = await searchRelations({
     filters: {
       relationCategories,
       entityPks,
@@ -85,7 +85,7 @@ async function searchInteractionRows({
     return [{ relation, subjectEntity, objectEntity }];
   });
 
-  return { hits, total };
+  return { hits };
 }
 
 export function RelationsExploreTab({
@@ -116,7 +116,6 @@ export function RelationsExploreTab({
     loadingMore,
     hasMore,
     error: infiniteScrollError,
-    totalResults,
     sentinelRef
   } = useInfiniteScroll<InteractionListRow>({
     fetchData: useCallback(async (offset: number, limit: number) => {
@@ -124,7 +123,6 @@ export function RelationsExploreTab({
 
       return {
         results: response.hits,
-        totalResults: response.total,
       };
     }, [effectiveFilters]),
     pageSize: RESULTS_PER_PAGE,
@@ -204,7 +202,7 @@ export function RelationsExploreTab({
     <div className="h-full overflow-hidden p-4">
       <DataCard
         className={cn("h-full min-w-0 flex flex-col")}
-        title={`${formatNumber(totalResults)} relations found`}
+        title="Relations"
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onExport={handleExport}

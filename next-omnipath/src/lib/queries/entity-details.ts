@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { entityRelation } from "@next-omnipath/drizzle";
 import { getDb } from "@/lib/db/client";
 import { getEntityByPublicId } from "@/lib/queries/entity";
@@ -10,14 +10,14 @@ export async function getEntityDetails(publicId: string) {
   if (!entity) return null;
 
   const db = getDb();
-  const [interactionRows, annotationRows] = await Promise.all([
+  const [interactionCountResult, annotationRows] = await Promise.all([
     db
-      .select({ relationPk: entityRelation.relationPk })
+      .select({ count: sql<number>`count(*)` })
       .from(entityRelation)
       .where(
         and(
           eq(entityRelation.relationCategory, "interaction"),
-          inArray(entityRelation.subjectEntityPk, [entity.entityPk]),
+          eq(entityRelation.subjectEntityPk, entity.entityPk),
         ),
       ),
     db
@@ -34,7 +34,7 @@ export async function getEntityDetails(publicId: string) {
   return {
     entity,
     summary: {
-      interactionCount: interactionRows.length,
+      interactionCount: Number(interactionCountResult[0]?.count || 0),
     },
     annotations: annotationRows,
   };
