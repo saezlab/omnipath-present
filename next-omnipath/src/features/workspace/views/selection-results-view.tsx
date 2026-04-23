@@ -16,7 +16,10 @@ export function SelectionResultsView() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { tab, setTab, query, setQuery, filters, setFilters } = useSelectionUrlState();
   const { entityIds, annotationIds, selectedAnnotations } = useEntitySelection();
-  const { selectedEntityIds, selectedAnnotationIds, annotationMatchedEntityIds, scopedEntityIds, isLoading } = useSelectionScope(entityIds, annotationIds);
+  const shouldResolveAnnotationEntities = tab !== "interactions";
+  const { selectedEntityIds, selectedAnnotationIds, scopedEntityIds, isLoading } = useSelectionScope(entityIds, annotationIds, {
+    resolveAnnotationEntities: shouldResolveAnnotationEntities,
+  });
   const [draftQuery, setDraftQuery] = useState(query);
   const [interactionsCount, setInteractionsCount] = useState<number | null>(null);
 
@@ -46,7 +49,9 @@ export function SelectionResultsView() {
     setQuery(draftQuery.trim());
   };
 
-  if (!isLoading && scopedEntityIds.length === 0) {
+  const isInteractionSelectionEmpty = selectedEntityIds.length === 0 && selectedAnnotationIds.length === 0;
+
+  if (!isLoading && ((tab === "interactions" && isInteractionSelectionEmpty) || (tab !== "interactions" && scopedEntityIds.length === 0))) {
     return (
       <div className="flex flex-1 items-center justify-center p-8">
         <Card className="w-full max-w-2xl border-dashed">
@@ -82,7 +87,8 @@ export function SelectionResultsView() {
           filters={filters}
           onFilterChange={setFilters}
           useInternalRefineLayout={false}
-          scopedEntityIds={scopedEntityIds}
+          scopedEntityIds={selectedEntityIds}
+          scopedAnnotationIds={selectedAnnotationIds}
         />
       ) : (
         <AnnotationBrowserTab

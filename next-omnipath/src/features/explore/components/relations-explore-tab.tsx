@@ -36,6 +36,7 @@ interface RelationsExploreTabProps {
   onFilterChange: (filters: SearchFilters) => void;
   useInternalRefineLayout?: boolean;
   scopedEntityIds?: string[];
+  scopedAnnotationIds?: string[];
 }
 
 async function searchInteractionRows({
@@ -51,7 +52,12 @@ async function searchInteractionRows({
   if (filters.entity_ids?.length) {
     const entities = await getEntitiesByPublicIds(filters.entity_ids.map(String));
     entityPks = entities.map((entity) => entity.entityPk);
-    if (entityPks.length === 0) {
+    const hasAnnotationConstraints = Boolean(
+      filters.ontology_terms?.length
+      || filters.participant_annotation_terms?.length
+      || filters.interaction_annotation_terms?.length,
+    );
+    if (entityPks.length === 0 && !hasAnnotationConstraints) {
       return { hits: [] };
     }
   }
@@ -67,6 +73,9 @@ async function searchInteractionRows({
       entityPks,
       predicates: filters.predicates,
       sources: filters.sources,
+      annotationTerms: filters.ontology_terms,
+      participantAnnotationTerms: filters.participant_annotation_terms,
+      interactionAnnotationTerms: filters.interaction_annotation_terms,
     },
     limit,
     offset,
@@ -93,6 +102,7 @@ export function RelationsExploreTab({
   onFilterChange,
   useInternalRefineLayout = true,
   scopedEntityIds,
+  scopedAnnotationIds,
 }: RelationsExploreTabProps) {
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
@@ -107,7 +117,12 @@ export function RelationsExploreTab({
           member_b_id: undefined,
         }
       : {}),
-  }), [filters, scopedEntityIds]);
+    ...(scopedAnnotationIds && scopedAnnotationIds.length > 0
+      ? {
+          ontology_terms: scopedAnnotationIds,
+        }
+      : {}),
+  }), [filters, scopedAnnotationIds, scopedEntityIds]);
 
   // Infinite scroll hook
   const {
@@ -145,7 +160,11 @@ export function RelationsExploreTab({
 
   // Handler for clear filters
   const handleClearFilters = () => {
-    onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds, relation_categories: ["interaction"] } : { relation_categories: ["interaction"] });
+    onFilterChange({
+      relation_categories: ["interaction"],
+      ...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {}),
+      ...(scopedAnnotationIds && scopedAnnotationIds.length > 0 ? { ontology_terms: scopedAnnotationIds } : {}),
+    });
   };
 
   const handleRowClick = (row: InteractionListRow) => {
@@ -359,7 +378,7 @@ export function RelationsExploreTab({
           ) : !loading && (
             <div className="p-6 flex-1 flex items-center justify-center">
               <p className="text-muted-foreground text-center">
-                {Object.keys(filters).length > 0
+                {Object.keys(effectiveFilters).length > 0
                   ? "No relations found matching your criteria."
                   : "Loading relations..."}
               </p>

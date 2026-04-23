@@ -68,10 +68,17 @@ export interface RelationFilters {
   objectEntityPks?: number[];
   entityPks?: number[];
   sources?: string[];
+  annotationTerms?: string[];
+  interactionAnnotationTerms?: string[];
+  participantAnnotationTerms?: string[];
 }
 
 function normalizeNumberValues(values: number[] | undefined): number[] {
   return Array.from(new Set((values || []).filter(Number.isFinite)));
+}
+
+function normalizeStringValues(values: string[] | undefined): string[] {
+  return Array.from(new Set((values || []).map((value) => value.trim()).filter(Boolean)));
 }
 
 function buildRelationSearchWhere(filters: RelationFilters) {
@@ -112,6 +119,15 @@ function buildRelationSearchWhere(filters: RelationFilters) {
     whereParts.push(`sources && ${pushParam(filters.sources, "text[]")}`);
   }
 
+  const annotationTerms = normalizeStringValues(filters.annotationTerms);
+  if (annotationTerms.length) {
+    whereParts.push(`EXISTS (
+      SELECT 1
+      FROM relation_annotation_term rat
+      WHERE rat.relation_pk = entity_relation.relation_pk
+        AND rat.term_id = ANY(${pushParam(annotationTerms, "text[]")})
+    )`);
+  }
   return {
     whereClause: whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "",
     params,

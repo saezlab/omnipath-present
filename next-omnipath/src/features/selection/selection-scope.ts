@@ -36,11 +36,17 @@ async function fetchEntityIdsForSelectedAnnotations(annotationIds: string[]): Pr
   return getEntityIdsForAnnotationTerms(annotationIds);
 }
 
-export function useSelectionScope(selectedEntityIds: string[], selectedAnnotationIds: string[]) {
+export function useSelectionScope(
+  selectedEntityIds: string[],
+  selectedAnnotationIds: string[],
+  options?: { resolveAnnotationEntities?: boolean },
+) {
+  const resolveAnnotationEntities = options?.resolveAnnotationEntities ?? true;
+
   const annotationScopeQuery = useQuery({
     queryKey: ["selection-scope-annotation-entities", selectedAnnotationIds],
     queryFn: () => fetchEntityIdsForSelectedAnnotations(selectedAnnotationIds),
-    enabled: selectedAnnotationIds.length > 0,
+    enabled: resolveAnnotationEntities && selectedAnnotationIds.length > 0,
     staleTime: 60_000,
   });
 
@@ -48,9 +54,9 @@ export function useSelectionScope(selectedEntityIds: string[], selectedAnnotatio
     () => deriveSelectionScope({
       selectedEntityIds,
       selectedAnnotationIds,
-      annotationMatchedEntityIds: annotationScopeQuery.data || [],
+      annotationMatchedEntityIds: resolveAnnotationEntities ? (annotationScopeQuery.data || []) : [],
     }),
-    [annotationScopeQuery.data, selectedAnnotationIds, selectedEntityIds],
+    [annotationScopeQuery.data, resolveAnnotationEntities, selectedAnnotationIds, selectedEntityIds],
   );
 
   return {
