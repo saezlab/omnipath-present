@@ -14,7 +14,7 @@ import {
   getEntitySecondaryName,
   getEntityTypeLabel,
 } from "@/lib/entities/display";
-import { getInteractionFilterCounts, searchInteractions } from "@/lib/interaction";
+import { searchInteractions } from "@/lib/queries/interaction-search";
 import { DataCard } from "@/features/interactions-search/components/data-card";
 import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
@@ -34,7 +34,6 @@ type LayoutMode = "search" | "split" | "ontology";
 interface InteractionsExploreTabProps {
   filters: SearchFilters;
   onFilterChange: (filters: SearchFilters) => void;
-  onFilterCountsUpdate: (counts: Record<string, Record<string, number>>) => void;
   useInternalRefineLayout?: boolean;
   scopedEntityIds?: string[];
 }
@@ -48,14 +47,12 @@ function getConsensusSign(interaction: InteractionListRow): 'positive' | 'negati
 export function InteractionsExploreTab({
   filters,
   onFilterChange,
-  onFilterCountsUpdate,
   useInternalRefineLayout = true,
   scopedEntityIds,
 }: InteractionsExploreTabProps) {
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
-  const [filterCounts, setFilterCounts] = useState<Record<string, Record<string, number>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const effectiveFilters = useMemo<SearchFilters>(() => ({
     ...filters,
@@ -79,21 +76,13 @@ export function InteractionsExploreTab({
     sentinelRef
   } = useInfiniteScroll<InteractionListRow>({
     fetchData: useCallback(async (offset: number, limit: number) => {
-      const [response, counts] = await Promise.all([
-        searchInteractions({ query: "", filters: effectiveFilters, limit, offset }),
-        offset === 0 ? getInteractionFilterCounts({ query: "", filters: effectiveFilters }) : Promise.resolve(null),
-      ]);
-
-      if (counts) {
-        setFilterCounts(counts);
-        onFilterCountsUpdate(counts);
-      }
+      const response = await searchInteractions({ query: "", filters: effectiveFilters, limit, offset });
 
       return {
         results: response.hits,
         totalResults: response.total,
       };
-    }, [effectiveFilters, onFilterCountsUpdate]),
+    }, [effectiveFilters]),
     pageSize: RESULTS_PER_PAGE,
     dependencies: [effectiveFilters],
     root: rootElement
@@ -107,11 +96,8 @@ export function InteractionsExploreTab({
   const [hasLoadedGraphData, setHasLoadedGraphData] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("search");
 
-  // Check if there are ontology terms available
-  const hasOntologyTerms = !!(
-    (filterCounts?.interaction_annotation_terms && Object.keys(filterCounts.interaction_annotation_terms).length > 0) ||
-    (filterCounts?.participant_annotation_terms && Object.keys(filterCounts.participant_annotation_terms).length > 0)
-  );
+  // Ontology browser is always available for searching terms
+  const hasOntologyTerms = true;
 
   // Update error state from infinite scroll hook
   useEffect(() => {
@@ -151,7 +137,7 @@ export function InteractionsExploreTab({
 
   // Handler for clear filters
   const handleClearFilters = () => {
-    onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {});
+    onFilterChange(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds, relation_categories: ["interaction"] } : { relation_categories: ["interaction"] });
   };
 
   const handleRowClick = (row: InteractionListRow) => {
@@ -170,7 +156,7 @@ export function InteractionsExploreTab({
         body: JSON.stringify({
           query: '',
           filters: effectiveFilters,
-          filename: `interactions_subset_${date}`,
+          filename: `relations_subset_${date}`,
         }),
       });
 
@@ -183,7 +169,7 @@ export function InteractionsExploreTab({
       const downloadUrl = window.URL.createObjectURL(blob);
       const contentDisposition = response.headers.get('Content-Disposition');
       const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
-      const fileName = fileNameMatch?.[1] || `interactions_subset_${date}.parquet`;
+      const fileName = fileNameMatch?.[1] || `relations_subset_${date}.parquet`;
 
       const link = document.createElement('a');
       link.href = downloadUrl;
@@ -193,7 +179,7 @@ export function InteractionsExploreTab({
       link.remove();
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export interactions');
+      setError(err instanceof Error ? err.message : 'Failed to export relations');
     }
   }, [effectiveFilters]);
 
@@ -219,7 +205,7 @@ export function InteractionsExploreTab({
     <div className="h-full overflow-hidden p-4">
       <DataCard
         className={cn("h-full min-w-0 flex flex-col")}
-        title={`${formatNumber(totalResults)} interactions found`}
+        title={`${formatNumber(totalResults)} relations found`}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onExport={handleExport}
@@ -231,7 +217,7 @@ export function InteractionsExploreTab({
               <Button variant="outline" className="w-full">
                 <Filter className="h-4 w-4 mr-2" />
                 Filters
-                {filterCounts && Object.keys(filters).length > 0 && (
+                {Object.keys(filters).length > 0 && (
                   <Badge variant="secondary" className="ml-2">
                     {Object.entries(filters).reduce((count, [, value]) => {
                       if (Array.isArray(value)) return count + value.length;
@@ -263,15 +249,12 @@ export function InteractionsExploreTab({
                 </div>
               </SheetHeader>
               <div className="h-[calc(100%-4rem)] overflow-y-auto">
-                {filterCounts && (
-                  <FilterSidebar
-                    filters={effectiveFilters}
-                    filterCounts={filterCounts}
-                    onFilterChange={onFilterChange}
-                    onClearFilters={handleClearFilters}
-                    isMobile
-                  />
-                )}
+                <FilterSidebar
+                  filters={effectiveFilters}
+                  onFilterChange={onFilterChange}
+                  onClearFilters={handleClearFilters}
+                  isMobile
+                />
               </div>
             </SheetContent>
           </Sheet>
@@ -380,8 +363,8 @@ export function InteractionsExploreTab({
             <div className="p-6 flex-1 flex items-center justify-center">
               <p className="text-muted-foreground text-center">
                 {Object.keys(filters).length > 0
-                  ? "No interactions found matching your criteria."
-                  : "Loading interactions..."}
+                  ? "No relations found matching your criteria."
+                  : "Loading relations..."}
               </p>
             </div>
           )
@@ -396,7 +379,6 @@ export function InteractionsExploreTab({
         <AnnotationFilterSidebar
           mode="interactions"
           filters={effectiveFilters}
-          filterCounts={filterCounts ?? {}}
           onFilterChange={onFilterChange}
         />
       </div>
@@ -423,14 +405,11 @@ export function InteractionsExploreTab({
                 <ResizableHandle withHandle />
                 <ResizablePanel defaultSize={28} minSize={22} className="min-h-0 border-l bg-background/40">
                   <div className="h-full overflow-y-auto p-4">
-                    {filterCounts ? (
-                      <FilterSidebar
-                        filters={effectiveFilters}
-                        filterCounts={filterCounts}
-                        onFilterChange={onFilterChange}
-                        onClearFilters={handleClearFilters}
-                      />
-                    ) : null}
+                    <FilterSidebar
+                      filters={effectiveFilters}
+                      onFilterChange={onFilterChange}
+                      onClearFilters={handleClearFilters}
+                    />
                   </div>
                 </ResizablePanel>
               </ResizablePanelGroup>

@@ -2,7 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getSiteUrl } from "@/lib/api/config"
 import { headers } from "next/headers"
 import { ExportTryNow, JsonTryNow } from "./try-now"
-import { loadFacetDistributionFromMaterializedView } from "@/lib/postgres-search/search"
+
 
 export const dynamic = "force-dynamic"
 
@@ -100,26 +100,18 @@ function facetMapToOptions(
 }
 
 async function getAllFacetExamples(): Promise<FacetExamples> {
-  const [entityFacets, interactionFacets] = await Promise.all([
-    loadFacetDistributionFromMaterializedView("entity_filter_counts"),
-    loadFacetDistributionFromMaterializedView("interaction_filter_counts"),
-  ])
-
-  const interactionTypes = facetMapToOptions(interactionFacets, "interaction_type")
-  const interactionAnnotationTerms = facetMapToOptions(interactionFacets, "interaction_annotation_terms")
-
   return {
     entities: {
-      entity_types: facetMapToOptions(entityFacets, "entity_type"),
-      sources: facetMapToOptions(entityFacets, "sources"),
-      taxonomy_ids: facetMapToOptions(entityFacets, "ncbi_tax_id"),
-      ontology_terms: facetMapToOptions(entityFacets, "ontology_terms"),
+      entity_types: [],
+      sources: [],
+      taxonomy_ids: [],
+      ontology_terms: [],
     },
     interactions: {
-      interaction_types: interactionTypes,
-      sources: facetMapToOptions(interactionFacets, "sources"),
-      interaction_annotation_terms: interactionAnnotationTerms,
-      participant_annotation_terms: facetMapToOptions(interactionFacets, "participant_annotation_terms"),
+      interaction_types: [],
+      sources: [],
+      interaction_annotation_terms: [],
+      participant_annotation_terms: [],
       direction: [
         { value: "any" },
         { value: "directed" },
@@ -131,7 +123,7 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
         { value: "negative" },
         { value: "mixed" },
       ],
-      ontology_terms: interactionAnnotationTerms,
+      ontology_terms: [],
     },
     associations: {
       parent_entity_types: [],

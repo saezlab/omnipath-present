@@ -1,6 +1,5 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import { SidebarContentProvider } from "@/contexts/sidebar-content-context"
@@ -10,8 +9,6 @@ import { Providers } from "@/components/providers"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 
 import "./globals.css"
-
-const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "OmniPath Explorer",
@@ -25,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} flex min-h-screen flex-col overflow-hidden bg-background`}>
+      <body className="flex min-h-screen flex-col overflow-hidden bg-background">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Providers>
             <NuqsAdapter>

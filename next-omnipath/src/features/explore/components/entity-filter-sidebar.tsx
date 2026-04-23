@@ -1,18 +1,17 @@
 "use client"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Filter, X } from "lucide-react"
 import { cn, formatNumber, getEntityTypeEmoji } from "@/lib/utils"
-import * as React from "react"
+import { useEffect, useState } from "react"
 import { EntityHoverCard, CvTermHoverCard } from "@/features/shared/entity-results/result-card"
+import { getEntityFilterOptions } from "@/lib/queries/entity"
 
 interface FilterOption {
   value: string;
-  count: number;
   displayName?: string;
   icon?: string;
   id?: string | null;
@@ -23,22 +22,9 @@ interface EntityFilterSidebarProps {
     entity_types?: string[];
     sources?: string[];
   };
-  filterCounts: {
-    entity_type?: Record<string, number>;
-    sources?: Record<string, number>;
-  };
   onFilterChange: (filters: { entity_types?: string[]; sources?: string[] }) => void;
   onClearFilters: () => void;
   isMobile?: boolean;
-}
-
-// Helper component for filter sections
-interface FilterSectionProps {
-  title: string;
-  filterKey: 'entity_types' | 'sources';
-  options: FilterOption[];
-  selectedValues: string[];
-  onToggle: (value: string) => void;
 }
 
 function FilterSection({
@@ -46,15 +32,21 @@ function FilterSection({
   filterKey,
   options,
   selectedValues,
-  onToggle
-}: FilterSectionProps) {
+  onToggle,
+}: {
+  title: string;
+  filterKey: 'entity_types' | 'sources';
+  options: FilterOption[];
+  selectedValues: string[];
+  onToggle: (value: string) => void;
+}) {
   if (options.length === 0) return null;
 
   return (
     <div>
       <h4 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{title}</h4>
       <div className="space-y-1 max-h-64 overflow-y-auto pr-2">
-        {options.map(({ value, count, displayName, icon, id }) => {
+        {options.map(({ value, displayName, icon, id }) => {
           const isSelected = selectedValues?.includes(value) || false;
 
           const labelContent = (
@@ -80,7 +72,6 @@ function FilterSection({
                   )}
                 />
                 {id ? (
-                  // Check if it's a CV term (MI: or OM:)
                   id.startsWith('MI:') || id.startsWith('OM:') ? (
                     <CvTermHoverCard termId={id}>
                       {labelContent}
@@ -94,15 +85,6 @@ function FilterSection({
                   labelContent
                 )}
               </Label>
-              <Badge
-                variant={isSelected ? "default" : "outline"}
-                className={cn(
-                  "h-5 flex-shrink-0 px-1.5 py-0 text-[11px]",
-                  isSelected ? "bg-primary text-primary-foreground" : ""
-                )}
-              >
-                {formatNumber(count)}
-              </Badge>
             </div>
           );
         })}
@@ -113,19 +95,71 @@ function FilterSection({
 
 export function EntityFilterSidebar({
   filters,
-  filterCounts,
   onFilterChange,
   onClearFilters,
   isMobile = false,
 }: EntityFilterSidebarProps) {
-  // Calculate active filter count
+  const [entityTypeOptions, setEntityTypeOptions] = useState<FilterOption[]>([]);
+  const [sourceOptions, setSourceOptions] = useState<FilterOption[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getEntityFilterOptions()
+      .then((options) => {
+        if (cancelled) return;
+        setEntityTypeOptions(
+          options.entity_types.map((value) => {
+            const match = value.match(/^(.+):([A-Z]+:\d+)$/);
+            let displayName = value;
+            let id: string | null = null;
+            if (match) {
+              displayName = match[1];
+              id = match[2];
+            } else {
+              const parts = value.split(':');
+              if (parts.length > 1) {
+                displayName = parts.slice(0, -1).join(':');
+                const potentialId = parts[parts.length - 1];
+                if (potentialId.length < 20) {
+                  const possiblePrefix = parts[parts.length - 2];
+                  if (['MI', 'OM'].includes(possiblePrefix)) {
+                    id = `${possiblePrefix}:${parts[parts.length - 1]}`;
+                  } else {
+                    id = parts[parts.length - 1];
+                  }
+                }
+              }
+            }
+            return {
+              value,
+              displayName,
+              icon: getEntityTypeEmoji(value),
+              id,
+            };
+          })
+        );
+        setSourceOptions(
+          options.sources.map((value) => ({
+            value,
+            displayName: value,
+            icon: '📚',
+          }))
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const activeFilterCount = Object.entries(filters).reduce((count, [, value]) => {
     if (Array.isArray(value)) return count + value.length;
     if (value !== null && value !== undefined) return count + 1;
     return count;
   }, 0);
 
-  // Handler for toggling filters
   const handleToggle = (filterKey: 'entity_types' | 'sources', value: string) => {
     const currentValues = (filters[filterKey] as string[]) || [];
     const newValues = currentValues.includes(value)
@@ -138,103 +172,19 @@ export function EntityFilterSidebar({
     });
   };
 
-  // Transform filter counts into FilterOption[] format
-  const transformFilterCounts = (counts: Record<string, number>, filterKey: string): FilterOption[] => {
-    return Object.entries(counts)
-      .map(([value, count]) => {
-        let displayName: string;
-        let id: string | null = null;
-
-        if (filterKey === 'entity_type') {
-          // For entity_type and sources, extract display name from "Label:Accession" format
-          // Format is "label:PREFIX:NUMBER" (e.g., "small molecule:MI:0328")
-          // We want to extract just the label part
-          const match = value.match(/^(.+):([A-Z]+:\d+)$/);
-          if (match) {
-            displayName = match[1]; // The label part (e.g., "small molecule")
-            id = match[2]; // The ID part (e.g., "MI:0328")
-          } else {
-            // Fallback: take everything before the last colon
-            const parts = value.split(':');
-            if (parts.length > 1) {
-              // Try to identify if the last part looks like an ID
-              // Often just splitting by last colon works for ad-hoc formats too
-              displayName = parts.slice(0, -1).join(':');
-
-              // Only treat as ID if it looks like one (simple heuristic)
-              // This handles cases where we might have just "Label:ID"
-              const potentialId = parts[parts.length - 1];
-              // Check if potentialId matches typical ID patterns (alphanumeric, maybe some special chars, but not too long/prose)
-              if (potentialId.length < 20) {
-                // For now, let's only be confident if we matched the specific pattern above or if it looks clearly like an ID
-                // Actually, let's keep it simple: if we didn't match the strict regex, we might not have a reliable ID.
-                // But wait, the previous code had `value.split(':')[0]` fallback.
-
-                // Let's refine the regex approach.
-                // For `sources`, commonly it might be `Source:ID`? 
-                // Actually looking at `filter-sidebar.tsx`, they handle:
-                // Agonist:MI:0001 -> label="Agonist", id="MI:0001"
-                // Label:ID -> label="Label", id="ID"
-
-                // Let's replicate that logic more closely if needed.
-                // But the regex `^(.+):([A-Z]+:\d+)$` helps a lot for strict CV terms.
-
-                // If no strict regex match:
-                if (parts.length >= 2) {
-                  const possiblePrefix = parts[parts.length - 2];
-                  if (['MI', 'OM'].includes(possiblePrefix)) {
-                    id = `${possiblePrefix}:${parts[parts.length - 1]}`;
-                  } else {
-                    // Maybe simple ID?
-                    id = parts[parts.length - 1];
-                  }
-                }
-              }
-            } else {
-              displayName = value;
-            }
-          }
-        } else {
-          displayName = value;
-          id = null;
-        }
-
-        let icon: string | undefined;
-        if (filterKey === 'entity_type') {
-          // Use helper function that handles normalization (spaces, underscores, case)
-          icon = getEntityTypeEmoji(value);
-        } else if (filterKey === 'sources') {
-          // Use the same database emoji for all sources
-          icon = '📚';
-        }
-
-        return {
-          value: value, // Use the full facet value
-          count,
-          displayName,
-          icon,
-          id
-        };
-      })
-      .sort((a, b) => b.count - a.count); // Sort by count in descending order
-  };
-
   const content = (
-    <div className="space-y-6">
-      {/* Entity Type Filter */}
+    <div className={cn("space-y-6", loading && "opacity-70")}>
       <FilterSection
         title="Entity Types"
         filterKey="entity_types"
-        options={transformFilterCounts(filterCounts.entity_type || {}, 'entity_type')}
+        options={entityTypeOptions}
         selectedValues={filters.entity_types || []}
         onToggle={(value) => handleToggle("entity_types", value)}
       />
-
-      {/* Data Sources Filter */}
       <FilterSection
         title="Data Sources"
         filterKey="sources"
-        options={transformFilterCounts(filterCounts.sources || {}, 'sources')}
+        options={sourceOptions}
         selectedValues={filters.sources || []}
         onToggle={(value) => handleToggle("sources", value)}
       />

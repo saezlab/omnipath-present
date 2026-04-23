@@ -14,7 +14,7 @@ import { ExploreBrowserShell } from "@/features/explore/components/explore-brows
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
 import type { SearchFilters } from "@/types/search";
 
-const exploreTabParser = parseAsStringLiteral(["entities", "interactions", "annotations"] as const).withDefault("entities");
+const exploreTabParser = parseAsStringLiteral(["entity", "relations", "ontology"] as const).withDefault("entity");
 const speciesParser = parseAsString.withDefault("9606");
 const queryParser = parseAsString.withDefault("");
 
@@ -42,8 +42,7 @@ export default function ExplorePage() {
   const [species, setSpecies] = useQueryState("species", speciesParser);
   const [draftQuery, setDraftQuery] = useState(query);
   const [entityFilters, setEntityFilters] = useState<SearchFilters>({ ncbi_tax_id: [species || "9606"] });
-  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
-  const [, setInteractionFilterCounts] = useState<Record<string, Record<string, number>>>({});
+  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({ relation_categories: ["interaction"] });
   const { entityIds, annotationIds, totalSelectionCount } = useEntitySelection();
 
   useEffect(() => {
@@ -86,7 +85,7 @@ export default function ExplorePage() {
 
   const selectionHref = useMemo(() => buildSelectionHref(entityIds, annotationIds), [annotationIds, entityIds]);
 
-  const content = tab === "entities"
+  const content = tab === "entity"
     ? (
       <EntitiesExploreTab
         query={query}
@@ -94,12 +93,11 @@ export default function ExplorePage() {
         filters={entityFilters}
         onFiltersChange={setEntityFilters}
       />
-    ) : tab === "interactions"
+    ) : tab === "relations"
       ? (
         <InteractionsExploreTab
           filters={interactionFilters}
           onFilterChange={setInteractionFilters}
-          onFilterCountsUpdate={setInteractionFilterCounts}
           useInternalRefineLayout={false}
         />
       ) : (
@@ -115,16 +113,16 @@ export default function ExplorePage() {
       tab={tab}
       onTabChange={(next) => void setTab(next)}
       tabs={[
-        { value: "entities", label: "Entities" },
-        { value: "interactions", label: "Interactions" },
-        { value: "annotations", label: "Annotations" },
+        { value: "entity", label: "entity" },
+        { value: "relations", label: "relations" },
+        { value: "ontology", label: "ontology" },
       ]}
       content={content}
-      searchPlaceholder={tab === "annotations" ? "Search annotations…" : tab === "interactions" ? "Search interactions…" : "Search entities…"}
+      searchPlaceholder={tab === "ontology" ? "Search ontology terms…" : tab === "relations" ? "Search relations…" : "Search entities…"}
       searchInputRef={inputRef}
       species={species}
       onSpeciesChange={(value) => void setSpecies(value)}
-      showSpeciesPicker={tab !== "annotations"}
+      showSpeciesPicker={tab === "entity"}
       speciesOptions={SPECIES_OPTIONS}
       footerCta={totalSelectionCount > 0 ? (
         <Button asChild size="lg" className="fixed bottom-6 right-6 z-40 h-12 rounded-full px-4 shadow-lg">

@@ -1,16 +1,14 @@
-import type { Entity as EntityRecord, Identifier as LegacyIdentifier } from '@next-omnipath/drizzle';
-
-import type { EntitySearchRow } from '@/types/search-results';
-
-export type EntityLike = EntityRecord | EntitySearchRow;
+import type { Entity, Identifier as LegacyIdentifier } from "@next-omnipath/drizzle";
+import type { EntityWithIdentifiers } from "@/lib/queries/entity";
+export type EntityLike = Entity | EntityWithIdentifiers;
 export type EntityIdentifierLike = LegacyIdentifier;
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
-export function isEntityRecord(entity: EntityLike): entity is EntityRecord {
-  return 'entityPk' in entity && 'canonicalIdentifier' in entity;
+export function isEntityRecord(entity: EntityLike): entity is Entity {
+  return "entityPk" in entity && "canonicalIdentifier" in entity;
 }
 
 export function getEntityPublicId(entity: EntityLike): string {
@@ -23,31 +21,32 @@ export function getEntityTypeValue(entity: EntityLike): string | undefined | nul
 
 export function getEntityTypeLabel(entity: EntityLike): string {
   const entityType = getEntityTypeValue(entity);
-  return entityType ? entityType.split(':')[0] : 'Entity';
+  return entityType ? entityType.split(":")[0] : "Entity";
 }
 
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
-  const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, '');
-  return typeLabel === 'smallmolecule'
-    || typeLabel === 'compound'
-    || typeLabel === 'metabolite'
-    || typeLabel === 'drug'
-    || typeLabel === 'lipid';
+  const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
+  return typeLabel === "smallmolecule"
+    || typeLabel === "compound"
+    || typeLabel === "metabolite"
+    || typeLabel === "drug"
+    || typeLabel === "lipid";
 }
 
 export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[] {
-  const raw = Array.isArray(entity.identifiers) ? entity.identifiers : [];
+  const typedEntity = entity as { identifiers?: unknown };
+  const raw = Array.isArray(typedEntity.identifiers) ? typedEntity.identifiers : [];
   return raw
-    .map((item) => {
+    .map((item: unknown) => {
       if (!isObject(item)) return null;
-      const key = typeof item.key === 'string'
+      const key = typeof item.key === "string"
         ? item.key
-        : typeof item.identifier_type === 'string'
+        : typeof item.identifier_type === "string"
           ? item.identifier_type
           : null;
-      const value = typeof item.value === 'string'
+      const value = typeof item.value === "string"
         ? item.value
-        : typeof item.identifier === 'string'
+        : typeof item.identifier === "string"
           ? item.identifier
           : null;
 
@@ -59,15 +58,15 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
 
 function identifierLabel(identifierType: string): string {
   const text = identifierType.trim();
-  if (!text) return '';
-  const parts = text.split(':');
+  if (!text) return "";
+  const parts = text.split(":");
 
   if (parts.length >= 3 && !/^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
     return parts[0].toLowerCase();
   }
 
   if (parts.length >= 3) {
-    return parts.slice(2).join(':').toLowerCase();
+    return parts.slice(2).join(":").toLowerCase();
   }
 
   return text.toLowerCase();
@@ -91,19 +90,19 @@ export function classifyEntityIdentifiers(entity: EntityLike): {
     const value = identifier.value.trim();
     if (!value) continue;
 
-    if (label.includes('gene name primary')) {
+    if (label.includes("gene name primary")) {
       geneSymbols.push(value);
       continue;
     }
-    if (label.includes('gene name synonym')) {
+    if (label.includes("gene name synonym")) {
       synonyms.push(value);
       continue;
     }
-    if (label === 'name' || label.endsWith(':name') || label.includes(' entry name')) {
+    if (label === "name" || label.endsWith(":name") || label.includes(" entry name")) {
       names.push(value);
       continue;
     }
-    if (label.includes('synonym')) {
+    if (label.includes("synonym")) {
       synonyms.push(value);
     }
   }
@@ -119,15 +118,15 @@ function mapEntityAttributesToDescriptions(attributes: unknown): string[] {
   if (!Array.isArray(attributes)) return [];
 
   const preferredKeywords = [
-    'function',
-    'description',
-    'disease',
-    'subcellular location',
-    'pathway',
-    'activity regulation',
-    'tissue specificity',
-    'developmental stage',
-    'note',
+    "function",
+    "description",
+    "disease",
+    "subcellular location",
+    "pathway",
+    "activity regulation",
+    "tissue specificity",
+    "developmental stage",
+    "note",
   ];
 
   const preferred: string[] = [];
@@ -135,9 +134,9 @@ function mapEntityAttributesToDescriptions(attributes: unknown): string[] {
 
   for (const attribute of attributes) {
     if (!isObject(attribute)) continue;
-    const value = typeof attribute.value === 'string' ? attribute.value.trim() : '';
+    const value = typeof attribute.value === "string" ? attribute.value.trim() : "";
     if (!value) continue;
-    const term = typeof attribute.term === 'string' ? attribute.term : '';
+    const term = typeof attribute.term === "string" ? attribute.term : "";
     const label = identifierLabel(term);
     if (preferredKeywords.some((keyword) => label.includes(keyword))) {
       preferred.push(value);
@@ -163,7 +162,7 @@ function getShortestName(names: string[]): string | undefined {
 
 function getIdentifierByType(entity: EntityLike, types: string[]): string | undefined {
   for (const identifier of getEntityIdentifiers(entity)) {
-    const normalized = identifier.key.split(':')[0]?.toLowerCase() || '';
+    const normalized = identifier.key.split(":")[0]?.toLowerCase() || "";
     if (types.some((type) => normalized.includes(type)) && identifier.value) {
       return identifier.value;
     }
@@ -178,15 +177,15 @@ export function getEntityDisplayName(entity: EntityLike): string {
 
   if (isSmallMoleculeEntity(entity)) {
     const shortName = getShortestName(names);
-    const chemblId = getIdentifierByType(entity, ['chembl']);
-    const pubchemId = getIdentifierByType(entity, ['pubchem', 'cid']);
+    const chemblId = getIdentifierByType(entity, ["chembl"]);
+    const pubchemId = getIdentifierByType(entity, ["pubchem", "cid"]);
     if (chemblId) return chemblId;
     if (shortName && !/^\d+$/.test(shortName)) return shortName;
     return pubchemId || shortName || publicId;
   }
 
-  if (entityTypeLabel === 'protein') {
-    const uniprotId = getIdentifierByType(entity, ['uniprot', 'uniprotkb']);
+  if (entityTypeLabel === "protein") {
+    const uniprotId = getIdentifierByType(entity, ["uniprot", "uniprotkb"]);
     return geneSymbols[0] || uniprotId || names[0] || entity.canonicalIdentifier || publicId;
   }
 
@@ -197,7 +196,7 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   const { names, geneSymbols } = classifyEntityIdentifiers(entity);
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
-  if (entityTypeLabel === 'protein') {
+  if (entityTypeLabel === "protein") {
     const canonicalIdentifier = entity.canonicalIdentifier || undefined;
     const primary = geneSymbols[0];
     if (primary && canonicalIdentifier && primary !== canonicalIdentifier) {
@@ -215,8 +214,8 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
 
 export function getEntitySmiles(entity: EntityLike): string | null {
   for (const identifier of getEntityIdentifiers(entity)) {
-    const idType = identifier.key.split(':')[0]?.toLowerCase().trim();
-    if (idType === 'biotin tag' || idType === 'biotin' || idType === 'smiles' || idType === 'canonical_smiles') {
+    const idType = identifier.key.split(":")[0]?.toLowerCase().trim();
+    if (idType === "biotin tag" || idType === "biotin" || idType === "smiles" || idType === "canonical_smiles") {
       return identifier.value;
     }
   }

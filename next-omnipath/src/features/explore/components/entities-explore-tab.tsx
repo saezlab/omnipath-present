@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { getEntityFilterCounts, searchEntities } from "@/lib/entity";
+import { searchEntities } from "@/lib/queries/entity";
 import { EntityFilterSidebar } from "@/features/explore/components/entity-filter-sidebar";
 import type { EntitySearchRow } from "@/types/search-results";
 import { SearchResults } from "@/features/shared/entity-results/search-results";
@@ -54,11 +54,6 @@ export function EntitiesExploreTab({
 }: EntitiesExploreTabProps) {
   const isMobile = useIsMobile();
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
-  const [filterCounts, setFilterCounts] = useState<{
-    entity_type?: Record<string, number>;
-    sources?: Record<string, number>;
-  }>({});
-  const [isLoadingFacets, setIsLoadingFacets] = useState(false);
 
   const effectiveFilters = useMemo(() => ({
     ...filters,
@@ -105,7 +100,7 @@ export function EntitiesExploreTab({
       });
 
       return {
-        results: response.hits,
+        results: response.entities,
         totalResults: response.total,
         nextPageParam: response.nextCursor ?? undefined,
       };
@@ -116,53 +111,16 @@ export function EntitiesExploreTab({
     getNextPageParam: (lastPage) => lastPage.nextPageParam,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadFacets = async () => {
-      setIsLoadingFacets(true);
-      try {
-        const facetFilters = { ...effectiveFilters };
-        delete facetFilters.ncbi_tax_id;
-
-        const response = await getEntityFilterCounts({
-          query: query || "",
-          filters: facetFilters,
-        });
-
-        if (cancelled) return;
-
-        setFilterCounts({
-          entity_type: response.entity_type || {},
-          sources: response.sources || {},
-        });
-      } finally {
-        if (!cancelled) {
-          setIsLoadingFacets(false);
-        }
-      }
-    };
-
-    void loadFacets();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveFilters, query]);
-
   const filterPane = (
-    <div className={isLoadingFacets ? "opacity-70 transition-opacity" : undefined}>
-      <EntityFilterSidebar
+    <EntityFilterSidebar
       filters={{
         entity_types: filters.entity_types,
         sources: filters.sources,
       }}
-      filterCounts={filterCounts}
       onFilterChange={handleFilterChange}
       onClearFilters={handleClearFilters}
-        isMobile={isMobile}
-      />
-    </div>
+      isMobile={isMobile}
+    />
   );
 
   const resultsPane = (

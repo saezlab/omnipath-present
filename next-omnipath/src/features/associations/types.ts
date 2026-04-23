@@ -1,8 +1,29 @@
+import type { EntityRelationEvidence } from "@next-omnipath/drizzle";
 import type {
-  Association,
-  AssociationEvidence as DbAssociationEvidence,
-  Entity,
-} from "@next-omnipath/drizzle";
+  AssociationEvidenceItem,
+  InteractionAnnotationValue,
+} from "@/lib/relations/semantics";
+import type { EntityWithIdentifiers } from "@/lib/queries/entity";
+
+export type AssociationAnnotation = InteractionAnnotationValue;
+export type AssociationEvidence = AssociationEvidenceItem;
+
+export type AssociationListRow = {
+  association: {
+    associationPk: number;
+    relationPk: number;
+    parentEntityPk: number;
+    memberEntityPk: number;
+    predicate: string;
+    relationCategory: string;
+    roleTermId: string | null;
+    stoichiometry: string | null;
+    evidenceCount: number;
+    sources: string[];
+  };
+  parent: EntityWithIdentifiers;
+  member: EntityWithIdentifiers;
+};
 
 export type EntityIdentifierRow = {
   entityPk: number;
@@ -10,34 +31,9 @@ export type EntityIdentifierRow = {
   identifier: string;
 };
 
-export type AssociationAnnotation = {
-  term: string;
-  value?: string | null;
-  unit?: string | null;
-};
-
-export type AssociationEvidence = {
-  evidence_serial: number;
-  source: string;
-  role_term_id?: string | null;
-  stoichiometry?: string | null;
-  annotations: AssociationAnnotation[];
-  parent_annotations: AssociationAnnotation[];
-  member_annotations: AssociationAnnotation[];
-};
-
-export type AssociationListRow = {
-  association: Association;
-  parent: Entity;
-  member: Entity;
-};
-
-export type AssociationDetailsData = {
-  association: Association;
-  parent: Entity;
-  member: Entity;
+export type AssociationDetailsData = AssociationListRow & {
   parentIdentifiers: EntityIdentifierRow[];
   memberIdentifiers: EntityIdentifierRow[];
   evidence: AssociationEvidence[];
-  rawEvidence: DbAssociationEvidence[];
+  rawEvidence: EntityRelationEvidence[];
 };

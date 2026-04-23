@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { InteractionDetails } from "@/features/interactions-search/components/interaction-details"
 import type { InteractionListRow } from "@/features/interactions-search/types"
-import { getInteractionDetails } from "@/lib/interaction"
+import { getInteractionDetails } from "@/lib/queries/interaction-details"
 
 interface InteractionDetailsSheetProps {
   open: boolean

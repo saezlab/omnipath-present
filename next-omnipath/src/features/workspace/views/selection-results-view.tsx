@@ -81,7 +81,6 @@ export function SelectionResultsView() {
         <InteractionsExploreTab
           filters={filters}
           onFilterChange={setFilters}
-          onFilterCountsUpdate={() => {}}
           useInternalRefineLayout={false}
           scopedEntityIds={scopedEntityIds}
         />

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import type { SearchFilters } from "@/types/search";
-import type { SearchResult } from "@/types/search-results";
 import {
   normalizeStringArray,
   parseEntityIdsParam,
@@ -25,8 +24,8 @@ export interface SelectedEntity {
   type?: string;
   cv_terms?: string[];
   references?: string[];
-  fullResult?: SearchResult;
   associated_entity_ids?: Array<string | number>;
+  fullResult?: unknown;
 }
 
 export interface SelectedAnnotation {

@@ -16,7 +16,6 @@ interface ResultsPanelProps {
 export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
   // State for interactions tab
   const [interactionsFilters, setInteractionsFilters] = useState<SearchFilters>({})
-  const [, setInteractionsFilterCounts] = useState<Record<string, Record<string, number>>>({})
 
   // Reset filters when toolResult changes
   useEffect(() => {
@@ -77,10 +76,6 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
     setInteractionsFilters(newFilters)
   }, [])
 
-  const handleInteractionsFilterCountsUpdate = useCallback((counts: Record<string, Record<string, number>>) => {
-    setInteractionsFilterCounts(counts)
-  }, [])
-
   if (!toolResult) {
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground">
@@ -130,7 +125,6 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
             <InteractionsExploreTab
               filters={interactionsFilters}
               onFilterChange={handleInteractionsFilterChange}
-              onFilterCountsUpdate={handleInteractionsFilterCountsUpdate}
             />
           </div>
         )

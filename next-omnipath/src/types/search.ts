@@ -8,6 +8,8 @@ export interface SearchFilters {
   member_b_id?: string | number;
   entity_ids?: Array<string | number>;
   interaction_types?: string[];
+  predicates?: string[];
+  relation_categories?: string[];
   is_directed?: boolean | null;
   signs?: Array<-1 | 0 | 1>;
   interaction_annotation_terms?: string[];

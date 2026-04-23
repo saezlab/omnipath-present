@@ -5,17 +5,18 @@ import { Check, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { browseAnnotationTerms, type ExploreOntologyTerm } from "@/lib/annotation";
+import { searchOntologyTerms, getOntologyPrefixes } from "@/lib/queries/ontology-term";
+import type { OntologyTerm } from "@next-omnipath/drizzle";
 import { useEntitySelection } from "@/lib/navigation/url-state";
-import type { SearchFilters } from "@/types/search";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface AnnotationBrowserTabProps {
   query: string;
   species?: string;
   scopedEntityIds?: string[];
-  entityFilters?: SearchFilters;
+  entityFilters?: import("@/types/search").SearchFilters;
 }
-
 
 function LoadingGrid() {
   return (
@@ -38,39 +39,34 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
+function AnnotationCards({ results }: { results: OntologyTerm[] }) {
   const { addAnnotation, isAnnotationSelected, removeAnnotation } = useEntitySelection();
 
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {results.map((term) => {
-        const selected = isAnnotationSelected(term.id);
+        const selected = isAnnotationSelected(term.termId);
 
         return (
-          <Card key={term.id} className="h-full transition-shadow hover:shadow-sm">
+          <Card key={term.termId} className="h-full transition-shadow hover:shadow-sm">
             <CardHeader className="space-y-3 pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <CardTitle className="text-base leading-tight">{term.label}</CardTitle>
-                  <CardDescription className="font-mono text-xs">{term.id}</CardDescription>
-                  {typeof term.annotatedEntityCount === "number" ? (
-                    <CardDescription className="text-xs">
-                      {term.annotatedEntityCount.toLocaleString()} annotated entities
-                    </CardDescription>
-                  ) : null}
+                  <CardTitle className="text-base leading-tight">{term.label || term.termId}</CardTitle>
+                  <CardDescription className="font-mono text-xs">{term.termId}</CardDescription>
                 </div>
                 <Button
                   size="sm"
                   variant={selected ? "default" : "outline"}
                   onClick={() => {
                     if (selected) {
-                      removeAnnotation(term.id);
+                      removeAnnotation(term.termId);
                       return;
                     }
                     addAnnotation({
-                      id: term.id,
-                      label: term.label,
-                      namespace: term.namespace || undefined,
+                      id: term.termId,
+                      label: term.label || term.termId,
+                      namespace: term.ontologyPrefix || undefined,
                       definition: term.definition,
                     });
                   }}
@@ -81,8 +77,7 @@ function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {term.namespace ? <Badge variant="outline">{term.namespace}</Badge> : null}
-                {term.matchType ? <Badge variant="secondary">{term.matchType}</Badge> : null}
+                {term.ontologyPrefix ? <Badge variant="outline">{term.ontologyPrefix}</Badge> : null}
               </div>
             </CardHeader>
             <CardContent>
@@ -97,55 +92,77 @@ function AnnotationCards({ results }: { results: ExploreOntologyTerm[] }) {
   );
 }
 
-export function AnnotationBrowserTab({ query, species, scopedEntityIds, entityFilters = {} }: AnnotationBrowserTabProps) {
+export function AnnotationBrowserTab({ query, scopedEntityIds }: AnnotationBrowserTabProps) {
   const isScoped = !!scopedEntityIds?.length;
+  const [selectedPrefixes, setSelectedPrefixes] = useState<string[]>([]);
+
+  const { data: prefixes } = useQuery({
+    queryKey: ["ontology-prefixes"],
+    queryFn: getOntologyPrefixes,
+    staleTime: 60_000,
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: isScoped
-      ? ["selection-scoped-annotations", query, scopedEntityIds, entityFilters]
-      : ["explore-annotations", query, species],
-    queryFn: () => browseAnnotationTerms({
+    queryKey: ["explore-annotations", query, selectedPrefixes],
+    queryFn: () => searchOntologyTerms({
       query,
-      species,
-      scopedEntityIds,
-      entityFilters,
+      prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
       limit: 30,
     }),
-    enabled: !isScoped || (scopedEntityIds?.length || 0) > 0,
     staleTime: 60_000,
   });
 
   const results = data || [];
 
-  if (isScoped && !(scopedEntityIds?.length)) {
-    return (
-      <EmptyState
-        title="No scoped annotations"
-        description="Add entities or annotations in Explore to build a scoped annotation set."
-      />
+  const togglePrefix = (prefix: string) => {
+    setSelectedPrefixes((prev) =>
+      prev.includes(prefix) ? prev.filter((p) => p !== prefix) : [...prev, prefix]
     );
-  }
+  };
 
-  if (isLoading) {
-    return <LoadingGrid />;
-  }
-
-  if (results.length === 0) {
+  if (isScoped) {
     return (
       <EmptyState
-        title={isScoped ? "No annotations found" : "No annotations found"}
-        description={isScoped
-          ? (query.trim() ? "No scoped annotations match this search." : "No annotations were found in the current scoped entity set.")
-          : (query.trim().length > 0
-            ? "Try a different ontology term, synonym, or ID such as GO:0005634 or MI:0217."
-            : "No annotation terms are available to browse right now.")}
+        title="Scoped annotations"
+        description="Scoped annotation browsing is not yet implemented in the new query layer."
       />
     );
   }
 
   return (
-    <div className="h-full overflow-y-auto p-1">
-      <AnnotationCards results={results} />
+    <div className="h-full flex flex-col gap-4 overflow-hidden">
+      {/* Prefix chips */}
+      <div className="shrink-0 px-1 pt-1">
+        <div className="flex flex-wrap gap-1.5">
+          {(prefixes || []).map((prefix) => (
+            <Button
+              key={prefix}
+              size="sm"
+              variant={selectedPrefixes.includes(prefix) ? "default" : "outline"}
+              onClick={() => togglePrefix(prefix)}
+              className="h-7 text-xs px-2.5"
+            >
+              {prefix}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-1">
+        {isLoading ? (
+          <LoadingGrid />
+        ) : results.length > 0 ? (
+          <AnnotationCards results={results} />
+        ) : (
+          <EmptyState
+            title="No annotations found"
+            description={query.trim().length > 0
+              ? "Try a different ontology term, synonym, or ID such as GO:0005634 or MI:0217."
+              : "No annotation terms are available to browse right now."}
+          />
+        )}
+      </div>
     </div>
   );
 }

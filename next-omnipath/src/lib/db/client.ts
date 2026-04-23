@@ -2,13 +2,14 @@ import 'server-only';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../drizzle/schema';
+import * as relations from '../../../drizzle/relations';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
 let pool: Pool | null = null;
 
 function createDb() {
-  return drizzle(getPool(), { schema });
+  return drizzle(getPool(), { schema: { ...schema, ...relations } });
 }
 
 let dbInstance: ReturnType<typeof createDb> | null = null;

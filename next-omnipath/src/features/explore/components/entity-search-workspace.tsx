@@ -3,10 +3,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
-import { getEntityFilterCounts, searchEntities } from "@/lib/entity";
-import { resolveEntityIdentifiers, type ResolvedEntityLookupResponse } from "@/lib/identifier";
+import { searchEntities } from "@/lib/queries/entity";
+import { resolveEntityIdentifiers } from "@/lib/queries/entity-identifier";
 import type { EntityLike } from "@/lib/entities/display";
-import type { SearchResult } from "@/types/search-results";
 import { EntityFilterSidebar } from "./entity-filter-sidebar";
 import { SearchBar } from "./search-bar";
 import { SearchResults } from "@/features/shared/entity-results/search-results";
@@ -22,6 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { useSearchUrlState } from "@/lib/navigation/url-state";
 import { useSearchWorkspaceState, type SearchWorkspacePane } from "@/features/explore/use-entity-search-workspace-state";
 import { SearchAssistantPane } from "@/features/chat/search-assistant-pane";
+
 
 interface EntitySearchWorkspaceProps {
   // Props for embedded mode (like in AI dialogs)
@@ -91,8 +91,7 @@ export default function EntitySearchWorkspace({
     }
     return base;
   });
-  const [filterCounts, setFilterCounts] = useState<{ entity_type?: Record<string, number>; sources?: Record<string, number>; ncbi_tax_id?: Record<string, number>; ontology_terms?: Record<string, number> }>({});
-  const [ontologyFacetCountsByPrefix, setOntologyFacetCountsByPrefix] = useState<Record<string, Record<string, number>>>({});
+
   const [lookupMatches, setLookupMatches] = useState<IdentifierMatch[]>([]);
   const [lookupEntities, setLookupEntities] = useState<EntityLike[]>([]);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -178,46 +177,22 @@ export default function EntitySearchWorkspace({
         return { results: [], totalResults: 0 };
       }
 
-      const [response, facetResponse] = await Promise.all([
-        searchEntities({
-          query: query || "",
-          limit,
-          cursor: cursor ?? undefined,
-          filters,
-        }),
-        cursor === null && initialSearchType === "search_entities"
-          ? getEntityFilterCounts({
-              query: query || "",
-              filters: { ...filters, ncbi_tax_id: undefined },
-            })
-          : Promise.resolve(null),
-      ]);
+      const response = await searchEntities({
+        query: query || "",
+        limit,
+        cursor: cursor ?? undefined,
+        filters,
+      });
 
-      const hits: SearchResult[] = response.hits || [];
-
-      if (facetResponse && initialSearchType === "search_entities") {
-        const ontologyCounts = facetResponse.ontology_terms || {};
-        const perOntologyCounts: Record<string, Record<string, number>> = {};
-        Object.entries(ontologyCounts).forEach(([value, count]) => {
-          const match = value.match(/^([A-Z][A-Z0-9_-]*):/);
-          const prefix = match ? match[1] : 'OTHER';
-          (perOntologyCounts[prefix] ||= {})[value] = count as number;
-        });
-        setOntologyFacetCountsByPrefix(perOntologyCounts);
-        setFilterCounts({
-          entity_type: facetResponse.entity_type || {},
-          sources: facetResponse.sources || {},
-          ncbi_tax_id: facetResponse.ncbi_tax_id || {},
-        });
-      }
+      const entities = response.entities || [];
 
       return {
-        results: hits,
+        results: entities,
         totalResults: response.total,
         nextPageParam: response.nextCursor ?? undefined,
       };
     },
-    [query, searchMode, initialSearchType, filters]
+    [query, searchMode, filters]
   );
 
   // Use infinite scroll hook for regular search
@@ -227,7 +202,7 @@ export default function EntitySearchWorkspace({
     loadingMore,
     hasMore,
     sentinelRef
-  } = useInfiniteScroll<SearchResult, number | null>({
+  } = useInfiniteScroll<import("@next-omnipath/drizzle").Entity, number | null>({
     fetchData: fetchSearchData,
     pageSize: 20,
     dependencies: [query, searchMode, initialSearchType, filters],
@@ -280,14 +255,10 @@ export default function EntitySearchWorkspace({
     });
   }, [normalizedLockedEntityIds]);
 
-  const hasOntologyTerms = Object.values(ontologyFacetCountsByPrefix).some(
-    (counts) => Object.keys(counts).length > 0
-  );
   const ontologyEnabled =
     (allowOntologyInEmbedded || !embedded) &&
     searchMode === "full-text" &&
-    initialSearchType === "search_entities" &&
-    hasOntologyTerms;
+    initialSearchType === "search_entities";
 
   const effectiveLayoutMode = embedded && !allowOntologyInEmbedded ? "search" : layoutMode;
   const availableDesktopPanes = useMemo<SearchWorkspacePane[]>(() => {
@@ -373,13 +344,12 @@ export default function EntitySearchWorkspace({
     lastSearchScrollTopRef.current = nextScrollTop;
   }, [embedded, showFloatingSearchHeader]);
 
-  // Set sidebar content when filter counts are available (not in embedded mode unless showFilters is true)
+  // Set sidebar content (not in embedded mode unless showFilters is true)
   useEffect(() => {
-    if ((!embedded || showFilters) && searchMode === "full-text" && initialSearchType === "search_entities" && Object.keys(filterCounts).length > 0) {
+    if ((!embedded || showFilters) && searchMode === "full-text" && initialSearchType === "search_entities") {
       setSidebarContent(
         <EntityFilterSidebar
           filters={filters}
-          filterCounts={filterCounts}
           onFilterChange={handleFilterChange}
           onClearFilters={handleClearFilters}
           isMobile
@@ -393,7 +363,7 @@ export default function EntitySearchWorkspace({
     return () => {
       setSidebarContent(null);
     };
-  }, [embedded, showFilters, searchMode, initialSearchType, filterCounts, filters, handleFilterChange, handleClearFilters, setSidebarContent]);
+  }, [embedded, showFilters, searchMode, initialSearchType, filters, handleFilterChange, handleClearFilters, setSidebarContent]);
 
   // Clear identifier results when returning to full-text mode
   useEffect(() => {
@@ -464,7 +434,7 @@ export default function EntitySearchWorkspace({
     setLookupLoading(true);
     setLookupError(null);
     try {
-      const data: ResolvedEntityLookupResponse = await resolveEntityIdentifiers(identifiers);
+      const data = await resolveEntityIdentifiers(identifiers);
       setLookupMatches((data.matches || []) as IdentifierMatch[]);
       setLookupEntities((data.entities || []) as EntityLike[]);
     } catch (err) {
@@ -667,7 +637,6 @@ export default function EntitySearchWorkspace({
           mode="entities"
           filters={filters}
           onFilterChange={handleAnnotationFilterChange}
-          ontologyFacetCountsByPrefix={ontologyFacetCountsByPrefix}
         />
       </div>
     </div>

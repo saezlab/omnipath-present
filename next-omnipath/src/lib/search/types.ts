@@ -5,5 +5,4 @@ export interface SearchResponse<THit = Record<string, unknown>> {
   offset: number;
   processingTimeMs: number;
   query: string;
-  facetDistribution?: Record<string, Record<string, number>>;
 }

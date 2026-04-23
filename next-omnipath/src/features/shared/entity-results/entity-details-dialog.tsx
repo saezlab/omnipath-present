@@ -10,7 +10,8 @@ import { MoleculeStructure } from "./molecule_structure";
 import { InteractionsExploreTab } from "@/features/explore/components/interactions-explore-tab";
 import type { SearchFilters } from "@/types/search";
 import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace";
-import { getAssociatedEntityIds, getEntityDetails } from "@/lib/entity";
+import { getEntityDetails } from "@/lib/queries/entity-details";
+import { getAssociatedEntityIds } from "@/lib/queries/membership-search";
 import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import {
   getEntityDescriptions,
@@ -205,7 +206,6 @@ export function EntityDetailsDialog({ open, onOpenChange, entity }: EntityDetail
                     <InteractionsExploreTab
                       filters={interactionFilters}
                       onFilterChange={setInteractionFilters}
-                      onFilterCountsUpdate={() => {}}
                     />
                   )}
                 </div>

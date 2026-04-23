@@ -2,46 +2,18 @@ import { getChatModel } from "@/ai";
 import { convertToModelMessages, stepCountIs, streamText, validateUIMessages } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { resolveOntologyTerms as resolveOntologyTermsQuery } from "@/lib/annotation";
-import { searchAssociations } from "@/lib/association";
-import { searchEntities } from "@/lib/entity";
-import { resolveEntityIdentifiers as resolveEntityIdentifiersQuery } from "@/lib/identifier";
-import { getInteractionFilterCounts, searchInteractions } from "@/lib/interaction";
+import { getOntologyTermsByIds } from "@/lib/queries/ontology-term";
+import { searchEntities } from "@/lib/queries/entity";
+import { resolveEntityIdentifiers } from "@/lib/queries/entity-identifier";
+import { searchRelations } from "@/lib/queries/relation";
+import { getEntitiesByPks, getEntitiesByPublicIds } from "@/lib/queries/entity";
 import {
   exploreOntologyTree as exploreOntologyTreeQuery,
   normalizeOntologyFilterValues,
 } from "@/lib/ontology";
 import { getEntityDisplayName, getEntityTypeLabel, getEntityPublicId } from "@/lib/entities/display";
-import type { SearchFilters } from "@/types/search";
-import type { AssociationListRow } from "@/features/associations/types";
-import type { InteractionListRow } from "@/features/interactions-search/types";
 import { getApiServiceUrl } from "@/lib/api/config";
-
-
-// Define types for Meilisearch hits
-interface EntityHit {
-  id: string;
-  entity_id?: string;
-  canonical_identifier?: string;
-  display_name?: string;
-  names?: string[];
-  gene_symbol?: string;
-  gene_symbols?: string[];
-  description?: string;
-  descriptions?: string[];
-  identifiers?: Array<{ key?: string; value?: string }>;
-  entity_type?: { name?: string } | string;
-  interaction_ids?: unknown[];
-  num_interactions?: number;
-  [key: string]: unknown;
-}
-
-interface TermInfo {
-  id: string;
-  name?: string;
-  definition?: string | null;
-  namespace?: string | null;
-}
+import type { SearchFilters } from "@/types/search";
 
 interface OntologySearchMatch {
   id: string;
@@ -65,64 +37,9 @@ interface OntologyTreeNode {
   children?: OntologyTreeNode[];
 }
 
-
-type AssociationHit = AssociationListRow;
-type InteractionHit = InteractionListRow;
-
 const requestSchema = z.object({
   messages: z.array(z.unknown()),
 });
-
-const getEntityDbId = (hit: EntityHit): string | undefined => {
-  const entityId = hit.entity_id ?? hit.id;
-  return typeof entityId === "string" ? entityId : undefined;
-};
-
-const getCanonicalIdentifier = (hit: EntityHit): string | undefined => {
-  if (hit.canonical_identifier) return hit.canonical_identifier;
-  const identifiers = hit.identifiers || [];
-  for (const identifier of identifiers) {
-    const key = identifier?.key?.toLowerCase() || "";
-    if (key.startsWith("uniprot:") && typeof identifier.value === "string") {
-      return identifier.value;
-    }
-  }
-  return undefined;
-};
-
-const getEntityName = (hit: EntityHit): string => {
-  const display = hit.display_name;
-  const gene = hit.gene_symbol || hit.gene_symbols?.[0];
-  const name = hit.names?.[0];
-  const canonical = getCanonicalIdentifier(hit);
-  const dbId = getEntityDbId(hit);
-  return display || gene || name || canonical || `Entity ${dbId ?? "unknown"}`;
-};
-
-const getEntityType = (hit: EntityHit): string => {
-  if (typeof hit.entity_type === "object") {
-    return hit.entity_type?.name || "entity";
-  }
-  if (typeof hit.entity_type === "string") {
-    return hit.entity_type.split(":")[0] || "entity";
-  }
-  return "entity";
-};
-
-const getInteractionParticipantsLabel = (hit: InteractionHit): string => {
-  const left = getEntityDisplayName(hit.entityA) || getEntityPublicId(hit.entityA);
-  const right = getEntityDisplayName(hit.entityB) || getEntityPublicId(hit.entityB);
-  return `${left} - ${right}`;
-};
-
-const getInteractionTypeLabel = (hit: InteractionHit): string => {
-  const leftType = getEntityTypeLabel(hit.entityA);
-  const rightType = getEntityTypeLabel(hit.entityB);
-  if (leftType && rightType) {
-    return `${leftType}-${rightType}`;
-  }
-  return "interaction";
-};
 
 // Define the tools
 const tools = {
@@ -160,14 +77,14 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           filters,
         });
 
-        const hits = (data.hits || []) as unknown as EntityHit[];
-        console.log(`Search returned ${hits.length} results.`);
-        console.log('Sample hit for preview:', JSON.stringify(hits[0], null, 2));
+        const entities = data.entities || [];
+        console.log(`Search returned ${entities.length} results.`);
+        console.log('Sample hit for preview:', JSON.stringify(entities[0], null, 2));
 
         // AI intelligently selects the best match
         let bestMatchId: string | undefined = undefined;
 
-        if (hits.length > 0) {
+        if (entities.length > 0) {
           const queryLower = query.toLowerCase();
           const queryTokens = queryLower
             .split(/\s+/)
@@ -175,49 +92,41 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
             .filter((token) => token.length > 1 && !["protein", "gene", "interactions", "interaction", "involving", "find", "all"].includes(token));
 
           let bestScore = -1;
-          let bestHit: EntityHit | null = null;
+          let bestHit = null as typeof entities[number] | null;
 
-          for (let i = 0; i < Math.min(hits.length, 50); i++) {
-            const hit = hits[i];
+          for (let i = 0; i < Math.min(entities.length, 50); i++) {
+            const entity = entities[i];
             let score = Math.max(1, 50 - i);
             const candidates = [
-              hit.display_name,
-              hit.gene_symbol,
-              hit.gene_symbols?.[0],
-              hit.names?.[0],
-              getCanonicalIdentifier(hit),
+              getEntityDisplayName(entity),
+              entity.canonicalIdentifier,
             ]
               .filter((v): v is string => typeof v === "string" && v.length > 0)
               .map((v) => v.toLowerCase());
-
-            const description = (hit.description || hit.descriptions?.[0] || "").toLowerCase();
 
             if (candidates.some((v) => v === queryLower)) score += 100;
             else if (queryTokens.some((token) => candidates.includes(token))) score += 90;
             else if (candidates.some((v) => v.startsWith(queryLower))) score += 50;
             else if (candidates.some((v) => v.includes(queryLower))) score += 25;
 
-            if ((hit.interaction_ids?.length || hit.num_interactions || 0) > 100) score += 10;
-            if (description.length > 100) score += 5;
-
             if (score > bestScore) {
               bestScore = score;
-              bestHit = hit;
+              bestHit = entity;
             }
           }
 
           if (bestHit) {
-            bestMatchId = getEntityDbId(bestHit);
+            bestMatchId = getEntityPublicId(bestHit);
           }
         }
 
-        const preview = hits.slice(0, 3).map((entity, index) => {
+        const preview = entities.slice(0, 3).map((entity, index) => {
           return {
-            id: getEntityDbId(entity) ?? `entity-${index}`,
-            name: getEntityName(entity),
-            type: getEntityType(entity),
-            canonical_identifier: getCanonicalIdentifier(entity),
-            interaction_count: entity.interaction_ids?.length || entity.num_interactions || 0,
+            id: getEntityPublicId(entity),
+            name: getEntityDisplayName(entity),
+            type: getEntityTypeLabel(entity),
+            canonical_identifier: entity.canonicalIdentifier,
+            interaction_count: 0,
           };
         });
 
@@ -228,11 +137,11 @@ Do NOT use this tool to resolve exact entity identifiers for anchored searches; 
           },
           preview,
           stats: {
-            totalCount: data.total || hits.length,
-            hasMore: hits.length < data.total,
+            totalCount: data.total || entities.length,
+            hasMore: entities.length < data.total,
           },
           results: preview,
-          totalCount: data.total || hits.length,
+          totalCount: data.total || entities.length,
           searchType: "entities",
           query,
           bestMatchId,
@@ -256,31 +165,26 @@ Returned entity IDs are canonical strings, not numeric IDs.`,
       console.log(`Resolving ${identifiers.length} identifiers.`);
       try {
         const normalizedIdentifiers = identifiers.map((identifier) => identifier.trim()).filter((identifier) => identifier.length > 0);
-        const responseData = await resolveEntityIdentifiersQuery(normalizedIdentifiers) as {
-          matches?: Array<{ identifier: string; entityIds: string[] }>;
-          entities?: EntityHit[];
-        };
+        const responseData = await resolveEntityIdentifiers(normalizedIdentifiers);
         const matches = responseData.matches || [];
-        const entities = (responseData.entities || []) as EntityHit[];
-        const entityMap = new Map<string, EntityHit>();
+        const entities = responseData.entities || [];
+        const entityMap = new Map<string, typeof entities[number]>();
         for (const entity of entities) {
-          const entityId = getEntityDbId(entity);
-          if (entityId !== undefined) {
-            entityMap.set(String(entityId), entity);
-          }
+          const entityId = getEntityPublicId(entity);
+          entityMap.set(entityId, entity);
         }
 
         const preview = matches.slice(0, 5).map((match) => {
           const topEntity = match.entityIds
             .map((entityId) => entityMap.get(entityId))
-            .find((entity): entity is EntityHit => Boolean(entity));
+            .find((entity): entity is typeof entities[number] => Boolean(entity));
 
           return {
             identifier: match.identifier,
             entityIds: match.entityIds,
             candidateCount: match.entityIds.length,
-            topMatch: topEntity ? getEntityName(topEntity) : undefined,
-            topEntityId: topEntity ? String(getEntityDbId(topEntity)) : (match.entityIds[0] || undefined),
+            topMatch: topEntity ? getEntityDisplayName(topEntity) : undefined,
+            topEntityId: topEntity ? getEntityPublicId(topEntity) : (match.entityIds[0] || undefined),
           };
         });
 
@@ -361,21 +265,16 @@ Prefer searchOntologyTerms first when the user only provides free-text ontology 
       console.log(`Resolving ${termIds.length} ontology terms.`);
       try {
         const normalizedTermIds = termIds.map((termId) => termId.trim()).filter((termId) => termId.length > 0);
-        const data = await resolveOntologyTermsQuery(normalizedTermIds);
+        const terms = await getOntologyTermsByIds(normalizedTermIds);
+        const termById = new Map(terms.map((t) => [t.termId, t]));
         const results = normalizedTermIds.map((termId) => {
-          const term = data[termId]
-            ? {
-                name: data[termId].label,
-                definition: data[termId].definition,
-                namespace: data[termId].namespace,
-              }
-            : null;
+          const term = termById.get(termId);
           return {
             termId,
             found: Boolean(term),
-            name: term?.name || null,
+            name: term?.label || null,
             definition: term?.definition || null,
-            namespace: term?.namespace || null,
+            namespace: term?.ontologyPrefix || null,
           };
         });
 
@@ -439,7 +338,7 @@ Do not use broad entity search as a substitute for identifier resolution when an
       isNegative: z.boolean().optional().describe("Optional filter for negative (inhibition/downregulation) interactions."),
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ entityIds, interactionTypes, interactionAnnotationTerms, participantAnnotationTermsGo, participantAnnotationTermsMi, participantAnnotationTermsOm, participantAnnotationTermsHp, participantAnnotationTermsKw, hasDirection, isPositive, isNegative, sources }: {
+    execute: async ({ entityIds, sources }: {
       entityIds?: string[];
       interactionTypes?: string[];
       interactionAnnotationTerms?: string[];
@@ -455,130 +354,49 @@ Do not use broad entity search as a substitute for identifier resolution when an
     }) => {
       console.log(`Searching interactions.`);
       try {
-        // Build the request with filters
-        const apiFilters: SearchFilters = {};
-
-        // Add entity IDs filter if provided
+        let entityPks: number[] | undefined;
         if (entityIds && entityIds.length > 0) {
-          apiFilters.entity_ids = entityIds.map((id) => String(id));
+          const entities = await getEntitiesByPublicIds(entityIds.map(String));
+          entityPks = entities.map((e) => e.entityPk);
         }
 
-        const [
-          normalizedInteractionAnnotationTerms,
-          normalizedParticipantAnnotationTermsGo,
-          normalizedParticipantAnnotationTermsMi,
-          normalizedParticipantAnnotationTermsOm,
-          normalizedParticipantAnnotationTermsHp,
-          normalizedParticipantAnnotationTermsKw,
-        ] = await Promise.all([
-          normalizeOntologyFilterValues(interactionAnnotationTerms),
-          normalizeOntologyFilterValues(participantAnnotationTermsGo),
-          normalizeOntologyFilterValues(participantAnnotationTermsMi),
-          normalizeOntologyFilterValues(participantAnnotationTermsOm),
-          normalizeOntologyFilterValues(participantAnnotationTermsHp),
-          normalizeOntologyFilterValues(participantAnnotationTermsKw),
-        ]);
+        const { relations, total } = await searchRelations({
+          filters: {
+            relationCategories: ["interaction"],
+            entityPks,
+            sources,
+          },
+          limit: 20,
+          offset: 0,
+        });
 
-        if (interactionTypes?.length) apiFilters.interaction_types = interactionTypes;
-        if (normalizedInteractionAnnotationTerms?.length) apiFilters.interaction_annotation_terms = normalizedInteractionAnnotationTerms;
-        const mergedParticipantAnnotationTerms = [
-          ...(normalizedParticipantAnnotationTermsGo || []),
-          ...(normalizedParticipantAnnotationTermsMi || []),
-          ...(normalizedParticipantAnnotationTermsOm || []),
-          ...(normalizedParticipantAnnotationTermsHp || []),
-          ...(normalizedParticipantAnnotationTermsKw || []),
-        ];
-        if (mergedParticipantAnnotationTerms.length) {
-          apiFilters.participant_annotation_terms = Array.from(new Set(mergedParticipantAnnotationTerms));
-        }
-        if (hasDirection !== undefined) apiFilters.is_directed = hasDirection;
-        if (isPositive) apiFilters.signs = [...(apiFilters.signs || []), 1];
-        if (isNegative) apiFilters.signs = [...(apiFilters.signs || []), -1];
-        if (sources?.length) apiFilters.sources = sources;
+        const pks = [...new Set(relations.flatMap((r) => [r.subjectEntityPk, r.objectEntityPk]))];
+        const entities = pks.length > 0 ? await getEntitiesByPks(pks) : [];
+        const entityByPk = new Map(entities.map((e) => [e.entityPk, e]));
 
-        const [data, facetStats] = await Promise.all([
-          searchInteractions({ query: "", filters: apiFilters, limit: 20, offset: 0 }),
-          getInteractionFilterCounts({ query: "", filters: apiFilters }),
-        ]);
+        type InteractionHit = { relation: typeof relations[number]; entityA: NonNullable<ReturnType<typeof entityByPk.get>>; entityB: NonNullable<ReturnType<typeof entityByPk.get>> };
+        const hits: InteractionHit[] = relations.map((r) => ({
+          relation: r,
+          entityA: entityByPk.get(r.subjectEntityPk),
+          entityB: entityByPk.get(r.objectEntityPk),
+        })).filter((h): h is InteractionHit => Boolean(h.entityA && h.entityB));
 
-        const hits = (data.hits || []) as InteractionHit[];
         console.log(`Interaction search returned ${hits.length} results.`);
 
-        // Support both old and new facet keys depending on index version
-        const formattedFacets = {
-          interactionTypes: facetStats['interaction_types_facet'] || facetStats['interaction_type'] || {},
-          dataSources: facetStats['data_sources_facet'] || facetStats['sources'] || {},
-          detectionMethods: facetStats['detection_methods_facet'] || {},
-          causalStatements: facetStats['causal_statements_facet'] || {},
-          causalMechanisms: facetStats['causal_mechanisms_facet'] || {},
-          interactorTypes: facetStats['interactor_types_facet'] || {},
-          signs: facetStats['sign'] || facetStats['signs'] || {},
-          consensusSign: facetStats['consensus_sign'] || {
-            positive: facetStats['sign']?.['1'] || 0,
-            negative: facetStats['sign']?.['-1'] || 0,
-            unsigned: facetStats['sign']?.['0'] || 0,
-          },
-          isDirected: facetStats['is_directed'] || {},
-          consensusDirection: facetStats['consensus_direction'] || {},
-          evidenceCountDistribution: facetStats['evidence_count'] || {}
-        };
-
-        // Calculate summary statistics from facets
-        const summaryStats = {
-          totalInteractions: data.total || hits.length,
-          uniqueInteractionTypes: Object.keys(formattedFacets.interactionTypes).length,
-          uniqueDataSources: Object.keys(formattedFacets.dataSources).length,
-          uniqueDetectionMethods: Object.keys(formattedFacets.detectionMethods).length,
-          directedInteractions: formattedFacets.isDirected['true'] || 0,
-          undirectedInteractions: formattedFacets.isDirected['false'] || 0,
-          // Top categories
-          topInteractionTypes: Object.entries(formattedFacets.interactionTypes)
-            .sort(([, a], [, b]) => (b as number) - (a as number))
-            .slice(0, 5)
-            .map(([name, count]) => ({ name, count })),
-          topDataSources: Object.entries(formattedFacets.dataSources)
-            .sort(([, a], [, b]) => (b as number) - (a as number))
-            .slice(0, 5)
-            .map(([name, count]) => ({ name, count })),
-          topDetectionMethods: Object.entries(formattedFacets.detectionMethods)
-            .sort(([, a], [, b]) => (b as number) - (a as number))
-            .slice(0, 5)
-            .map(([name, count]) => ({ name, count }))
-        };
-
         const exampleInteractions = hits.slice(0, 2).map((hit) => ({
-          participants: getInteractionParticipantsLabel(hit),
-          type: getInteractionTypeLabel(hit),
-          evidences: hit.interaction.evidenceCount || 0,
+          participants: `${getEntityDisplayName(hit.entityA)} - ${getEntityDisplayName(hit.entityB)}`,
+          type: `${getEntityTypeLabel(hit.entityA)}-${getEntityTypeLabel(hit.entityB)}`,
+          evidences: hit.relation.evidenceCount || 0,
         }));
 
         return {
           componentParams: {
             entityIds,
-            interactionTypes,
-            interactionAnnotationTerms,
-            participantAnnotationTermsGo,
-            participantAnnotationTermsMi,
-            participantAnnotationTermsOm,
-            participantAnnotationTermsHp,
-            participantAnnotationTermsKw,
-            normalizedInteractionAnnotationTerms,
-            normalizedParticipantAnnotationTermsGo,
-            normalizedParticipantAnnotationTermsMi,
-            normalizedParticipantAnnotationTermsOm,
-            normalizedParticipantAnnotationTermsHp,
-            normalizedParticipantAnnotationTermsKw,
-            hasDirection,
-            isPositive,
-            isNegative,
             sources,
           },
-          facetStatistics: formattedFacets,
-          summary: summaryStats,
           exampleInteractions,
-          // Keep a generic results field for tool UI compatibility
           results: exampleInteractions,
-          totalCount: data.total || hits.length,
+          totalCount: total || hits.length,
           entityIds: entityIds?.map((id) => String(id)),
         };
       } catch (error: unknown) {
@@ -599,7 +417,7 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
       ontologyTerms: z.array(z.string()).optional().describe("Association annotation terms."),
       sources: z.array(z.string()).optional().describe("Source prefixes."),
     }),
-    execute: async ({ parentEntityIds, memberEntityIds, parentEntityTypes, memberEntityTypes, ontologyTerms, sources }: {
+    execute: async ({ parentEntityIds, memberEntityIds, sources }: {
       parentEntityIds?: string[];
       memberEntityIds?: string[];
       parentEntityTypes?: string[];
@@ -609,18 +427,39 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
     }) => {
       console.log(`Searching associations.`);
       try {
-        const apiFilters: SearchFilters = {};
-        const normalizedOntologyTerms = await normalizeOntologyFilterValues(ontologyTerms);
+        let subjectEntityPks: number[] | undefined;
+        let objectEntityPks: number[] | undefined;
 
-        if (parentEntityIds?.length) apiFilters.parent_entity_ids = parentEntityIds;
-        if (memberEntityIds?.length) apiFilters.member_entity_ids = memberEntityIds;
-        if (parentEntityTypes?.length) apiFilters.parent_entity_types = parentEntityTypes;
-        if (memberEntityTypes?.length) apiFilters.member_entity_types = memberEntityTypes;
-        if (normalizedOntologyTerms?.length) apiFilters.association_annotation_terms = normalizedOntologyTerms;
-        if (sources?.length) apiFilters.sources = sources;
+        if (parentEntityIds?.length) {
+          const entities = await getEntitiesByPublicIds(parentEntityIds.map(String));
+          subjectEntityPks = entities.map((e) => e.entityPk);
+        }
+        if (memberEntityIds?.length) {
+          const entities = await getEntitiesByPublicIds(memberEntityIds.map(String));
+          objectEntityPks = entities.map((e) => e.entityPk);
+        }
 
-        const data = await searchAssociations("", apiFilters, 20, 0);
-        const hits = (data.hits || []) as AssociationHit[];
+        const { relations, total } = await searchRelations({
+          filters: {
+            relationCategories: ["membership"],
+            subjectEntityPks,
+            objectEntityPks,
+            sources,
+          },
+          limit: 20,
+          offset: 0,
+        });
+
+        const pks = [...new Set(relations.flatMap((r) => [r.subjectEntityPk, r.objectEntityPk]))];
+        const entities = pks.length > 0 ? await getEntitiesByPks(pks) : [];
+        const entityByPk = new Map(entities.map((e) => [e.entityPk, e]));
+
+        type AssociationHit = { relation: typeof relations[number]; parent: NonNullable<ReturnType<typeof entityByPk.get>>; member: NonNullable<ReturnType<typeof entityByPk.get>> };
+        const hits: AssociationHit[] = relations.map((r) => ({
+          relation: r,
+          parent: entityByPk.get(r.subjectEntityPk),
+          member: entityByPk.get(r.objectEntityPk),
+        })).filter((h): h is AssociationHit => Boolean(h.parent && h.member));
 
         const exampleAssociations = hits.slice(0, 5).map((hit) => ({
           parent: getEntityDisplayName(hit.parent) || getEntityPublicId(hit.parent),
@@ -629,17 +468,9 @@ IMPORTANT: The associations index does NOT search by abstract entity names. Use 
           memberType: getEntityTypeLabel(hit.member),
         }));
 
-        const facetStats = (data.facetDistribution || {}) as Record<string, Record<string, number>>;
-
         return {
-          totalCount: data.estimatedTotalHits || hits.length,
+          totalCount: total || hits.length,
           exampleAssociations,
-          facetStatistics: {
-            parentEntityTypes: facetStats['parent_entity_type'] || {},
-            memberEntityTypes: facetStats['member_entity_type'] || {},
-            sources: facetStats['sources'] || {},
-            associationAnnotationTerms: facetStats['association_annotation_terms'] || {},
-          },
         };
       } catch (error: unknown) {
         console.error("Error searching associations:", error);

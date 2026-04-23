@@ -1,67 +1,40 @@
 import { relations } from "drizzle-orm/relations";
-import { entity, entityIdentifier, association, interaction, interactionAnnotation, entityAnnotation } from "./schema";
+import { entityRelation, entityRelationEvidence, entity, entityIdentifier } from "./schema";
 
-export const entityIdentifierRelations = relations(entityIdentifier, ({one}) => ({
-	entity: one(entity, {
-		fields: [entityIdentifier.entityPk],
-		references: [entity.entityPk]
+export const entityRelationEvidenceRelations = relations(entityRelationEvidence, ({one}) => ({
+	entityRelation: one(entityRelation, {
+		fields: [entityRelationEvidence.relationPk],
+		references: [entityRelation.relationPk]
+	}),
+}));
+
+export const entityRelationRelations = relations(entityRelation, ({one, many}) => ({
+	entityRelationEvidences: many(entityRelationEvidence),
+	entity_subjectEntityPk: one(entity, {
+		fields: [entityRelation.subjectEntityPk],
+		references: [entity.entityPk],
+		relationName: "entityRelation_subjectEntityPk_entity_entityPk"
+	}),
+	entity_objectEntityPk: one(entity, {
+		fields: [entityRelation.objectEntityPk],
+		references: [entity.entityPk],
+		relationName: "entityRelation_objectEntityPk_entity_entityPk"
 	}),
 }));
 
 export const entityRelations = relations(entity, ({many}) => ({
+	entityRelations_subjectEntityPk: many(entityRelation, {
+		relationName: "entityRelation_subjectEntityPk_entity_entityPk"
+	}),
+	entityRelations_objectEntityPk: many(entityRelation, {
+		relationName: "entityRelation_objectEntityPk_entity_entityPk"
+	}),
 	entityIdentifiers: many(entityIdentifier),
-	associations_parentEntityPk: many(association, {
-		relationName: "association_parentEntityPk_entity_entityPk"
-	}),
-	associations_memberEntityPk: many(association, {
-		relationName: "association_memberEntityPk_entity_entityPk"
-	}),
-	interactions_entityAPk: many(interaction, {
-		relationName: "interaction_entityAPk_entity_entityPk"
-	}),
-	interactions_entityBPk: many(interaction, {
-		relationName: "interaction_entityBPk_entity_entityPk"
-	}),
-	entityAnnotations: many(entityAnnotation),
 }));
 
-export const associationRelations = relations(association, ({one}) => ({
-	entity_parentEntityPk: one(entity, {
-		fields: [association.parentEntityPk],
-		references: [entity.entityPk],
-		relationName: "association_parentEntityPk_entity_entityPk"
-	}),
-	entity_memberEntityPk: one(entity, {
-		fields: [association.memberEntityPk],
-		references: [entity.entityPk],
-		relationName: "association_memberEntityPk_entity_entityPk"
-	}),
-}));
-
-export const interactionRelations = relations(interaction, ({one, many}) => ({
-	entity_entityAPk: one(entity, {
-		fields: [interaction.entityAPk],
-		references: [entity.entityPk],
-		relationName: "interaction_entityAPk_entity_entityPk"
-	}),
-	entity_entityBPk: one(entity, {
-		fields: [interaction.entityBPk],
-		references: [entity.entityPk],
-		relationName: "interaction_entityBPk_entity_entityPk"
-	}),
-	interactionAnnotations: many(interactionAnnotation),
-}));
-
-export const interactionAnnotationRelations = relations(interactionAnnotation, ({one}) => ({
-	interaction: one(interaction, {
-		fields: [interactionAnnotation.interactionPk],
-		references: [interaction.interactionPk]
-	}),
-}));
-
-export const entityAnnotationRelations = relations(entityAnnotation, ({one}) => ({
+export const entityIdentifierRelations = relations(entityIdentifier, ({one}) => ({
 	entity: one(entity, {
-		fields: [entityAnnotation.entityPk],
+		fields: [entityIdentifier.entityPk],
 		references: [entity.entityPk]
 	}),
 }));
