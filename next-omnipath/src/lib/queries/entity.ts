@@ -3,7 +3,7 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, getPool } from "@/lib/db/client";
 import { entity, entityIdentifier, type Entity, type EntityIdentifier } from "@next-omnipath/drizzle";
-import { normalizeEntityTypeFilterValue, normalizedEntityTypeSqlExpression } from "@/lib/entity-filter";
+import { entityTypeLabelSqlExpression, normalizeEntityTypeFilterValue, normalizedEntityTypeSqlExpression, taxonomyScopedEntityTypeLabels } from "@/lib/entity-filter";
 import { normalizeStringValues, publicEntityIdWhere } from "@/lib/entity-public-id";
 
 export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[] };
@@ -145,8 +145,16 @@ export async function searchEntities({
     if (filters.ncbi_tax_id?.length) {
       const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id);
       if (taxonomyIds.length) {
-        const param = pushParam(taxonomyIds);
-        whereParts.push(`e.taxonomy_id = ANY(${param}::text[])`);
+        const taxonomyParam = pushParam(taxonomyIds);
+        if (filters.entity_types?.length) {
+          const scopedTypeLabelsParam = pushParam([...taxonomyScopedEntityTypeLabels]);
+          whereParts.push(`(
+            e.taxonomy_id = ANY(${taxonomyParam}::text[])
+            OR ${entityTypeLabelSqlExpression("e.entity_type")} <> ALL(${scopedTypeLabelsParam}::text[])
+          )`);
+        } else {
+          whereParts.push(`e.taxonomy_id = ANY(${taxonomyParam}::text[])`);
+        }
       }
     }
 
