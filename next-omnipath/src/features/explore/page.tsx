@@ -43,6 +43,7 @@ export default function ExplorePage() {
   const [draftQuery, setDraftQuery] = useState(query);
   const [entityFilters, setEntityFilters] = useState<SearchFilters>({ ncbi_tax_id: [species || "9606"] });
   const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
+  const [annotationFilters, setAnnotationFilters] = useState<SearchFilters>({});
   const { entityIds, annotationIds, totalSelectionCount } = useEntitySelection();
 
   useEffect(() => {
@@ -101,7 +102,12 @@ export default function ExplorePage() {
           useInternalRefineLayout={false}
         />
       ) : (
-        <AnnotationBrowserTab query={query} species={species || "9606"} />
+        <AnnotationBrowserTab
+          query={query}
+          species={species || "9606"}
+          filters={annotationFilters}
+          onFiltersChange={setAnnotationFilters}
+        />
       );
 
   return (

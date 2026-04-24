@@ -194,6 +194,54 @@ def _relation_query_expression(query: str) -> pl.Expr | None:
     ])
 
 
+def filtered_annotations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFrame:
+    _require_file(ONTOLOGY_TERM_PARQUET)
+    scan = pl.scan_parquet(str(ONTOLOGY_TERM_PARQUET))
+    expressions: list[pl.Expr] = []
+
+    query_text = (query or "").strip().lower()
+    if query_text:
+        expressions.append(_combine_or([
+            _contains_query_scalar("term_id", query_text),
+            _contains_query_scalar("label", query_text),
+            _contains_query_scalar("definition", query_text),
+            _contains_query_scalar("ontology_prefix", query_text),
+            _contains_query_list("synonyms", query_text),
+            _contains_query_list("sources", query_text),
+        ]) or pl.lit(True))
+
+    prefixes = _normalize_strings(_get_any(filters, "prefixes", "ontology_prefixes", "ontologyPrefixes", default=[]))
+    if prefixes:
+        expressions.append(_scalar_in("ontology_prefix", prefixes))
+
+    expr = _combine_and(expressions)
+    if expr is not None:
+        scan = scan.filter(expr)
+
+    entity_pks = _normalize_ints(_get_any(filters, "entity_pks", "entityPks", default=[]))
+    if entity_pks:
+        _require_file(RELATIONS_PARQUET)
+        scoped_terms = (
+            pl.scan_parquet(str(RELATIONS_PARQUET))
+            .filter(
+                (pl.col("relation_category") == "annotation")
+                & pl.col("subject_entity_pk").is_in(entity_pks)
+            )
+            .select(pl.col("object_entity_pk").alias("entity_pk"))
+            .unique()
+        )
+        _require_file(ENTITY_PARQUET)
+        scoped_term_ids = (
+            pl.scan_parquet(str(ENTITY_PARQUET))
+            .join(scoped_terms, on="entity_pk", how="semi")
+            .select(pl.col("canonical_identifier").alias("term_id"))
+            .unique()
+        )
+        scan = scan.join(scoped_term_ids, on="term_id", how="semi")
+
+    return scan
+
+
 def filtered_relations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFrame:
     _require_file(RELATIONS_PARQUET)
     scan = pl.scan_parquet(str(RELATIONS_PARQUET))
@@ -254,6 +302,10 @@ def filtered_relations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFrame
 
 def write_entity_subset_parquet_direct(query: str, filters: dict[str, Any], output_path: Path) -> int:
     return _write_scan(filtered_entities_scan(query, filters), output_path)
+
+
+def write_annotation_subset_parquet_direct(query: str, filters: dict[str, Any], output_path: Path) -> int:
+    return _write_scan(filtered_annotations_scan(query, filters), output_path)
 
 
 def write_relation_subset_parquet_direct(query: str, filters: dict[str, Any], output_path: Path) -> int:

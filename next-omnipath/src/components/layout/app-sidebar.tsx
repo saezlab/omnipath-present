@@ -10,11 +10,9 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   SidebarSeparator,
   SidebarRail,
 } from "@/components/ui/sidebar"
@@ -24,7 +22,7 @@ import {
   Moon,
   ListChecks,
   Database,
-  BookOpen,
+  ExternalLink,
   MessageSquare,
 } from "lucide-react"
 import Link from "next/link"
@@ -51,8 +49,9 @@ const navigationItems = [
   },
   {
     title: "API Docs",
-    url: "/api-docs",
-    icon: BookOpen,
+    url: "/api/docs",
+    icon: ExternalLink,
+    external: true,
   }
 ]
 
@@ -101,7 +100,11 @@ export function AppSidebar() {
               {navigationItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isPathActive(item.url)}>
-                    <Link href={item.url}>
+                    <Link
+                      href={item.url}
+                      target={item.external ? "_blank" : undefined}
+                      rel={item.external ? "noopener noreferrer" : undefined}
+                    >
                       <item.icon className="h-5 w-5" />
                       <span>{item.title}</span>
                     </Link>
@@ -109,12 +112,11 @@ export function AppSidebar() {
                 </SidebarMenuItem>
               ))}
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isPathActive('/chat')}>
-                  <Link href="/chat">
-                    <MessageSquare className="h-5 w-5" />
-                    <span>AI Assistant</span>
-                  </Link>
+                <SidebarMenuButton disabled className="opacity-60">
+                  <MessageSquare className="h-5 w-5" />
+                  <span>AI Assistant</span>
                 </SidebarMenuButton>
+                <SidebarMenuBadge className="text-[10px]">Soon</SidebarMenuBadge>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>

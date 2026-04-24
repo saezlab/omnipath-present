@@ -1,4 +1,4 @@
-import type { EntitySubsetFilters, InteractionSubsetFilters, RelationSubsetFilters, SubsetArtifact, SubsetMaterializeRequest, SubsetResource } from "@/types/subsets";
+import type { AnnotationSubsetFilters, EntitySubsetFilters, InteractionSubsetFilters, RelationSubsetFilters, SubsetArtifact, SubsetMaterializeRequest, SubsetResource } from "@/types/subsets";
 
 interface MaterializeSubsetProgress {
   stage: "requesting" | "downloading" | "complete";
@@ -141,6 +141,22 @@ export async function materializeInteractionsSubset(
       relation_categories: filters.relation_categories?.length ? filters.relation_categories : ["interaction"],
     },
     query,
+    options,
+  );
+}
+
+export async function materializeAnnotationsSubset(
+  filters: AnnotationSubsetFilters,
+  query = "",
+  options?: MaterializeSubsetOptions,
+) {
+  return materializeSubset<AnnotationSubsetFilters>(
+    {
+      resource: "annotations",
+      query,
+      filters,
+      filename: getDefaultFileName("annotations"),
+    },
     options,
   );
 }

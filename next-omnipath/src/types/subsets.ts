@@ -1,4 +1,10 @@
-export type SubsetResource = "entities" | "relations";
+export type SubsetResource = "entities" | "relations" | "annotations";
+
+export interface AnnotationSubsetFilters {
+  prefixes?: string[];
+  ontology_prefixes?: string[];
+  entity_pks?: number[];
+}
 
 export interface EntitySubsetFilters {
   entity_pks?: number[];

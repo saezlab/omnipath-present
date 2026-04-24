@@ -29,6 +29,7 @@ from .models import (
     OntologiesResponse,
     EntityExportRequest,
     RelationExportRequest,
+    AnnotationExportRequest,
     ResourceDownloadRequest,
     SliceRequest,
     SliceResponse,
@@ -584,7 +585,7 @@ def _filters_payload(request) -> dict:
 
 def _run_export(
     *,
-    request: EntityExportRequest | RelationExportRequest,
+    request: EntityExportRequest | RelationExportRequest | AnnotationExportRequest,
     background_tasks: BackgroundTasks,
     write_subset_direct,
     default_filename: str,
@@ -650,6 +651,35 @@ def export_entities_parquet_get(
         filename=filename,
     )
     return export_entities_parquet(request, background_tasks)
+
+
+@app.post("/exports/annotations/parquet")
+def export_annotations_parquet(request: AnnotationExportRequest, background_tasks: BackgroundTasks):
+    from .exports import write_annotation_subset_parquet_direct
+
+    return _run_export(
+        request=request,
+        background_tasks=background_tasks,
+        write_subset_direct=write_annotation_subset_parquet_direct,
+        default_filename="annotations_subset",
+        log_label="Annotation",
+    )
+
+
+@app.get("/exports/annotations/parquet")
+def export_annotations_parquet_get(
+    background_tasks: BackgroundTasks,
+    query: str = "",
+    filters: str | None = Query(default=None),
+    filename: str | None = None,
+):
+    request = _parse_export_request_from_query(
+        AnnotationExportRequest,
+        query=query,
+        filters=filters,
+        filename=filename,
+    )
+    return export_annotations_parquet(request, background_tasks)
 
 
 @app.post("/exports/relations/parquet")

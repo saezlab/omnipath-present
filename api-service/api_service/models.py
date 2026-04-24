@@ -115,6 +115,14 @@ class EntityFilters(BaseModel):
     sources: list[str] = Field(default_factory=list)
 
 
+class AnnotationFilters(BaseModel):
+    """Graph-native filters for ontology term exports."""
+
+    prefixes: list[str] = Field(default_factory=list)
+    ontology_prefixes: list[str] = Field(default_factory=list)
+    entity_pks: list[int] = Field(default_factory=list)
+
+
 class RelationFilters(BaseModel):
     """Graph-native filters for relation slices/exports."""
 
@@ -147,6 +155,14 @@ class RelationExportRequest(BaseModel):
 
     query: str = ""
     filters: RelationFilters = Field(default_factory=RelationFilters)
+    filename: str | None = None
+
+
+class AnnotationExportRequest(BaseModel):
+    """Request payload for ontology term export."""
+
+    query: str = ""
+    filters: AnnotationFilters = Field(default_factory=AnnotationFilters)
     filename: str | None = None
 
 
