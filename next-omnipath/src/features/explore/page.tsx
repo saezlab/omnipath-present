@@ -42,7 +42,7 @@ export default function ExplorePage() {
   const [species, setSpecies] = useQueryState("species", speciesParser);
   const [draftQuery, setDraftQuery] = useState(query);
   const [entityFilters, setEntityFilters] = useState<SearchFilters>({ ncbi_tax_id: [species || "9606"] });
-  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({ relation_categories: ["interaction"] });
+  const [interactionFilters, setInteractionFilters] = useState<SearchFilters>({});
   const { entityIds, annotationIds, totalSelectionCount } = useEntitySelection();
 
   useEffect(() => {

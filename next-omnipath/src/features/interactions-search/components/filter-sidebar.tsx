@@ -236,6 +236,24 @@ export function FilterSidebar({
     });
   };
 
+  const handlePredicateToggle = (category: string, predicate: string) => {
+    const currentPredicates = filters.predicates || [];
+    const isSelected = currentPredicates.includes(predicate);
+    const nextPredicates = isSelected
+      ? currentPredicates.filter((value) => value !== predicate)
+      : [...currentPredicates, predicate];
+    const currentCategories = filters.relation_categories || [];
+    const nextCategories = !isSelected && !currentCategories.includes(category)
+      ? [...currentCategories, category]
+      : currentCategories;
+
+    onFilterChange({
+      ...filters,
+      predicates: nextPredicates.length > 0 ? nextPredicates : undefined,
+      relation_categories: nextCategories.length > 0 ? nextCategories : undefined,
+    });
+  };
+
   const content = (
     <div className={cn("space-y-6", loading && "opacity-70")}>
       {Object.entries(predicatesByCategory).map(([category, predicates]) => (
@@ -253,7 +271,7 @@ export function FilterSidebar({
                 filterKey="predicates"
                 option={{ value: predicate, label: predicate }}
                 selectedValues={filters.predicates || []}
-                onToggle={(value) => handleArrayToggle("predicates", value)}
+                onToggle={(value) => handlePredicateToggle(category, value)}
               />
             ))}
           </div>

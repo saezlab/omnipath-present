@@ -72,6 +72,8 @@ export interface RelationFilters {
   entityPks?: number[];
   sources?: string[];
   annotationTerms?: string[];
+  scopeEntityPks?: number[];
+  scopeAnnotationTerms?: string[];
 }
 
 function normalizeNumberValues(values: number[] | undefined): number[] {
@@ -91,6 +93,41 @@ function buildRelationSearchWhere(filters: RelationFilters) {
     const placeholder = `$${params.length}`;
     return cast ? `${placeholder}::${cast}` : placeholder;
   };
+
+  const entityPkPredicate = (placeholder: string) =>
+    `(subject_entity_pk = ANY(${placeholder}) OR object_entity_pk = ANY(${placeholder}))`;
+
+  const annotationTermPredicate = (placeholder: string) => `(
+      EXISTS (
+        SELECT 1
+        FROM relation_annotation_term rat
+        WHERE rat.relation_pk = entity_relation.relation_pk
+          AND rat.term_id = ANY(${placeholder})
+      )
+      OR (
+        entity_relation.relation_category = 'annotation'
+        AND EXISTS (
+          SELECT 1
+          FROM entity term_entity
+          WHERE term_entity.entity_pk = entity_relation.object_entity_pk
+            AND term_entity.canonical_identifier = ANY(${placeholder})
+        )
+      )
+      OR (
+        entity_relation.relation_category = 'membership'
+        AND EXISTS (
+          SELECT 1
+          FROM entity_relation participant_annotation
+          JOIN entity term_entity ON term_entity.entity_pk = participant_annotation.object_entity_pk
+          WHERE participant_annotation.relation_category = 'annotation'
+            AND participant_annotation.subject_entity_pk IN (
+              entity_relation.subject_entity_pk,
+              entity_relation.object_entity_pk
+            )
+            AND term_entity.canonical_identifier = ANY(${placeholder})
+        )
+      )
+    )`;
 
   if (filters.relationCategories?.length) {
     whereParts.push(`relation_category = ANY(${pushParam(filters.relationCategories, "text[]")})`);
@@ -117,8 +154,7 @@ function buildRelationSearchWhere(filters: RelationFilters) {
 
   const entityPks = normalizeNumberValues(filters.entityPks);
   if (entityPks.length) {
-    const placeholder = pushParam(entityPks, "bigint[]");
-    whereParts.push(`(subject_entity_pk = ANY(${placeholder}) OR object_entity_pk = ANY(${placeholder}))`);
+    whereParts.push(entityPkPredicate(pushParam(entityPks, "bigint[]")));
   }
 
   if (filters.sources?.length) {
@@ -127,12 +163,20 @@ function buildRelationSearchWhere(filters: RelationFilters) {
 
   const annotationTerms = normalizeStringValues(filters.annotationTerms);
   if (annotationTerms.length) {
-    whereParts.push(`EXISTS (
-      SELECT 1
-      FROM relation_annotation_term rat
-      WHERE rat.relation_pk = entity_relation.relation_pk
-        AND rat.term_id = ANY(${pushParam(annotationTerms, "text[]")})
-    )`);
+    whereParts.push(annotationTermPredicate(pushParam(annotationTerms, "text[]")));
+  }
+
+  const scopeParts: string[] = [];
+  const scopeEntityPks = normalizeNumberValues(filters.scopeEntityPks);
+  if (scopeEntityPks.length) {
+    scopeParts.push(entityPkPredicate(pushParam(scopeEntityPks, "bigint[]")));
+  }
+  const scopeAnnotationTerms = normalizeStringValues(filters.scopeAnnotationTerms);
+  if (scopeAnnotationTerms.length) {
+    scopeParts.push(annotationTermPredicate(pushParam(scopeAnnotationTerms, "text[]")));
+  }
+  if (scopeParts.length) {
+    whereParts.push(`(${scopeParts.join(" OR ")})`);
   }
   return {
     whereClause: whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "",

@@ -24,7 +24,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatNumber } from "@/lib/utils";
 import { SearchFilters } from "@/types/search";
 import { Filter, Minus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const RESULTS_PER_PAGE = 20;
 
@@ -56,9 +56,8 @@ async function buildRelationExportFilters(filters: SearchFilters) {
   const { numeric, nonNumeric } = parseNumericIds(filters.entity_ids);
   const resolvedEntities = nonNumeric.length > 0 ? await getEntitiesByPublicIds(nonNumeric) : [];
   const entityPks = Array.from(new Set([...numeric, ...resolvedEntities.map((entity) => entity.entityPk)]));
-  const relationCategories = Array.from(new Set([
-    ...(filters.relation_categories?.length ? filters.relation_categories : ["interaction"]),
-  ])).filter((value) => value === "interaction" || value === "membership" || value === "annotation");
+  const relationCategories = Array.from(new Set(filters.relation_categories || []))
+    .filter((value) => value === "interaction" || value === "membership" || value === "annotation");
 
   return {
     ...(entityPks.length > 0 ? { entity_pks: entityPks } : {}),
@@ -85,10 +84,14 @@ async function searchInteractionRows({
   filters,
   limit,
   offset,
+  scopedEntityIds,
+  scopedAnnotationIds,
 }: {
   filters: SearchFilters;
   limit: number;
   offset: number;
+  scopedEntityIds?: string[];
+  scopedAnnotationIds?: string[];
 }): Promise<{ hits: InteractionListRow[] }> {
   let entityPks: number[] | undefined;
   if (filters.entity_ids?.length) {
@@ -100,15 +103,24 @@ async function searchInteractionRows({
     }
   }
 
-  const relationCategories = Array.from(new Set([
-    "interaction",
-    ...(filters.relation_categories?.length ? filters.relation_categories : []),
-  ])).filter((value) => value === "interaction");
+  let scopeEntityPks: number[] | undefined;
+  if (scopedEntityIds?.length) {
+    const entities = await getEntitiesByPublicIds(scopedEntityIds.map(String));
+    scopeEntityPks = entities.map((entity) => entity.entityPk);
+    if (scopeEntityPks.length === 0 && !scopedAnnotationIds?.length) {
+      return { hits: [] };
+    }
+  }
+
+  const relationCategories = Array.from(new Set(filters.relation_categories || []))
+    .filter((value) => value === "interaction" || value === "membership" || value === "annotation");
 
   const { relations } = await searchRelations({
     filters: {
-      relationCategories,
+      relationCategories: relationCategories.length > 0 ? relationCategories : undefined,
       entityPks,
+      scopeEntityPks,
+      scopeAnnotationTerms: scopedAnnotationIds,
       predicates: filters.predicates,
       interactionTypes: filters.interaction_types,
       sources: filters.sources,
@@ -145,21 +157,7 @@ export function RelationsExploreTab({
   const isMobile = useIsMobile();
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const effectiveFilters = useMemo<SearchFilters>(() => ({
-    ...filters,
-    ...(scopedEntityIds && scopedEntityIds.length > 0
-      ? {
-          entity_ids: scopedEntityIds,
-          member_a_id: undefined,
-          member_b_id: undefined,
-        }
-      : {}),
-    ...(scopedAnnotationIds && scopedAnnotationIds.length > 0
-      ? {
-          ontology_terms: scopedAnnotationIds,
-        }
-      : {}),
-  }), [filters, scopedAnnotationIds, scopedEntityIds]);
+  const effectiveFilters = filters;
 
   // Infinite scroll hook
   const {
@@ -171,14 +169,20 @@ export function RelationsExploreTab({
     sentinelRef
   } = useInfiniteScroll<InteractionListRow>({
     fetchData: useCallback(async (offset: number, limit: number) => {
-      const response = await searchInteractionRows({ filters: effectiveFilters, limit, offset });
+      const response = await searchInteractionRows({
+        filters: effectiveFilters,
+        limit,
+        offset,
+        scopedEntityIds,
+        scopedAnnotationIds,
+      });
 
       return {
         results: response.hits,
       };
-    }, [effectiveFilters]),
+    }, [effectiveFilters, scopedAnnotationIds, scopedEntityIds]),
     pageSize: RESULTS_PER_PAGE,
-    dependencies: [effectiveFilters],
+    dependencies: [effectiveFilters, scopedAnnotationIds, scopedEntityIds],
     root: rootElement
   });
 
@@ -197,11 +201,7 @@ export function RelationsExploreTab({
 
   // Handler for clear filters
   const handleClearFilters = () => {
-    onFilterChange({
-      relation_categories: ["interaction"],
-      ...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {}),
-      ...(scopedAnnotationIds && scopedAnnotationIds.length > 0 ? { ontology_terms: scopedAnnotationIds } : {}),
-    });
+    onFilterChange({});
   };
 
   const handleRowClick = (row: InteractionListRow) => {
