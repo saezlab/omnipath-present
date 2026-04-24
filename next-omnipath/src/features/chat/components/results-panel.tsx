@@ -44,17 +44,8 @@ export function ResultsPanel({ toolResult, onClose }: ResultsPanelProps) {
       const interactionTypes = toStringArray(query.interactionTypes) || toStringArray(query.interaction_types)
       if (interactionTypes?.length) nextFilters.interaction_types = interactionTypes
 
-      const interactionAnnotationTerms = toStringArray(query.interactionAnnotationTerms) || toStringArray(query.interaction_annotation_terms)
-      if (interactionAnnotationTerms?.length) nextFilters.interaction_annotation_terms = interactionAnnotationTerms
-
-      const participantTerms = [
-        ...(toStringArray(query.participantAnnotationTermsGo) || toStringArray(query.participant_annotation_terms_go) || []),
-        ...(toStringArray(query.participantAnnotationTermsMi) || toStringArray(query.participant_annotation_terms_mi) || []),
-        ...(toStringArray(query.participantAnnotationTermsOm) || toStringArray(query.participant_annotation_terms_om) || []),
-        ...(toStringArray(query.participantAnnotationTermsHp) || toStringArray(query.participant_annotation_terms_hp) || []),
-        ...(toStringArray(query.participantAnnotationTermsKw) || toStringArray(query.participant_annotation_terms_kw) || []),
-      ]
-      if (participantTerms.length) nextFilters.participant_annotation_terms = Array.from(new Set(participantTerms))
+      const ontologyTerms = toStringArray(query.ontologyTerms) || toStringArray(query.ontology_terms)
+      if (ontologyTerms?.length) nextFilters.ontology_terms = ontologyTerms
 
       if (typeof query.hasDirection === "boolean") nextFilters.is_directed = query.hasDirection
       if (typeof query.has_direction === "boolean") nextFilters.is_directed = query.has_direction

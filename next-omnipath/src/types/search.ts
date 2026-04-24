@@ -12,8 +12,6 @@ export interface SearchFilters {
   relation_categories?: string[];
   is_directed?: boolean | null;
   signs?: Array<-1 | 0 | 1>;
-  interaction_annotation_terms?: string[];
-  participant_annotation_terms?: string[];
 
   entity_types?: string[];
   sources?: string[];

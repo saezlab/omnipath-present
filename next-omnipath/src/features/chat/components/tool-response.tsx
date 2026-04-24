@@ -70,18 +70,7 @@ interface SearchInteractionsResult {
   componentParams?: {
     entityIds?: string[]
     interactionTypes?: string[]
-    interactionAnnotationTerms?: string[]
-    participantAnnotationTermsGo?: string[]
-    participantAnnotationTermsMi?: string[]
-    participantAnnotationTermsOm?: string[]
-    participantAnnotationTermsHp?: string[]
-    participantAnnotationTermsKw?: string[]
-    normalizedInteractionAnnotationTerms?: string[]
-    normalizedParticipantAnnotationTermsGo?: string[]
-    normalizedParticipantAnnotationTermsMi?: string[]
-    normalizedParticipantAnnotationTermsOm?: string[]
-    normalizedParticipantAnnotationTermsHp?: string[]
-    normalizedParticipantAnnotationTermsKw?: string[]
+    ontologyTerms?: string[]
     hasDirection?: boolean
     isPositive?: boolean
     isNegative?: boolean
@@ -228,12 +217,7 @@ export const ToolResponse = ({
         ...args,
         entityIds: searchResult.componentParams?.entityIds || searchResult.entityIds || [],
         interactionTypes: searchResult.componentParams?.interactionTypes || [],
-        interactionAnnotationTerms: searchResult.componentParams?.normalizedInteractionAnnotationTerms || searchResult.componentParams?.interactionAnnotationTerms || [],
-        participantAnnotationTermsGo: searchResult.componentParams?.normalizedParticipantAnnotationTermsGo || searchResult.componentParams?.participantAnnotationTermsGo || [],
-        participantAnnotationTermsMi: searchResult.componentParams?.normalizedParticipantAnnotationTermsMi || searchResult.componentParams?.participantAnnotationTermsMi || [],
-        participantAnnotationTermsOm: searchResult.componentParams?.normalizedParticipantAnnotationTermsOm || searchResult.componentParams?.participantAnnotationTermsOm || [],
-        participantAnnotationTermsHp: searchResult.componentParams?.normalizedParticipantAnnotationTermsHp || searchResult.componentParams?.participantAnnotationTermsHp || [],
-        participantAnnotationTermsKw: searchResult.componentParams?.normalizedParticipantAnnotationTermsKw || searchResult.componentParams?.participantAnnotationTermsKw || [],
+        ontologyTerms: searchResult.componentParams?.ontologyTerms || [],
         hasDirection: searchResult.componentParams?.hasDirection,
         isPositive: searchResult.componentParams?.isPositive,
         isNegative: searchResult.componentParams?.isNegative,

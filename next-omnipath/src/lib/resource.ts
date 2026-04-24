@@ -1,6 +1,8 @@
 import "server-only";
 
-import { getApiServiceUrl } from "@/lib/api/config";
+import { asc } from "drizzle-orm";
+import { resources } from "@next-omnipath/drizzle";
+import { getDb } from "@/lib/db/client";
 
 export interface ResourceRecord {
   resource_id: string;
@@ -13,14 +15,11 @@ export interface ResourceRecord {
   annotation_ontologies: string[];
   entity_count: number;
   interaction_count: number;
-  association_count: number;
+  membership_count: number;
   annotation_count: number;
   identifier_count: number;
   ontology_term_count: number;
   total_size_bytes: number;
-  download_archive_exists: boolean;
-  download_archive_name: string | null;
-  download_archive_size_bytes: number | null;
   last_downloaded_at: string | null;
   last_built_at: string | null;
   build_status: string | null;
@@ -30,7 +29,7 @@ export interface ResourcesSummary {
   totalResources: number;
   totalEntities: number;
   totalInteractions: number;
-  totalAssociations: number;
+  totalMemberships: number;
   totalAnnotations: number;
   totalIdentifiers: number;
   totalOntologyTerms: number;
@@ -39,19 +38,34 @@ export interface ResourcesSummary {
   categoryCounts: Record<string, number>;
 }
 
+function normalizeTextArray(values: string[] | null | undefined): string[] {
+  return (values || []).filter(Boolean);
+}
+
 export async function listResources(): Promise<ResourceRecord[]> {
-  const apiServiceUrl = getApiServiceUrl();
-  const response = await fetch(`${apiServiceUrl}/resources`, {
-    cache: "no-store",
-  });
+  const db = getDb();
+  const rows = await db.select().from(resources).orderBy(asc(resources.resourceName), asc(resources.resourceId));
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`API resources error: ${response.status} ${text}`);
-  }
-
-  const rows = await response.json() as ResourceRecord[];
-  return rows.sort((a, b) => a.resource_name.localeCompare(b.resource_name));
+  return rows.map((row) => ({
+    resource_id: row.resourceId,
+    resource_name: row.resourceName || row.resourceId,
+    description: row.description,
+    homepage_url: row.homepageUrl,
+    license: row.license,
+    pubmed_id: row.pubmedId,
+    categories: normalizeTextArray(row.categories),
+    annotation_ontologies: normalizeTextArray(row.annotationOntologies),
+    entity_count: row.entityCount || 0,
+    interaction_count: row.interactionCount || 0,
+    membership_count: row.membershipCount || 0,
+    annotation_count: row.annotationCount || 0,
+    identifier_count: row.identifierCount || 0,
+    ontology_term_count: row.ontologyTermCount || 0,
+    total_size_bytes: row.totalSizeBytes || 0,
+    last_downloaded_at: row.lastDownloadedAt,
+    last_built_at: row.lastBuiltAt,
+    build_status: row.buildStatus,
+  }));
 }
 
 export function summarizeResources(resources: ResourceRecord[]): ResourcesSummary {
@@ -60,7 +74,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
 
   let totalEntities = 0;
   let totalInteractions = 0;
-  let totalAssociations = 0;
+  let totalMemberships = 0;
   let totalAnnotations = 0;
   let totalIdentifiers = 0;
   let totalOntologyTerms = 0;
@@ -76,7 +90,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
 
     totalEntities += resource.entity_count || 0;
     totalInteractions += resource.interaction_count || 0;
-    totalAssociations += resource.association_count || 0;
+    totalMemberships += resource.membership_count || 0;
     totalAnnotations += resource.annotation_count || 0;
     totalIdentifiers += resource.identifier_count || 0;
     totalOntologyTerms += resource.ontology_term_count || 0;
@@ -87,7 +101,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
     totalResources: resources.length,
     totalEntities,
     totalInteractions,
-    totalAssociations,
+    totalMemberships,
     totalAnnotations,
     totalIdentifiers,
     totalOntologyTerms,

@@ -187,6 +187,7 @@ export function FilterSidebar({
   isMobile = false,
 }: FilterSidebarProps) {
   const [predicatesByCategory, setPredicatesByCategory] = useState<Record<string, string[]>>({});
+  const [interactionTypeOptions, setInteractionTypeOptions] = useState<FilterOption[]>([]);
   const [sourceOptions, setSourceOptions] = useState<FilterOption[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -197,6 +198,12 @@ export function FilterSidebar({
       .then((options) => {
         if (cancelled) return;
         setPredicatesByCategory(options.predicatesByCategory);
+        setInteractionTypeOptions(
+          options.interactionTypes.map((value) => ({
+            value,
+            label: value,
+          }))
+        );
         setSourceOptions(
           options.sources.map((value) => ({
             value,
@@ -252,6 +259,23 @@ export function FilterSidebar({
           </div>
         </div>
       ))}
+
+      {interactionTypeOptions.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold">Participant types</h4>
+          <div className="space-y-1 max-h-64 overflow-y-auto pr-2">
+            {interactionTypeOptions.map((option) => (
+              <FilterOptionRow
+                key={option.value}
+                filterKey="interaction_types"
+                option={option}
+                selectedValues={filters.interaction_types || []}
+                onToggle={(value) => handleArrayToggle("interaction_types", value)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <h4 className="text-sm font-semibold">Sources</h4>
@@ -397,7 +421,7 @@ export function AnnotationFilterSidebar({
             const prefix = extractPrefix(termId);
             const filterKey = mode === "entities"
               ? getEntityFilterKeyForValue(termId) || undefined
-              : ("interaction_annotation_terms" as keyof SearchFilters);
+              : ("ontology_terms" as keyof SearchFilters);
 
             return {
               value: termId,
@@ -441,7 +465,7 @@ export function AnnotationFilterSidebar({
               prefix,
               filterKey: mode === "entities"
                 ? getEntityFilterKeyForValue(term.termId) || undefined
-                : ("interaction_annotation_terms" as keyof SearchFilters),
+                : ("ontology_terms" as keyof SearchFilters),
             })),
           };
         } catch {
@@ -478,7 +502,7 @@ export function AnnotationFilterSidebar({
       if (mode === "entities") {
         filterKey = getEntityFilterKeyForValue(value) || undefined;
       } else {
-        filterKey = "interaction_annotation_terms";
+        filterKey = "ontology_terms";
       }
     }
     if (!filterKey) return;
@@ -552,7 +576,7 @@ export function AnnotationFilterSidebar({
           {annotationOptions.map((option) => {
             const filterKey = option.filterKey || (mode === "entities"
               ? getEntityFilterKeyForValue(option.value)
-              : "interaction_annotation_terms");
+              : "ontology_terms");
             if (!filterKey) return null;
 
             return (
@@ -584,7 +608,7 @@ export function AnnotationFilterSidebar({
                     {terms.map((option) => {
                       const filterKey = option.filterKey || (mode === "entities"
                         ? getEntityFilterKeyForValue(option.value)
-                        : "interaction_annotation_terms");
+                        : "ontology_terms");
                       if (!filterKey) return null;
 
                       return (

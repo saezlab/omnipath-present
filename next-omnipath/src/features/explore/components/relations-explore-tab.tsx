@@ -52,11 +52,7 @@ async function searchInteractionRows({
   if (filters.entity_ids?.length) {
     const entities = await getEntitiesByPublicIds(filters.entity_ids.map(String));
     entityPks = entities.map((entity) => entity.entityPk);
-    const hasAnnotationConstraints = Boolean(
-      filters.ontology_terms?.length
-      || filters.participant_annotation_terms?.length
-      || filters.interaction_annotation_terms?.length,
-    );
+    const hasAnnotationConstraints = Boolean(filters.ontology_terms?.length);
     if (entityPks.length === 0 && !hasAnnotationConstraints) {
       return { hits: [] };
     }
@@ -72,10 +68,9 @@ async function searchInteractionRows({
       relationCategories,
       entityPks,
       predicates: filters.predicates,
+      interactionTypes: filters.interaction_types,
       sources: filters.sources,
       annotationTerms: filters.ontology_terms,
-      participantAnnotationTerms: filters.participant_annotation_terms,
-      interactionAnnotationTerms: filters.interaction_annotation_terms,
     },
     limit,
     offset,

@@ -17,8 +17,9 @@ function toRelationRow(row: {
   predicate: string;
   object_entity_pk: string | number;
   relation_category: string;
+  participant_types: string[] | null;
   evidence_count: string | number;
-  sources: string[];
+  sources: string[] | null;
 }): EntityRelation {
   return {
     relationPk: Number(row.relation_pk),
@@ -26,8 +27,9 @@ function toRelationRow(row: {
     predicate: row.predicate,
     objectEntityPk: Number(row.object_entity_pk),
     relationCategory: row.relation_category,
+    participantTypes: (row.participant_types || []).filter(Boolean),
     evidenceCount: Number(row.evidence_count),
-    sources: row.sources,
+    sources: (row.sources || []).filter(Boolean),
   };
 }
 
@@ -64,13 +66,12 @@ export async function getRelationsByPks(pks: number[]): Promise<EntityRelation[]
 export interface RelationFilters {
   relationCategories?: string[];
   predicates?: string[];
+  interactionTypes?: string[];
   subjectEntityPks?: number[];
   objectEntityPks?: number[];
   entityPks?: number[];
   sources?: string[];
   annotationTerms?: string[];
-  interactionAnnotationTerms?: string[];
-  participantAnnotationTerms?: string[];
 }
 
 function normalizeNumberValues(values: number[] | undefined): number[] {
@@ -97,6 +98,11 @@ function buildRelationSearchWhere(filters: RelationFilters) {
 
   if (filters.predicates?.length) {
     whereParts.push(`predicate = ANY(${pushParam(filters.predicates, "text[]")})`);
+  }
+
+  const interactionTypes = normalizeStringValues(filters.interactionTypes);
+  if (interactionTypes.length) {
+    whereParts.push(`participant_types @> ${pushParam(interactionTypes, "text[]")}`);
   }
 
   const subjectEntityPks = normalizeNumberValues(filters.subjectEntityPks);
@@ -154,8 +160,9 @@ export async function searchRelations({
       predicate: string;
       object_entity_pk: string | number;
       relation_category: string;
+      participant_types: string[] | null;
       evidence_count: string | number;
-      sources: string[];
+      sources: string[] | null;
     }>(
       `SELECT *
        FROM entity_relation
@@ -189,15 +196,23 @@ export async function countRelations(filters: RelationFilters = {}): Promise<num
 }
 
 let relationFilterOptionsCache:
-  | { value: { predicatesByCategory: Record<string, string[]>; sources: string[] }; expiresAt: number }
+  | {
+      value: {
+        predicatesByCategory: Record<string, string[]>;
+        sources: string[];
+        interactionTypes: string[];
+      };
+      expiresAt: number;
+    }
   | null = null;
 let relationFilterOptionsInFlight:
-  | Promise<{ predicatesByCategory: Record<string, string[]>; sources: string[] }>
+  | Promise<{ predicatesByCategory: Record<string, string[]>; sources: string[]; interactionTypes: string[] }>
   | null = null;
 
 export async function getRelationFilterOptions(): Promise<{
   predicatesByCategory: Record<string, string[]>;
   sources: string[];
+  interactionTypes: string[];
 }> {
   const now = Date.now();
   if (relationFilterOptionsCache && relationFilterOptionsCache.expiresAt > now) {
@@ -211,7 +226,7 @@ export async function getRelationFilterOptions(): Promise<{
     const client = await getPool().connect();
     try {
       const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
-      const [predicateResult, sourceResult] = await Promise.all([
+      const [predicateResult, sourceResult, interactionTypeResult] = await Promise.all([
         client.query<{ category: string; predicates: string[] | null }>(
           `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
            FROM (
@@ -230,6 +245,16 @@ export async function getRelationFilterOptions(): Promise<{
              WHERE source.value <> ''
            ) t`,
         ),
+        client.query<{ values: string[] | null }>(
+          `SELECT array_agg(value ORDER BY value) AS values
+           FROM (
+             SELECT DISTINCT participant_type.value AS value
+             FROM ${SEARCH_SCHEMA}.entity_relation r
+             CROSS JOIN LATERAL unnest(r.participant_types) AS participant_type(value)
+             WHERE r.relation_category = 'interaction'
+               AND participant_type.value <> ''
+           ) t`,
+        ),
       ]);
 
       const value = {
@@ -237,6 +262,7 @@ export async function getRelationFilterOptions(): Promise<{
           predicateResult.rows.map((row) => [row.category, row.predicates?.filter(Boolean) ?? []]),
         ),
         sources: sourceResult.rows[0]?.values?.filter(Boolean) ?? [],
+        interactionTypes: interactionTypeResult.rows[0]?.values?.filter(Boolean) ?? [],
       };
 
       relationFilterOptionsCache = {

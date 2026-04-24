@@ -254,14 +254,24 @@ export function InteractionDetails({ selectedInteraction, evidenceLoading = fals
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border-t pt-4">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-primary">{selectedInteraction.relation.evidenceCount}</div>
-            <div className="text-xs text-muted-foreground">Evidence{selectedInteraction.relation.evidenceCount !== 1 ? "s" : ""}</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">{annotationTermCount}</div>
-            <div className="text-xs text-muted-foreground">Annotation Term{annotationTermCount !== 1 ? "s" : ""}</div>
+        <div className="space-y-4 border-t pt-4">
+          {selectedInteraction.relation.participantTypes.length > 0 ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              {selectedInteraction.relation.participantTypes.map((participantType) => (
+                <Badge key={participantType} variant="secondary">{participantType}</Badge>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary">{selectedInteraction.relation.evidenceCount}</div>
+              <div className="text-xs text-muted-foreground">Evidence{selectedInteraction.relation.evidenceCount !== 1 ? "s" : ""}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-purple-600">{annotationTermCount}</div>
+              <div className="text-xs text-muted-foreground">Annotation Term{annotationTermCount !== 1 ? "s" : ""}</div>
+            </div>
           </div>
         </div>
       </div>

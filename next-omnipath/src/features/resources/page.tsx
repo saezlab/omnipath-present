@@ -3,7 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ResourceRecord, ResourcesSummary } from "@/lib/resource";
-import { downloadResourceSelection } from "@/lib/resource-downloads";
 import { cn, formatNumber } from "@/lib/utils";
 import {
   Check,
@@ -11,7 +10,6 @@ import {
   ChevronUp,
   Copy,
   Database,
-  Download,
   ExternalLink,
   Layers3,
   Network,
@@ -57,7 +55,7 @@ function formatDate(value: string | null | undefined): string {
 function iconForCategories(categories: string[]) {
   if (categories.includes("interaction")) return Network;
   if (categories.includes("annotation")) return Layers3;
-  if (categories.includes("association")) return Tags;
+  if (categories.includes("membership") || categories.includes("association")) return Tags;
   return Database;
 }
 
@@ -108,11 +106,10 @@ function ResourceCard({
   const stats = [
     { label: "Entities", value: resource.entity_count },
     { label: "Interactions", value: resource.interaction_count },
-    { label: "Associations", value: resource.association_count },
+    { label: "Memberships", value: resource.membership_count },
     { label: "Annotations", value: resource.annotation_count },
     { label: "Ontology Terms", value: resource.ontology_term_count },
   ].filter((stat) => stat.value > 0);
-  const canDownloadArchive = resource.build_status === "success" && resource.download_archive_exists;
 
   return (
     <article
@@ -183,19 +180,10 @@ function ResourceCard({
             )}
           </button>
 
-          {canDownloadArchive ? (
-            <Button asChild className="rounded-full">
-              <a href={`/api/resources/${encodeURIComponent(resource.resource_id)}/download`}>
-                Download
-                <Download className="h-4 w-4" />
-              </a>
-            </Button>
-          ) : (
-            <Button className="rounded-full" variant="outline" disabled>
-              Download
-              <Download className="h-4 w-4" />
-            </Button>
-          )}
+          <Button className="rounded-full" variant={selected ? "default" : "outline"} onClick={onToggle}>
+            {selected ? "Selected" : "Select"}
+            {selected ? <Check className="h-4 w-4" /> : null}
+          </Button>
         </div>
 
         {expanded ? (
@@ -229,16 +217,16 @@ function ResourceCard({
                 <dd className="max-w-[65%] text-right text-foreground/90 break-words">{resource.license || "—"}</dd>
               </div>
               <div className="flex items-start justify-between gap-4">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Downloaded</dt>
+                <dd className="text-right text-foreground/90">{formatDate(resource.last_downloaded_at)}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
                 <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Last Built</dt>
                 <dd className="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd>
               </div>
               <div className="flex items-start justify-between gap-4">
                 <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Snapshot Size</dt>
                 <dd className="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd>
-              </div>
-              <div className="flex items-start justify-between gap-4">
-                <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Download Size</dt>
-                <dd className="text-right text-foreground/90">{formatFileSize(resource.download_archive_size_bytes)}</dd>
               </div>
             </dl>
 
@@ -284,8 +272,6 @@ export default function ResourcesPage({
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const [downloadingSelection, setDownloadingSelection] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const categories = useMemo(
     () => ["all", ...Object.keys(summary.categoryCounts).sort((a, b) => a.localeCompare(b))],
@@ -337,20 +323,6 @@ export default function ResourcesPage({
     window.setTimeout(() => setCopied(false), 1500);
   }
 
-  async function handleSelectionDownload() {
-    if (selectedIds.length === 0) return;
-
-    try {
-      setDownloadError(null);
-      setDownloadingSelection(true);
-      await downloadResourceSelection(selectedIds);
-    } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : "Download failed.");
-    } finally {
-      setDownloadingSelection(false);
-    }
-  }
-
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 md:px-6 md:py-5">
       <div className="min-h-0 flex-1 overflow-y-auto pb-32 pr-1">
@@ -361,7 +333,7 @@ export default function ResourcesPage({
                 <div className="min-w-0 flex-1">
                   <div className="text-xl font-semibold tracking-tight">Resource catalog</div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Browse curated OmniPath resources and open focused local workspaces.
+                    Browse curated OmniPath resources directly from the local catalog table.
                   </p>
                 </div>
 
@@ -390,6 +362,8 @@ export default function ResourcesPage({
                 <span>{formatNumber(summary.totalEntities)} entities</span>
                 <span>•</span>
                 <span>{formatNumber(summary.totalInteractions)} interactions</span>
+                <span>•</span>
+                <span>{formatNumber(summary.totalMemberships)} memberships</span>
                 <span>•</span>
                 <span>{formatNumber(summary.totalAnnotations)} annotations</span>
               </div>
@@ -435,7 +409,6 @@ export default function ResourcesPage({
               <div>
                 <div className="text-base font-medium">{selectedResources.length} resources selected</div>
                 <div className="text-sm text-muted-foreground">Estimated total size: {formatFileSize(selectedTotalBytes)}</div>
-                {downloadError ? <div className="mt-1 text-sm text-destructive">{downloadError}</div> : null}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <Button variant="ghost" onClick={() => setSelectedIds([])}>
@@ -444,10 +417,6 @@ export default function ResourcesPage({
                 <Button variant="outline" onClick={copySelectedIds}>
                   {copied ? "Copied IDs" : "Copy selected IDs"}
                   <Copy className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" onClick={handleSelectionDownload} disabled={downloadingSelection}>
-                  {downloadingSelection ? "Preparing bundle…" : "Download selection"}
-                  <Download className="h-4 w-4" />
                 </Button>
               </div>
             </div>

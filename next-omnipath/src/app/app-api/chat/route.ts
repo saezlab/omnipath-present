@@ -327,26 +327,16 @@ Do not use broad entity search as a substitute for identifier resolution when an
     inputSchema: z.object({
       entityIds: z.array(z.string()).optional().describe("Canonical string entity IDs to filter interactions by. Use resolveEntityIdentifiers first for anchored searches."),
       interactionTypes: z.array(z.string()).optional().describe("Optional filter by canonical interaction type values (for example 'protein:MI:0326|protein:MI:0326'). These are pair/type values, not annotation terms."),
-      interactionAnnotationTerms: z.array(z.string()).optional().describe("Optional interaction-level annotation terms. Use MI terms only."),
-      participantAnnotationTermsGo: z.array(z.string()).optional().describe("Optional participant-level GO annotation terms."),
-      participantAnnotationTermsMi: z.array(z.string()).optional().describe("Optional participant-level MI annotation terms."),
-      participantAnnotationTermsOm: z.array(z.string()).optional().describe("Optional participant-level OM annotation terms."),
-      participantAnnotationTermsHp: z.array(z.string()).optional().describe("Optional participant-level HP annotation terms."),
-      participantAnnotationTermsKw: z.array(z.string()).optional().describe("Optional participant-level KW annotation terms."),
+      ontologyTerms: z.array(z.string()).optional().describe("Optional ontology term IDs for interaction filtering. In the UI these are selected from the ontology browser."),
       hasDirection: z.boolean().optional().describe("Optional filter for directed (true) or undirected (false) interactions."),
       isPositive: z.boolean().optional().describe("Optional filter for positive (activation/upregulation) interactions."),
       isNegative: z.boolean().optional().describe("Optional filter for negative (inhibition/downregulation) interactions."),
       sources: z.array(z.string()).optional().describe("Optional filter by data source prefixes"),
     }),
-    execute: async ({ entityIds, sources }: {
+    execute: async ({ entityIds, interactionTypes, ontologyTerms, sources }: {
       entityIds?: string[];
       interactionTypes?: string[];
-      interactionAnnotationTerms?: string[];
-      participantAnnotationTermsGo?: string[];
-      participantAnnotationTermsMi?: string[];
-      participantAnnotationTermsOm?: string[];
-      participantAnnotationTermsHp?: string[];
-      participantAnnotationTermsKw?: string[];
+      ontologyTerms?: string[];
       hasDirection?: boolean;
       isPositive?: boolean;
       isNegative?: boolean;
@@ -392,6 +382,8 @@ Do not use broad entity search as a substitute for identifier resolution when an
         return {
           componentParams: {
             entityIds,
+            interactionTypes,
+            ontologyTerms,
             sources,
           },
           exampleInteractions,

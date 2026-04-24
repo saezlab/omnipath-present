@@ -33,8 +33,7 @@ const schemas: Record<string, Row[]> = {
     ["evidence", "List(Struct{ evidence_serial, source, interaction_annotations, member_a_annotations, member_b_annotations })", "[{ evidence_serial: 1, source: \"SIGNOR:OM:1152\", ... }]"],
     ["evidence_count", "Int64", "3"],
     ["sources", "List(String)", "[\"SIGNOR:OM:1152\"]"],
-    ["interaction_annotation_terms", "List(String)", "[\"MI:0217\"]"],
-    ["participant_annotation_terms", "List(String)", "[\"GO:0004672\", \"MI:0326\", \"CHEBI:15377\"]"],
+    ["ontology_terms", "List(String)", "[\"MI:0217\", \"GO:0004672\", \"CHEBI:15377\"]"],
   ],
   associations: [
     ["association_id", "Int64", "948211"],
@@ -64,9 +63,7 @@ const filters: Record<"entities" | "interactions" | "associations", FilterRow[]>
     ["interaction_types", "string[]", "Interaction type terms"],
     ["direction", '"any" | "directed" | "undirected"', "Directedness filter"],
     ["sign", '"any" | "positive" | "negative" | "mixed"', "Interaction sign filter"],
-    ["interaction_annotation_terms", "string[]", "Ontology annotation terms on the interaction itself"],
-    ["participant_annotation_terms", "string[]", "Ontology annotation terms aggregated from interaction participants"],
-    ["ontology_terms", "string[]", "Alias merged into interaction_annotation_terms"],
+    ["ontology_terms", "string[]", "Ontology term IDs selected from the ontology browser"],
     ["sources", "string[]", "Datasource terms"],
   ],
   associations: [
@@ -110,8 +107,7 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
     interactions: {
       interaction_types: [],
       sources: [],
-      interaction_annotation_terms: [],
-      participant_annotation_terms: [],
+      ontology_terms: [],
       direction: [
         { value: "any" },
         { value: "directed" },
@@ -123,7 +119,6 @@ async function getAllFacetExamples(): Promise<FacetExamples> {
         { value: "negative" },
         { value: "mixed" },
       ],
-      ontology_terms: [],
     },
     associations: {
       parent_entity_types: [],

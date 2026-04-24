@@ -21,7 +21,6 @@ import { EntityDetailsDialog } from "./entity-details-dialog";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
 import {
   classifyEntityIdentifiers,
-  getEntityDescriptions,
   getEntityDisplayName,
   getEntityIdentifiers,
   getEntityPublicId,
@@ -142,6 +141,27 @@ const convertEmToHighlight = (text: string | undefined) => {
 };
 
 const stripHtml = (text: string): string => text.replace(/<[^>]*>/g, '');
+
+const DESCRIPTION_ATTRIBUTE_TERM_KEYS = [
+  "OM:0603:Function",
+  "OM:0605:Disease",
+  "OM:0604:Subcellular Location",
+] as const;
+
+const getAllowedEntityDescriptions = (entity: EntityLike): string[] => {
+  if (!Array.isArray(entity.entityAttributes)) return [];
+
+  const allowedTerms = new Set(DESCRIPTION_ATTRIBUTE_TERM_KEYS.map((term) => term.toLowerCase()));
+
+  return entity.entityAttributes
+    .flatMap((attribute) => {
+      if (!attribute || typeof attribute !== "object") return [];
+      const term = typeof attribute.term === "string" ? attribute.term.trim().toLowerCase() : "";
+      const value = typeof attribute.value === "string" ? attribute.value.trim() : "";
+      if (!term || !value || !allowedTerms.has(term)) return [];
+      return [value];
+    });
+};
 
 type DescriptionSection = {
   label: string;
@@ -555,7 +575,7 @@ export function ResultCard({ result }: { result: SearchResult | EntityLike }) {
   };
 
   // Extract data based on type
-  const descriptions = entity ? getEntityDescriptions(entity) : (searchResult.descriptions || []);
+  const descriptions = entity ? getAllowedEntityDescriptions(entity) : (searchResult.descriptions || []);
   const { names, geneSymbols, synonyms } = entity
     ? classifyEntityIdentifiers(entity)
     : { names: searchResult.names || [], geneSymbols: searchResult.gene_symbols || [], synonyms: searchResult.synonyms || [] };
@@ -776,7 +796,7 @@ export function ResultCardContent({ result }: { result: SearchResult | EntityLik
   const type = ('type' in result && result.type) || "entity";
   const entity = type === 'entity' ? result as EntityLike : null;
 
-  const descriptions = entity ? getEntityDescriptions(entity) : ((result as SearchResult).descriptions || []);
+  const descriptions = entity ? getAllowedEntityDescriptions(entity) : ((result as SearchResult).descriptions || []);
   const namespaceName = 'namespace_name' in result ? result.namespace_name : undefined;
   const definition = 'definition' in result ? result.definition : undefined;
   const descriptionSections = getDescriptionSections(definition, descriptions);
