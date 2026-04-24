@@ -1,6 +1,6 @@
 # API Service
 
-REST API for querying biological ontologies using [ontograph](https://github.com/saezlab/ontograph).
+REST API for querying biological ontologies and serving graph-native OmniPath data slices/exports.
 
 ## Preloaded Ontologies
 
@@ -23,10 +23,12 @@ uv sync
 uv run uvicorn api_service.main:app --reload --port 8081
 ```
 
-For resource download endpoints, point the service at the gold resource root if it is not auto-detected:
+For graph data endpoints, point the service at the combined parquet folder and Postgres database. For resource downloads, point it at the gold zip root if it is not auto-detected:
 
 ```bash
-export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
+export ONTOLOGY_DATA_DIR=/path/to/omnipath_build/data/combined
+export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data/gold
+export DATABASE_URL=postgresql://user:password@localhost:5432/omnipath
 ```
 
 ## API Endpoints
@@ -43,7 +45,6 @@ export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
 | GET | `/{ontology}/term/{id}` | Get term info (name, definition) |
 | POST | `/terms` | Batch term lookup |
 | POST | `/terms/search` | Search ontology terms by label or synonym |
-| POST | `/entity-lookup` | Resolve raw identifiers to candidate entity IDs and attached entity documents |
 
 ### Navigation
 | Method | Path | Description |
@@ -59,14 +60,20 @@ export OMNIPATH_GOLD_ROOT=/path/to/omnipath_build/data_v2/gold
 | GET | `/{ontology}/term/{id}/trajectories` | All paths from root to term |
 | POST | `/tree` | Merged tree for multiple terms |
 
-### Data Export
+### Graph data
 | Method | Path | Description |
 |--------|------|-------------|
-| POST / GET | `/exports/interactions/parquet` | Export filtered interactions as Parquet subset |
+| POST | `/entities/resolve` | Resolve identifiers to numeric `entity_pk` values using Postgres |
+| POST | `/entities/slice` | Return a filtered JSON slice from `entity.parquet` |
+| POST | `/relations/slice` | Return a filtered JSON slice from `entity_relation.parquet` |
 | POST / GET | `/exports/entities/parquet` | Export filtered entities as Parquet subset |
-| POST / GET | `/exports/associations/parquet` | Export filtered associations as Parquet subset |
-| GET | `/resources/{resource_id}/download` | Download the prebuilt zip archive for the current gold version of one resource |
-| POST | `/resources/download` | Bundle multiple selected resource gold artifact sets into one zip |
+| POST / GET | `/exports/relations/parquet` | Export filtered relations as Parquet subset |
+| GET | `/relations/{relation_pk}/evidence` | Return evidence rows for a relation |
+| GET | `/relation-evidence/{relation_evidence_pk}` | Return one relation evidence row |
+| GET | `/resources/{resource_id}/download` | Download `gold/<resource>/<resource>.zip` |
+| POST | `/resources/download` | Bundle multiple selected resource zip archives into one zip |
+
+Relation categories are `interaction`, `membership`, and `annotation`. Resource workspace endpoints and old `search_*.parquet` export endpoints are retired.
 
 ## Examples
 

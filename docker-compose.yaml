@@ -8,58 +8,11 @@
 #   DATA_DIR=../data/releases/latest  (staging, symlink)
 #   DATA_DIR=../data/releases/v-20260225-071916  (prod, pinned)
 #
-# GOLD_ROOT_DIR must be set to the root of versioned gold resource outputs, e.g.:
-#   GOLD_ROOT_DIR=../omnipath_build/data_v2/gold
+# GOLD_ROOT_DIR must be set to the root of gold resource zip outputs, e.g.:
+#   GOLD_ROOT_DIR=../omnipath_build/data/gold
 
 services:
-    # Meilisearch - Full-text search engine
-    # NOTE: Data is populated by omnipath_build (direct import), not by omnipath-present.
-    omnipath-meilisearch:
-        image: getmeili/meilisearch:v1.36
-        restart: unless-stopped
-        ulimits:
-            nofile:
-                soft: 65535
-                hard: 65535
-        environment:
-            MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY}
-            MEILI_ENV: ${MEILI_ENV:-production}
-            MEILI_NO_ANALYTICS: "true"
-        volumes:
-            - meilisearch_data:/meili_data
-        ports:
-            - "${MEILISEARCH_PORT:-7700}:7700"
-        networks:
-            - dokploy-network
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
-            interval: 30s
-            timeout: 30s
-            retries: 20
-            start_period: 15m
-
-    # Entity Resolver Service - Parquet-based entity lookup
-    entity-resolver-service:
-        build:
-            context: ./entity-service
-            dockerfile: Dockerfile
-        restart: unless-stopped
-        environment:
-            ENTITY_PARQUET_PATH: /data/entity_identifier.parquet
-            BIND_ADDR: 0.0.0.0:8080
-            RUST_LOG: ${RUST_LOG:-info}
-        volumes:
-            - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
-        networks:
-            - dokploy-network
-        healthcheck:
-            test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 10s
-
-    # API Service - FastAPI wrapper for ontograph + exports
+    # API Service - FastAPI wrapper for ontograph + graph-native exports
     api-service:
         build:
             context: .
@@ -71,7 +24,7 @@ services:
             OMNIPATH_GOLD_ROOT: /gold
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
-            ENTITY_SERVICE_URL: http://entity-resolver-service:8080
+            DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
         volumes:
             - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
             - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
@@ -112,8 +65,6 @@ services:
         depends_on:
             omnipath-meilisearch:
                 condition: service_healthy
-            entity-resolver-service:
-                condition: service_healthy
             api-service:
                 condition: service_healthy
 
@@ -122,7 +73,5 @@ networks:
         external: true
 
 volumes:
-    meilisearch_data:
-        name: ${MEILISEARCH_VOLUME_NAME:-omnipath-meilisearch}
     ontology_cache:
         name: ${ONTOLOGY_CACHE_VOLUME_NAME:-omnipath-ontology-cache}

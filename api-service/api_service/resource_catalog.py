@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import polars as pl
 from fastapi import HTTPException
 
-from .resource_downloads import get_gold_root
+
+def get_data_root() -> Path:
+    return Path(os.getenv("ONTOLOGY_DATA_DIR", "./data")).expanduser().resolve()
 
 
 def get_resources_parquet_path() -> Path:
-    parquet_path = get_gold_root() / "resources.parquet"
+    parquet_path = get_data_root() / "resources.parquet"
     if not parquet_path.exists() or not parquet_path.is_file():
         raise HTTPException(status_code=404, detail=f"Resources parquet not found: {parquet_path}")
     return parquet_path

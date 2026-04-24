@@ -101,97 +101,71 @@ class OntologiesResponse(BaseModel):
     ontologies: list[OntologyInfo]
 
 
-class InteractionDirectionFilter(str):
-    ANY = "any"
-    DIRECTED = "directed"
-    UNDIRECTED = "undirected"
+RelationCategory = Literal["interaction", "membership", "annotation"]
 
 
-class InteractionSignFilter(str):
-    ANY = "any"
-    POSITIVE = "positive"
-    NEGATIVE = "negative"
-    MIXED = "mixed"
+class EntityFilters(BaseModel):
+    """Graph-native filters for entity slices/exports."""
 
-
-class InteractionExportFilters(BaseModel):
-    """Typed filters for interaction exports."""
-
-    entity_ids: list[str] = Field(default_factory=list)
-    member_a_id: str | None = None
-    member_b_id: str | None = None
-    interaction_types: list[str] = Field(default_factory=list)
-
-    # New, clearer API fields
-    direction: Literal["any", "directed", "undirected"] | None = None
-    sign: Literal["any", "positive", "negative", "mixed"] | None = None
-
-    # Backward-compatible fields currently used in UI
-    has_direction: bool | None = None
-    has_positive_sign: bool | None = None
-    has_negative_sign: bool | None = None
-
-    # Ontology term filters
-    interaction_annotation_terms: list[str] = Field(default_factory=list)
-    participant_annotation_terms: list[str] = Field(default_factory=list)
-    ontology_terms: list[str] = Field(default_factory=list)
-
-    sources: list[str] = Field(default_factory=list)
-
-
-class EntityExportFilters(BaseModel):
-    """Typed filters for entity exports."""
-
-    entity_ids: list[str] = Field(default_factory=list)
+    entity_pks: list[int] = Field(default_factory=list)
+    entity_ids: list[int] = Field(default_factory=list)
     entity_types: list[str] = Field(default_factory=list)
-    sources: list[str] = Field(default_factory=list)
-
-    # New API alias for species filtering
     taxonomy_ids: list[str] = Field(default_factory=list)
-    # Backward-compatible key used by current clients
     ncbi_tax_id: list[str] = Field(default_factory=list)
-
-    # Unified ontology term filters
-    ontology_terms: list[str] = Field(default_factory=list)
-
-
-class AssociationExportFilters(BaseModel):
-    """Typed filters for association exports."""
-
-    parent_entity_ids: list[str] = Field(default_factory=list)
-    member_entity_ids: list[str] = Field(default_factory=list)
-
-    parent_entity_types: list[str] = Field(default_factory=list)
-    member_entity_types: list[str] = Field(default_factory=list)
-
     sources: list[str] = Field(default_factory=list)
 
-    association_annotation_terms: list[str] = Field(default_factory=list)
+
+class RelationFilters(BaseModel):
+    """Graph-native filters for relation slices/exports."""
+
+    relation_pks: list[int] = Field(default_factory=list)
+    subject_entity_pks: list[int] = Field(default_factory=list)
+    object_entity_pks: list[int] = Field(default_factory=list)
+    entity_pks: list[int] = Field(default_factory=list)
+    entity_ids: list[int] = Field(default_factory=list)
+    predicates: list[str] = Field(default_factory=list)
+    interaction_types: list[str] = Field(default_factory=list)
+    relation_categories: list[RelationCategory] = Field(default_factory=list)
+    participant_types: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    annotation_terms: list[str] = Field(default_factory=list)
+    # UI filter key currently used for ontology-term scoped relation filters.
     ontology_terms: list[str] = Field(default_factory=list)
-
-
-class InteractionExportRequest(BaseModel):
-    """Request payload for interaction subset export."""
-
-    query: str = ""
-    filters: InteractionExportFilters = Field(default_factory=InteractionExportFilters)
-    filename: str | None = None
+    annotation_scopes: list[str] = Field(default_factory=list)
 
 
 class EntityExportRequest(BaseModel):
     """Request payload for entity subset export."""
 
     query: str = ""
-    filters: EntityExportFilters = Field(default_factory=EntityExportFilters)
+    filters: EntityFilters = Field(default_factory=EntityFilters)
     filename: str | None = None
 
 
-class AssociationExportRequest(BaseModel):
-    """Request payload for association subset export."""
+class RelationExportRequest(BaseModel):
+    """Request payload for relation subset export."""
 
     query: str = ""
-    filters: AssociationExportFilters = Field(default_factory=AssociationExportFilters)
+    filters: RelationFilters = Field(default_factory=RelationFilters)
     filename: str | None = None
+
+
+class SliceRequest(BaseModel):
+    """Request payload for filtered JSON slices."""
+
+    query: str = ""
+    filters: dict[str, Any] = Field(default_factory=dict)
+    limit: int = Field(default=50, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+
+
+class SliceResponse(BaseModel):
+    """Filtered slice response."""
+
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    total: int | None = None
+    limit: int
+    offset: int
 
 
 class ResourceDownloadRequest(BaseModel):
@@ -201,37 +175,23 @@ class ResourceDownloadRequest(BaseModel):
     filename: str | None = None
 
 
-class ResourceWorkspaceRequest(BaseModel):
-    """Request payload for opening one or more resources in DuckDB."""
-
-    resource_ids: list[str] = Field(default_factory=list)
-
-
-class EvidenceLookupResponse(BaseModel):
-    """Evidence lookup response for a single interaction or association."""
-
-    id: int
-    key: str
-    evidence: list[dict]
-
-
-class EntityLookupRequest(BaseModel):
-    """Request payload for identifier-to-entity resolution."""
+class EntityResolveRequest(BaseModel):
+    """Request payload for identifier-to-entity_pk resolution."""
 
     identifiers: list[str] = Field(default_factory=list)
 
 
-class EntityLookupMatch(BaseModel):
-    """Resolved entity IDs for one queried identifier."""
+class EntityResolveMatch(BaseModel):
+    """Resolved entity PKs for one queried identifier."""
 
     identifier: str
-    entityIds: list[str] = Field(default_factory=list)
+    entityPks: list[int] = Field(default_factory=list)
 
 
-class EntityLookupResponse(BaseModel):
-    """Identifier lookup response including matched entity documents."""
+class EntityResolveResponse(BaseModel):
+    """Identifier lookup response including matched entity rows."""
 
-    matches: list[EntityLookupMatch] = Field(default_factory=list)
+    matches: list[EntityResolveMatch] = Field(default_factory=list)
     entities: list[dict[str, Any]] = Field(default_factory=list)
 
 

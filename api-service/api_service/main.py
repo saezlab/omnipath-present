@@ -12,9 +12,6 @@ from time import perf_counter
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
-import httpx
-import polars as pl
-from ontograph.queries.introspection import IntrospectionPronto
 from pydantic import ValidationError
 
 from .models import (
@@ -30,26 +27,22 @@ from .models import (
     TreeResponse,
     OntologyInfo,
     OntologiesResponse,
-    InteractionExportRequest,
     EntityExportRequest,
-    AssociationExportRequest,
+    RelationExportRequest,
     ResourceDownloadRequest,
-    ResourceWorkspaceRequest,
-    EvidenceLookupResponse,
-    EntityLookupRequest,
-    EntityLookupMatch,
-    EntityLookupResponse,
+    SliceRequest,
+    SliceResponse,
+    EntityResolveRequest,
+    EntityResolveMatch,
+    EntityResolveResponse,
 )
 from .registry import registry
-from .exports import INTERACTIONS_PARQUET, ASSOCIATIONS_PARQUET, ENTITIES_PARQUET
 from .resource_catalog import list_resources
 from .resource_downloads import build_multi_resource_download, build_single_resource_download
-from .resource_workspace import build_workspace_manifest, resolve_workspace_artifact
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ENTITY_SERVICE_URL = os.getenv("ENTITY_SERVICE_URL", "http://localhost:8080")
 
 
 @asynccontextmanager
@@ -246,41 +239,6 @@ async def health():
     return {"status": "ok"}
 
 
-def _load_evidence_row(parquet_path: Path, id_column: str, key_column: str, record_id: int) -> EvidenceLookupResponse:
-    """Load a single evidence-bearing row from parquet by numeric ID."""
-    if not parquet_path.exists():
-        raise HTTPException(status_code=500, detail=f"Missing parquet file: {parquet_path}")
-
-    df = (
-        pl.scan_parquet(str(parquet_path))
-        .filter(pl.col(id_column) == record_id)
-        .select([id_column, key_column, "evidence"])
-        .collect(streaming=True)
-    )
-
-    if df.is_empty():
-        raise HTTPException(status_code=404, detail=f"Record '{record_id}' not found")
-
-    row = df.row(0, named=True)
-    return EvidenceLookupResponse(
-        id=int(row[id_column]),
-        key=str(row[key_column]),
-        evidence=list(row.get("evidence") or []),
-    )
-
-
-@app.get("/interactions/{interaction_id}/evidence", response_model=EvidenceLookupResponse)
-async def get_interaction_evidence(interaction_id: int):
-    """Return full evidence payload for a single interaction."""
-    return _load_evidence_row(INTERACTIONS_PARQUET, "interaction_id", "interaction_key", interaction_id)
-
-
-@app.get("/associations/{association_id}/evidence", response_model=EvidenceLookupResponse)
-async def get_association_evidence(association_id: int):
-    """Return full evidence payload for a single association."""
-    return _load_evidence_row(ASSOCIATIONS_PARQUET, "association_id", "association_key", association_id)
-
-
 # --- Ontology listing ---
 
 @app.get("/ontologies", response_model=OntologiesResponse)
@@ -297,55 +255,85 @@ async def list_ontologies():
     return OntologiesResponse(ontologies=ontologies)
 
 
-def _load_entity_documents(entity_ids: list[str]) -> list[dict]:
-    """Load entity search documents for resolved entity IDs."""
-    if not entity_ids:
-        return []
-
-    if not ENTITIES_PARQUET.exists():
-        raise HTTPException(status_code=500, detail=f"Missing parquet file: {ENTITIES_PARQUET}")
-
-    df = (
-        pl.scan_parquet(str(ENTITIES_PARQUET))
-        .filter(pl.col("entity_id").is_in(entity_ids))
-        .collect(streaming=True)
-    )
-
-    if df.is_empty():
-        return []
-
-    docs = df.to_dicts()
-    order = {entity_id: idx for idx, entity_id in enumerate(entity_ids)}
-    docs.sort(key=lambda row: order.get(str(row.get("entity_id")), len(order)))
-    return docs
+def _database_url() -> str:
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+    return url
 
 
-@app.post("/entity-lookup", response_model=EntityLookupResponse)
-async def entity_lookup(request: EntityLookupRequest):
-    """Resolve raw identifiers to candidate OmniPath entity IDs and attach entity documents."""
-    identifiers = [identifier.strip() for identifier in request.identifiers if identifier.strip()]
+def _normalize_identifiers(identifiers: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for identifier in identifiers:
+        value = str(identifier).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+@app.post("/entities/resolve", response_model=EntityResolveResponse)
+def resolve_entities(request: EntityResolveRequest):
+    """Resolve raw identifiers to candidate entity primary keys using Postgres."""
+    identifiers = _normalize_identifiers(request.identifiers)
     if not identifiers:
         raise HTTPException(status_code=400, detail="No identifiers provided")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(f"{ENTITY_SERVICE_URL}/lookup", json={"identifiers": identifiers})
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text
-        raise HTTPException(status_code=502, detail=f"Entity service error: {exc.response.status_code} {detail}") from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Entity service unavailable: {exc}") from exc
+        import psycopg
+        from psycopg.rows import dict_row
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="Postgres driver is not installed") from exc
 
-    payload = response.json()
-    results = payload.get("results") or {}
-    matches = [
-        EntityLookupMatch(identifier=identifier, entityIds=list(results.get(identifier) or []))
-        for identifier in identifiers
-    ]
-    all_entity_ids = list(dict.fromkeys(entity_id for match in matches for entity_id in match.entityIds))
-    entities = _load_entity_documents(all_entity_ids)
-    return EntityLookupResponse(matches=matches, entities=entities)
+    query = """
+        SELECT
+            ei.identifier,
+            e.entity_pk,
+            e.canonical_identifier,
+            e.canonical_identifier_type,
+            e.entity_type,
+            e.taxonomy_id,
+            e.entity_attributes,
+            e.sources
+        FROM entity_identifier ei
+        JOIN entity e ON e.entity_pk = ei.entity_pk
+        WHERE {where_clause}
+        ORDER BY e.entity_pk
+    """
+
+    with psycopg.connect(_database_url(), row_factory=dict_row) as conn:
+        exact_rows = list(conn.execute(query.format(where_clause="ei.identifier = ANY(%s)"), (identifiers,)))
+        exact_keys = {str(row["identifier"]).lower() for row in exact_rows}
+        lowered_misses = sorted({identifier.lower() for identifier in identifiers if identifier.lower() not in exact_keys})
+        fallback_rows = list(conn.execute(query.format(where_clause="LOWER(ei.identifier) = ANY(%s)"), (lowered_misses,))) if lowered_misses else []
+
+    match_map: dict[str, list[int]] = {}
+    entities_by_pk: dict[int, dict] = {}
+    for row in [*exact_rows, *fallback_rows]:
+        entity_pk = int(row["entity_pk"])
+        key = str(row["identifier"]).lower()
+        match_map.setdefault(key, [])
+        if entity_pk not in match_map[key]:
+            match_map[key].append(entity_pk)
+        entities_by_pk.setdefault(entity_pk, {
+            "entity_pk": entity_pk,
+            "canonical_identifier": row["canonical_identifier"],
+            "canonical_identifier_type": row["canonical_identifier_type"],
+            "entity_type": row["entity_type"],
+            "taxonomy_id": row["taxonomy_id"],
+            "entity_attributes": row["entity_attributes"],
+            "sources": row["sources"] or [],
+        })
+
+    return EntityResolveResponse(
+        matches=[
+            EntityResolveMatch(identifier=identifier, entityPks=match_map.get(identifier.lower(), []))
+            for identifier in identifiers
+        ],
+        entities=list(entities_by_pk.values()),
+    )
 
 
 # --- Term lookup ---
@@ -522,9 +510,27 @@ async def get_tree(request: TermsRequest):
     if not all_trajectories:
         return TreeResponse(root=None)
     
-    # Build merged tree using ontograph's implementation
-    ontograph_root = IntrospectionPronto._build_tree_from_trajectories(all_trajectories)
-    root = ontograph_node_to_tree_node(ontograph_root)
+    root: TreeNode | None = None
+    node_index: dict[str, TreeNode] = {}
+    for trajectory in all_trajectories:
+        parent: TreeNode | None = None
+        for raw_node in trajectory:
+            node_id = str(raw_node.get("id"))
+            node = node_index.get(node_id)
+            if node is None:
+                node = TreeNode(
+                    id=node_id,
+                    name=raw_node.get("name"),
+                    distance=int(raw_node.get("distance", 0)),
+                    children=[],
+                )
+                node_index[node_id] = node
+            if parent is None:
+                root = root or node
+            elif all(child.id != node.id for child in parent.children):
+                parent.children.append(node)
+            parent = node
+
     return TreeResponse(root=root)
 
 
@@ -570,16 +576,22 @@ def _parse_export_request_from_query(
 
 
 
+def _filters_payload(request) -> dict:
+    if hasattr(request.filters, "model_dump"):
+        return request.filters.model_dump(exclude_none=True)
+    return dict(request.filters or {})
+
+
 def _run_export(
     *,
-    request: InteractionExportRequest | EntityExportRequest | AssociationExportRequest,
+    request: EntityExportRequest | RelationExportRequest,
     background_tasks: BackgroundTasks,
     write_subset_direct,
     default_filename: str,
     log_label: str,
 ):
     try:
-        filters_payload = request.filters.model_dump(exclude_none=True)
+        filters_payload = _filters_payload(request)
 
         temp_file = tempfile.NamedTemporaryFile(prefix=f"{default_filename}_", suffix=".parquet", delete=False)
         temp_path = Path(temp_file.name)
@@ -605,39 +617,10 @@ def _run_export(
         return response
 
     except ValueError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("%s export failed", log_label)
         raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
-
-
-@app.post("/exports/interactions/parquet")
-def export_interactions_parquet(request: InteractionExportRequest, background_tasks: BackgroundTasks):
-    from .exports import write_interaction_subset_parquet_direct
-
-    return _run_export(
-        request=request,
-        background_tasks=background_tasks,
-        write_subset_direct=write_interaction_subset_parquet_direct,
-        default_filename="interactions_subset",
-        log_label="Interaction",
-    )
-
-
-@app.get("/exports/interactions/parquet")
-def export_interactions_parquet_get(
-    background_tasks: BackgroundTasks,
-    query: str = "",
-    filters: str | None = Query(default=None),
-    filename: str | None = None,
-):
-    request = _parse_export_request_from_query(
-        InteractionExportRequest,
-        query=query,
-        filters=filters,
-        filename=filename,
-    )
-    return export_interactions_parquet(request, background_tasks)
 
 
 @app.post("/exports/entities/parquet")
@@ -669,33 +652,69 @@ def export_entities_parquet_get(
     return export_entities_parquet(request, background_tasks)
 
 
-@app.post("/exports/associations/parquet")
-def export_associations_parquet(request: AssociationExportRequest, background_tasks: BackgroundTasks):
-    from .exports import write_association_subset_parquet_direct
+@app.post("/exports/relations/parquet")
+def export_relations_parquet(request: RelationExportRequest, background_tasks: BackgroundTasks):
+    from .exports import write_relation_subset_parquet_direct
 
     return _run_export(
         request=request,
         background_tasks=background_tasks,
-        write_subset_direct=write_association_subset_parquet_direct,
-        default_filename="associations_subset",
-        log_label="Association",
+        write_subset_direct=write_relation_subset_parquet_direct,
+        default_filename="relations_subset",
+        log_label="Relation",
     )
 
 
-@app.get("/exports/associations/parquet")
-def export_associations_parquet_get(
+@app.get("/exports/relations/parquet")
+def export_relations_parquet_get(
     background_tasks: BackgroundTasks,
     query: str = "",
     filters: str | None = Query(default=None),
     filename: str | None = None,
 ):
     request = _parse_export_request_from_query(
-        AssociationExportRequest,
+        RelationExportRequest,
         query=query,
         filters=filters,
         filename=filename,
     )
-    return export_associations_parquet(request, background_tasks)
+    return export_relations_parquet(request, background_tasks)
+
+
+@app.post("/entities/slice", response_model=SliceResponse)
+def get_entities_slice(request: SliceRequest):
+    from .exports import collect_entity_slice
+
+    rows, total = collect_entity_slice(request.query, request.filters, limit=request.limit, offset=request.offset)
+    return SliceResponse(rows=rows, total=total, limit=request.limit, offset=request.offset)
+
+
+@app.post("/relations/slice", response_model=SliceResponse)
+def get_relations_slice(request: SliceRequest):
+    from .exports import collect_relation_slice
+
+    rows, total = collect_relation_slice(request.query, request.filters, limit=request.limit, offset=request.offset)
+    return SliceResponse(rows=rows, total=total, limit=request.limit, offset=request.offset)
+
+
+@app.get("/relations/{relation_pk}/evidence")
+def get_relation_evidence(relation_pk: int):
+    from .exports import collect_relation_evidence
+
+    rows = collect_relation_evidence(relation_pk)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Relation '{relation_pk}' evidence not found")
+    return {"relation_pk": relation_pk, "evidence": rows}
+
+
+@app.get("/relation-evidence/{relation_evidence_pk}")
+def get_relation_evidence_record(relation_evidence_pk: int):
+    from .exports import collect_relation_evidence_by_pk
+
+    row = collect_relation_evidence_by_pk(relation_evidence_pk)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Relation evidence '{relation_evidence_pk}' not found")
+    return row
 
 
 @app.get("/resources")
@@ -732,23 +751,4 @@ def download_multiple_resources(request: ResourceDownloadRequest, background_tas
     response.headers["X-Resource-Count"] = str(len(request.resource_ids))
     return response
 
-
-@app.post("/resources/workspace/manifest")
-def get_resource_workspace_manifest(request: ResourceWorkspaceRequest):
-    return build_workspace_manifest(request.resource_ids)
-
-
-@app.get("/resources/{resource_id}/artifacts/{artifact_name}")
-def download_resource_workspace_artifact(resource_id: str, artifact_name: str, background_tasks: BackgroundTasks):
-    artifact_path = resolve_workspace_artifact(resource_id, artifact_name)
-    response = _build_file_response(
-        path=artifact_path,
-        media_type="application/x-parquet",
-        filename=f"{resource_id}_{artifact_path.name}",
-        background_tasks=background_tasks,
-        temporary=False,
-    )
-    response.headers["X-Resource-Id"] = resource_id
-    response.headers["X-Artifact-Name"] = artifact_path.name
-    return response
 

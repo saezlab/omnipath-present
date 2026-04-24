@@ -2,8 +2,12 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
-from ontograph.client import ClientOntology
+try:
+    from ontograph.client import ClientOntology
+except ModuleNotFoundError:  # pragma: no cover - only used in minimal test/dev envs
+    ClientOntology = Any
 
 from .config import CORE_ONTOLOGIES, CACHE_DIR, OntologyConfig
 
@@ -36,6 +40,8 @@ class OntologyRegistry:
     
     def _load_ontology(self, ontology_id: str, config: OntologyConfig) -> ClientOntology:
         """Load an ontology from its source."""
+        if ClientOntology is Any:
+            raise RuntimeError("ontograph is not installed")
         client = ClientOntology(cache_dir=str(self._cache_dir))
         client.load(source=config.source, backend="pronto")
         self._ontologies[ontology_id] = client
