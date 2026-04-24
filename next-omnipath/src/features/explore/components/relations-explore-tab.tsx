@@ -28,6 +28,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const RESULTS_PER_PAGE = 20;
 
+function parseNumericIds(values: Array<string | number> | undefined): { numeric: number[]; nonNumeric: string[] } {
+  const numeric: number[] = [];
+  const nonNumeric: string[] = [];
+  const seenNumeric = new Set<number>();
+  const seenNonNumeric = new Set<string>();
+
+  for (const value of values || []) {
+    const text = String(value).trim();
+    if (!text) continue;
+    const parsed = Number(text);
+    if (Number.isInteger(parsed)) {
+      if (!seenNumeric.has(parsed)) {
+        seenNumeric.add(parsed);
+        numeric.push(parsed);
+      }
+    } else if (!seenNonNumeric.has(text)) {
+      seenNonNumeric.add(text);
+      nonNumeric.push(text);
+    }
+  }
+
+  return { numeric, nonNumeric };
+}
+
+async function buildRelationExportFilters(filters: SearchFilters) {
+  const { numeric, nonNumeric } = parseNumericIds(filters.entity_ids);
+  const resolvedEntities = nonNumeric.length > 0 ? await getEntitiesByPublicIds(nonNumeric) : [];
+  const entityPks = Array.from(new Set([...numeric, ...resolvedEntities.map((entity) => entity.entityPk)]));
+  const relationCategories = Array.from(new Set([
+    ...(filters.relation_categories?.length ? filters.relation_categories : ["interaction"]),
+  ])).filter((value) => value === "interaction" || value === "membership" || value === "annotation");
+
+  return {
+    ...(entityPks.length > 0 ? { entity_pks: entityPks } : {}),
+    ...(relationCategories.length > 0 ? { relation_categories: relationCategories } : {}),
+    ...(filters.predicates?.length ? { predicates: filters.predicates } : {}),
+    ...(filters.interaction_types?.length ? { interaction_types: filters.interaction_types } : {}),
+    ...(filters.sources?.length ? { sources: filters.sources } : {}),
+    ...(filters.ontology_terms?.length ? { ontology_terms: filters.ontology_terms } : {}),
+  };
+}
+
 type ViewMode = "table" | "network";
 type LayoutMode = "search" | "split" | "ontology";
 
@@ -172,19 +214,19 @@ export function RelationsExploreTab({
     try {
       setError(null);
       const date = new Date().toISOString().split('T')[0];
-      const response = await fetch('/api/exports/interactions/parquet', {
+      const response = await fetch('/api/exports/relations/parquet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: '',
-          filters: effectiveFilters,
+          filters: await buildRelationExportFilters(effectiveFilters),
           filename: `relations_subset_${date}`,
         }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `Export failed (${response.status})`);
+        throw new Error(payload.detail || payload.error || `Export failed (${response.status})`);
       }
 
       const blob = await response.blob();

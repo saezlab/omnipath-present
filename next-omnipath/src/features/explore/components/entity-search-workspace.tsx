@@ -3,7 +3,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebarContent } from "@/contexts/sidebar-content-context";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type UIEvent } from "react";
-import { searchEntities } from "@/lib/queries/entity";
+import { getEntitiesByPublicIds, searchEntities } from "@/lib/queries/entity";
 import { resolveEntityIdentifiers } from "@/lib/queries/entity-identifier";
 import type { EntityLike } from "@/lib/entities/display";
 import { EntityFilterSidebar } from "./entity-filter-sidebar";
@@ -22,6 +22,43 @@ import { useSearchUrlState } from "@/lib/navigation/url-state";
 import { useSearchWorkspaceState, type SearchWorkspacePane } from "@/features/explore/use-entity-search-workspace-state";
 import { SearchAssistantPane } from "@/features/chat/search-assistant-pane";
 
+
+function parseNumericIds(values: Array<string | number> | undefined): { numeric: number[]; nonNumeric: string[] } {
+  const numeric: number[] = [];
+  const nonNumeric: string[] = [];
+  const seenNumeric = new Set<number>();
+  const seenNonNumeric = new Set<string>();
+
+  for (const value of values || []) {
+    const text = String(value).trim();
+    if (!text) continue;
+    const parsed = Number(text);
+    if (Number.isInteger(parsed)) {
+      if (!seenNumeric.has(parsed)) {
+        seenNumeric.add(parsed);
+        numeric.push(parsed);
+      }
+    } else if (!seenNonNumeric.has(text)) {
+      seenNonNumeric.add(text);
+      nonNumeric.push(text);
+    }
+  }
+
+  return { numeric, nonNumeric };
+}
+
+async function buildEntityExportFilters(filters: SearchFilters) {
+  const { numeric, nonNumeric } = parseNumericIds(filters.entity_ids);
+  const resolvedEntities = nonNumeric.length > 0 ? await getEntitiesByPublicIds(nonNumeric) : [];
+  const entityPks = Array.from(new Set([...numeric, ...resolvedEntities.map((entity) => entity.entityPk)]));
+
+  return {
+    ...(entityPks.length > 0 ? { entity_pks: entityPks } : {}),
+    ...(filters.entity_types?.length ? { entity_types: filters.entity_types } : {}),
+    ...(filters.ncbi_tax_id?.length ? { taxonomy_ids: filters.ncbi_tax_id } : {}),
+    ...(filters.sources?.length ? { sources: filters.sources } : {}),
+  };
+}
 
 interface EntitySearchWorkspaceProps {
   // Props for embedded mode (like in AI dialogs)
@@ -400,14 +437,14 @@ export default function EntitySearchWorkspace({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: query || '',
-          filters,
+          filters: await buildEntityExportFilters(filters),
           filename: `entities_subset_${date}`,
         }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `Export failed (${response.status})`);
+        throw new Error(payload.detail || payload.error || `Export failed (${response.status})`);
       }
 
       const blob = await response.blob();

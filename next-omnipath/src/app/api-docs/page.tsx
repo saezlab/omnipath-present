@@ -226,12 +226,12 @@ export default async function ApiDocsPage() {
     "human_proteins_example"
   )
   const interactionExampleUrl = buildDownloadUrl(
-    "/api/exports/interactions/parquet",
+    "/api/exports/relations/parquet",
     { sources: [facetExamples.interactions.sources[0]?.value || "SIGNOR:OM:1152"], direction: "directed" },
     "directed_interactions_example"
   )
   const associationExampleUrl = buildDownloadUrl(
-    "/api/exports/associations/parquet",
+    "/api/exports/relations/parquet",
     { parent_entity_types: [facetExamples.associations.parent_entity_types[0]?.value || "complex:MI:0314"] },
     "parent_type_associations_example"
   )
@@ -246,7 +246,7 @@ export default async function ApiDocsPage() {
     "tutorial_human_nucleus_seizure_entities"
   )
   const tutorialInteractionsUrl = buildDownloadUrl(
-    "/api/exports/interactions/parquet",
+    "/api/exports/relations/parquet",
     {
       entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
       direction: "directed",
@@ -256,7 +256,7 @@ export default async function ApiDocsPage() {
     "tutorial_tp53_akt1_phospho_interactions"
   )
   const tutorialAssociationsUrl = buildDownloadUrl(
-    "/api/exports/associations/parquet",
+    "/api/exports/relations/parquet",
     {
       member_entity_ids: ["P:UP:P04637:UNK", "P:UP:AKT1_HUMAN:UNK"],
       parent_entity_types: ["reaction:OM:0015"],
@@ -326,10 +326,10 @@ export default async function ApiDocsPage() {
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 1 — Resolve identifiers to canonical entity IDs</div>
             <p className="text-xs text-muted-foreground">Uses the main FastAPI service so the endpoint is part of the public API and OpenAPI schema.</p>
-            <Code>{`curl -X POST ${baseUrl}/api/entity-lookup \\
+            <Code>{`curl -X POST ${baseUrl}/api/entities/resolve \\
   -H "Content-Type: application/json" \\
   -d '{ "identifiers": ["TP53", "AKT1", "P31749"] }'`}</Code>
-            <JsonTryNow endpoint="/api/entity-lookup" initialBody={{ identifiers: ["TP53", "AKT1", "P31749"] }} />
+            <JsonTryNow endpoint="/api/entities/resolve" initialBody={{ identifiers: ["TP53", "AKT1", "P31749"] }} />
           </div>
 
           <div className="rounded-lg border p-4 space-y-3">
@@ -361,7 +361,7 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 4 — Export directed positive phosphorylation interactions for TP53/AKT1</div>
-            <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
+            <Code>{`curl -X POST ${baseUrl}/api/exports/relations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "filename": "tutorial_tp53_akt1_phospho_interactions",
@@ -377,7 +377,7 @@ export default async function ApiDocsPage() {
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="font-medium">Step 5 — Export reaction associations where TP53/AKT1 act as reactants</div>
-            <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
+            <Code>{`curl -X POST ${baseUrl}/api/exports/relations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "filename": "tutorial_tp53_akt1_reaction_associations",
@@ -435,7 +435,7 @@ export default async function ApiDocsPage() {
         </TabsContent>
 
         <TabsContent value="interactions-export" className="space-y-4">
-          <h2 className="text-xl font-semibold">POST /api/exports/interactions/parquet</h2>
+          <h2 className="text-xl font-semibold">POST /api/exports/relations/parquet</h2>
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border bg-card/60 p-4 space-y-3">
               <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Filters</div>
@@ -454,7 +454,7 @@ export default async function ApiDocsPage() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
             <div className="rounded-xl border bg-card/60 p-4 space-y-3">
               <div className="text-xs font-medium">Try this (POST)</div>
-              <Code>{`curl -X POST ${baseUrl}/api/exports/interactions/parquet \\
+              <Code>{`curl -X POST ${baseUrl}/api/exports/relations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -477,7 +477,7 @@ export default async function ApiDocsPage() {
         </TabsContent>
 
         <TabsContent value="associations-export" className="space-y-4">
-          <h2 className="text-xl font-semibold">POST /api/exports/associations/parquet</h2>
+          <h2 className="text-xl font-semibold">POST /api/exports/relations/parquet</h2>
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border bg-card/60 p-4 space-y-3">
               <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">Filters</div>
@@ -496,7 +496,7 @@ export default async function ApiDocsPage() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
             <div className="rounded-xl border bg-card/60 p-4 space-y-3">
               <div className="text-xs font-medium">Try this (POST)</div>
-              <Code>{`curl -X POST ${baseUrl}/api/exports/associations/parquet \\
+              <Code>{`curl -X POST ${baseUrl}/api/exports/relations/parquet \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "",
@@ -519,24 +519,24 @@ export default async function ApiDocsPage() {
         </TabsContent>
 
         <TabsContent value="entity-lookup" className="space-y-4">
-          <h2 className="text-xl font-semibold">Entity resolving service</h2>
-          <p className="text-xs text-muted-foreground">This endpoint is served by the main FastAPI app and internally resolves identifiers via the entity resolver service.</p>
+          <h2 className="text-xl font-semibold">Entity resolving</h2>
+          <p className="text-xs text-muted-foreground">This endpoint is served by the main FastAPI app and internally resolves identifiers via the Postgres entity_identifier table.</p>
 
           <div className="rounded-lg border p-4 space-y-3">
             <div>
-              <div className="font-medium">POST /api/entity-lookup</div>
+              <div className="font-medium">POST /api/entities/resolve</div>
               <p className="text-xs text-muted-foreground">Resolves raw identifiers to candidate entity IDs and returns matching entity documents.</p>
             </div>
             <div className="text-xs font-medium">Try this</div>
-            <Code>{`curl -X POST ${baseUrl}/api/entity-lookup \\
+            <Code>{`curl -X POST ${baseUrl}/api/entities/resolve \\
   -H "Content-Type: application/json" \\
   -d '{
     "identifiers": ["P04637", "TP53", "Q9Y6K9"]
   }'`}</Code>
-            <JsonTryNow endpoint="/api/entity-lookup" initialBody={{ identifiers: ["P04637", "TP53", "Q9Y6K9"] }} />
+            <JsonTryNow endpoint="/api/entities/resolve" initialBody={{ identifiers: ["P04637", "TP53", "Q9Y6K9"] }} />
             <Code>{`{
   "matches": [
-    { "identifier": "P04637", "entityIds": ["P:UP:P04637:UNK"] }
+    { "identifier": "P04637", "entityPks": ["P:UP:P04637:UNK"] }
   ],
   "entities": [
     {

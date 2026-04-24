@@ -1,24 +1,31 @@
-export type SubsetResource = "entities" | "interactions" | "associations";
+export type SubsetResource = "entities" | "relations";
 
 export interface EntitySubsetFilters {
+  entity_pks?: number[];
   entity_ids?: Array<string | number>;
   entity_types?: string[];
   sources?: string[];
+  taxonomy_ids?: string[];
   ncbi_tax_id?: string[];
-  ontology_terms?: string[];
 }
 
-export interface InteractionSubsetFilters {
-  member_a_id?: string | number;
-  member_b_id?: string | number;
+export interface RelationSubsetFilters {
+  relation_pks?: number[];
+  subject_entity_pks?: number[];
+  object_entity_pks?: number[];
+  entity_pks?: number[];
   entity_ids?: Array<string | number>;
+  predicates?: string[];
   interaction_types?: string[];
-  is_directed?: boolean | null;
-  signs?: Array<-1 | 0 | 1>;
-  interaction_annotation_terms?: string[];
-  participant_annotation_terms?: string[];
+  relation_categories?: Array<"interaction" | "membership" | "annotation">;
+  participant_types?: string[];
   sources?: string[];
+  annotation_terms?: string[];
+  ontology_terms?: string[];
+  annotation_scopes?: string[];
 }
+
+export type InteractionSubsetFilters = RelationSubsetFilters;
 
 export interface SubsetMaterializeRequest<TFilters extends object> {
   resource: SubsetResource;
@@ -42,12 +49,11 @@ export interface DuckDbFacetBucket {
 }
 
 export interface DuckDbFacetCounts {
-  interaction_type: DuckDbFacetBucket[];
-  sign: DuckDbFacetBucket[];
-  is_directed: DuckDbFacetBucket[];
+  predicate: DuckDbFacetBucket[];
+  relation_category: DuckDbFacetBucket[];
   sources: DuckDbFacetBucket[];
-  interaction_annotation_terms: DuckDbFacetBucket[];
-  participant_annotation_terms: DuckDbFacetBucket[];
+  participant_types: DuckDbFacetBucket[];
+  annotation_terms: DuckDbFacetBucket[];
 }
 
 export interface DuckDbInteractionsPage {
@@ -56,10 +62,8 @@ export interface DuckDbInteractionsPage {
 }
 
 export interface InteractionLocalFilters {
-  interaction_types: string[];
-  signs: Array<-1 | 0 | 1>;
-  is_directed?: boolean;
+  predicates: string[];
+  relation_categories: Array<"interaction" | "membership" | "annotation">;
   sources: string[];
-  interaction_annotation_terms: string[];
-  participant_annotation_terms: string[];
+  annotation_terms: string[];
 }

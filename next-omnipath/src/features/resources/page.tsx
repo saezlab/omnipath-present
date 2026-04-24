@@ -5,11 +5,10 @@ import { Input } from "@/components/ui/input";
 import type { ResourceRecord, ResourcesSummary } from "@/lib/resource";
 import { cn, formatNumber } from "@/lib/utils";
 import {
-  Check,
   ChevronDown,
   ChevronUp,
-  Copy,
   Database,
+  Download,
   ExternalLink,
   Layers3,
   Network,
@@ -92,17 +91,47 @@ function MiniTag({ children }: { children: React.ReactNode }) {
   );
 }
 
+async function triggerDownload(response: Response) {
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const contentDisposition = response.headers.get("Content-Disposition");
+  const fileNameMatch = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  const fileName = fileNameMatch?.[1] || "download.zip";
+
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+}
+
 function ResourceCard({
   resource,
-  selected,
-  onToggle,
 }: {
   resource: ResourceRecord;
-  selected: boolean;
-  onToggle: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const Icon = iconForCategories(resource.categories);
+
+  async function handleDownload() {
+    try {
+      setDownloading(true);
+      const response = await fetch(`/api/resources/${resource.resource_id}/download`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Download failed (${response.status})`);
+      }
+      await triggerDownload(response);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const stats = [
     { label: "Entities", value: resource.entity_count },
     { label: "Interactions", value: resource.interaction_count },
@@ -115,7 +144,7 @@ function ResourceCard({
     <article
       className={cn(
         "flex h-full flex-col rounded-[1.25rem] border bg-card/70 p-4 transition-all",
-        selected ? "border-primary/60 bg-primary/[0.04] ring-1 ring-primary/20" : "border-border/50 hover:bg-muted/[0.18]",
+        "border-border/50 hover:bg-muted/[0.18]",
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -180,9 +209,16 @@ function ResourceCard({
             )}
           </button>
 
-          <Button className="rounded-full" variant={selected ? "default" : "outline"} onClick={onToggle}>
-            {selected ? "Selected" : "Select"}
-            {selected ? <Check className="h-4 w-4" /> : null}
+          <Button
+            className="rounded-full"
+            variant="outline"
+            size="sm"
+            onClick={handleDownload}
+            disabled={downloading || resource.build_status !== "success"}
+            title={resource.build_status !== "success" ? "No download available for this resource" : undefined}
+          >
+            <Download className="h-4 w-4" />
+            {downloading ? "Downloading…" : "Download"}
           </Button>
         </div>
 
@@ -270,8 +306,6 @@ export default function ResourcesPage({
 }) {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
 
   const categories = useMemo(
     () => ["all", ...Object.keys(summary.categoryCounts).sort((a, b) => a.localeCompare(b))],
@@ -300,32 +334,9 @@ export default function ResourcesPage({
     });
   }, [query, resources, selectedCategory]);
 
-  const selectedResources = useMemo(
-    () => resources.filter((resource) => selectedIds.includes(resource.resource_id)),
-    [resources, selectedIds],
-  );
-
-  const selectedTotalBytes = useMemo(
-    () => selectedResources.reduce((sum, item) => sum + (item.total_size_bytes || 0), 0),
-    [selectedResources],
-  );
-
-  function toggleSelected(resourceId: string) {
-    setSelectedIds((current) =>
-      current.includes(resourceId) ? current.filter((id) => id !== resourceId) : [...current, resourceId],
-    );
-  }
-
-  async function copySelectedIds() {
-    if (selectedIds.length === 0) return;
-    await navigator.clipboard.writeText(selectedIds.join(","));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
-
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 md:px-6 md:py-5">
-      <div className="min-h-0 flex-1 overflow-y-auto pb-32 pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="space-y-4">
           <div className="rounded-[1.4rem] border bg-card p-3 shadow-sm">
             <div className="flex flex-col gap-3">
@@ -388,8 +399,6 @@ export default function ResourcesPage({
                   <ResourceCard
                     key={resource.resource_id}
                     resource={resource}
-                    selected={selectedIds.includes(resource.resource_id)}
-                    onToggle={() => toggleSelected(resource.resource_id)}
                   />
                 ))}
               </div>
@@ -401,28 +410,6 @@ export default function ResourcesPage({
           </section>
         </div>
       </div>
-
-      {selectedResources.length > 0 ? (
-        <div className="fixed inset-x-4 bottom-4 z-40">
-          <div className="mx-auto w-full max-w-7xl rounded-[1.25rem] border border-border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="text-base font-medium">{selectedResources.length} resources selected</div>
-                <div className="text-sm text-muted-foreground">Estimated total size: {formatFileSize(selectedTotalBytes)}</div>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <Button variant="ghost" onClick={() => setSelectedIds([])}>
-                  Clear selection
-                </Button>
-                <Button variant="outline" onClick={copySelectedIds}>
-                  {copied ? "Copied IDs" : "Copy selected IDs"}
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

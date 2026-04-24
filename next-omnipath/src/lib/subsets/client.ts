@@ -1,4 +1,4 @@
-import type { EntitySubsetFilters, InteractionSubsetFilters, SubsetArtifact, SubsetMaterializeRequest, SubsetResource } from "@/types/subsets";
+import type { EntitySubsetFilters, InteractionSubsetFilters, RelationSubsetFilters, SubsetArtifact, SubsetMaterializeRequest, SubsetResource } from "@/types/subsets";
 
 interface MaterializeSubsetProgress {
   stage: "requesting" | "downloading" | "complete";
@@ -114,18 +114,33 @@ function parseOptionalNumber(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+export async function materializeRelationsSubset(
+  filters: RelationSubsetFilters,
+  query = "",
+  options?: MaterializeSubsetOptions,
+) {
+  return materializeSubset<RelationSubsetFilters>(
+    {
+      resource: "relations",
+      query,
+      filters,
+      filename: getDefaultFileName("relations"),
+    },
+    options,
+  );
+}
+
 export async function materializeInteractionsSubset(
   filters: InteractionSubsetFilters,
   query = "",
   options?: MaterializeSubsetOptions,
 ) {
-  return materializeSubset<InteractionSubsetFilters>(
+  return materializeRelationsSubset(
     {
-      resource: "interactions",
-      query,
-      filters,
-      filename: getDefaultFileName("interactions"),
+      ...filters,
+      relation_categories: filters.relation_categories?.length ? filters.relation_categories : ["interaction"],
     },
+    query,
     options,
   );
 }
