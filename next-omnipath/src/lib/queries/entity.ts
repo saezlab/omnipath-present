@@ -115,7 +115,12 @@ export async function searchEntities({
 
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery);
-      whereParts.push(`ei.identifier = ${queryParam}`);
+      whereParts.push(`EXISTS (
+        SELECT 1
+        FROM entity_identifier ei
+        WHERE ei.entity_pk = e.entity_pk
+          AND ei.identifier = ${queryParam}
+      )`);
     }
 
     if (filters.entity_ids?.length) {
@@ -174,9 +179,7 @@ export async function searchEntities({
     }
 
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
-    const baseFrom = trimmedQuery
-      ? `FROM entity_identifier ei JOIN entity e ON e.entity_pk = ei.entity_pk`
-      : `FROM entity e`;
+    const baseFrom = `FROM entity e`;
 
     const pageParams = [...params];
     if (typeof cursor === "number" && Number.isFinite(cursor)) {

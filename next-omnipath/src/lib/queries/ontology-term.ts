@@ -1,9 +1,15 @@
 "use server";
 
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { asc, inArray, sql } from "drizzle-orm";
 import { getDb, getPool } from "@/lib/db/client";
-import { entity, entityRelation, ontologyTerm, type OntologyTerm } from "@next-omnipath/drizzle";
+import { ontologyTerm, type OntologyTerm } from "@next-omnipath/drizzle";
 import { toPublicEntityId } from "@/lib/entity-public-id";
+
+export type OntologyTermWithAnnotationCounts = OntologyTerm & {
+  annotatedEntityCount: number;
+  annotatedRelationCount: number;
+  annotatedItemCount: number;
+};
 
 export type ScopedOntologyTerm = OntologyTerm & {
   annotatedEntityCount: number;
@@ -26,34 +32,83 @@ export async function searchOntologyTerms({
   prefixes?: string[];
   limit?: number;
   offset?: number;
-} = {}): Promise<OntologyTerm[]> {
-  const db = getDb();
-  const conditions: SQL[] = [];
-
+} = {}): Promise<OntologyTermWithAnnotationCounts[]> {
+  const normalizedPrefixes = Array.from(new Set((prefixes || []).map((prefix) => prefix.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
-  if (trimmedQuery) {
-    const pattern = `%${trimmedQuery}%`;
-    conditions.push(sql`(
-      ${ontologyTerm.termId} ILIKE ${pattern}
-      OR ${ontologyTerm.label} ILIKE ${pattern}
-      OR ${ontologyTerm.definition} ILIKE ${pattern}
-      OR ${ontologyTerm.ontologyPrefix} ILIKE ${pattern}
-    )`);
+  const client = await getPool().connect();
+
+  try {
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const params: unknown[] = [];
+    const whereParts: string[] = [];
+
+    if (trimmedQuery) {
+      params.push(`%${trimmedQuery}%`);
+      const placeholder = `$${params.length}`;
+      whereParts.push(`(
+        ot.term_id ILIKE ${placeholder}
+        OR ot.label ILIKE ${placeholder}
+        OR ot.definition ILIKE ${placeholder}
+        OR ot.ontology_prefix ILIKE ${placeholder}
+      )`);
+    }
+
+    if (normalizedPrefixes.length > 0) {
+      params.push(normalizedPrefixes);
+      whereParts.push(`ot.ontology_prefix = ANY($${params.length}::text[])`);
+    }
+
+    params.push(limit);
+    const limitPlaceholder = `$${params.length}`;
+    params.push(offset);
+    const offsetPlaceholder = `$${params.length}`;
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+
+    const result = await client.query<{
+      term_id: string;
+      ontology_prefix: string | null;
+      label: string | null;
+      definition: string | null;
+      synonyms: string[] | null;
+      sources: string[] | null;
+      annotated_entity_count: string | number | null;
+      annotated_relation_count: string | number | null;
+      annotated_item_count: string | number | null;
+    }>(
+      `SELECT
+         ot.term_id,
+         ot.ontology_prefix,
+         ot.label,
+         ot.definition,
+         ot.synonyms,
+         ot.sources,
+         COALESCE(counts.annotated_entity_count, 0) AS annotated_entity_count,
+         COALESCE(counts.annotated_relation_count, 0) AS annotated_relation_count,
+         COALESCE(counts.annotated_item_count, 0) AS annotated_item_count
+       FROM ${SEARCH_SCHEMA}.ontology_term ot
+       LEFT JOIN ${SEARCH_SCHEMA}.ontology_term_annotation_counts counts
+         ON counts.term_id = ot.term_id
+       ${whereClause}
+       ORDER BY COALESCE(counts.annotated_item_count, 0) DESC, ot.term_id ASC
+       LIMIT ${limitPlaceholder}
+       OFFSET ${offsetPlaceholder}`,
+      params,
+    );
+
+    return result.rows.map((row) => ({
+      termId: row.term_id,
+      ontologyPrefix: row.ontology_prefix,
+      label: row.label,
+      definition: row.definition,
+      synonyms: row.synonyms || [],
+      sources: row.sources || [],
+      annotatedEntityCount: Number(row.annotated_entity_count || 0),
+      annotatedRelationCount: Number(row.annotated_relation_count || 0),
+      annotatedItemCount: Number(row.annotated_item_count || 0),
+    }));
+  } finally {
+    client.release();
   }
-
-  if (prefixes?.length) {
-    conditions.push(inArray(ontologyTerm.ontologyPrefix, prefixes));
-  }
-
-  const where = conditions.length ? and(...conditions) : undefined;
-
-  return db
-    .select()
-    .from(ontologyTerm)
-    .where(where)
-    .orderBy(asc(ontologyTerm.termId))
-    .limit(limit)
-    .offset(offset);
 }
 
 let ontologyPrefixesCache: { value: string[]; expiresAt: number } | null = null;

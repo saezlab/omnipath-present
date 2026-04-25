@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { searchOntologyTerms, searchScopedOntologyTerms, getOntologyPrefixes, type ScopedOntologyTerm } from "@/lib/queries/ontology-term";
+import { searchOntologyTerms, searchScopedOntologyTerms, getOntologyPrefixes, type OntologyTermWithAnnotationCounts, type ScopedOntologyTerm } from "@/lib/queries/ontology-term";
 import { getEntitiesByPublicIds } from "@/lib/queries/entity";
 import { materializeAnnotationsSubset } from "@/lib/subsets/client";
 import type { OntologyTerm } from "@next-omnipath/drizzle";
@@ -48,7 +48,11 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function AnnotationCards({ results }: { results: Array<OntologyTerm | ScopedOntologyTerm> }) {
+function formatUsageCount(count: number) {
+  return `${count.toLocaleString()} ${count === 1 ? "use" : "uses"}`;
+}
+
+function AnnotationCards({ results }: { results: Array<OntologyTerm | OntologyTermWithAnnotationCounts | ScopedOntologyTerm> }) {
   const { addAnnotation, isAnnotationSelected, removeAnnotation } = useEntitySelection();
 
   return (
@@ -87,8 +91,14 @@ function AnnotationCards({ results }: { results: Array<OntologyTerm | ScopedOnto
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {term.ontologyPrefix ? <Badge variant="outline">{term.ontologyPrefix}</Badge> : null}
-                {"annotatedEntityCount" in term ? (
-                  <Badge variant="secondary">{term.annotatedEntityCount.toLocaleString()} entities</Badge>
+                {"annotatedItemCount" in term ? (
+                  <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
+                    {formatUsageCount(term.annotatedItemCount)}
+                  </Badge>
+                ) : "annotatedEntityCount" in term ? (
+                  <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
+                    {term.annotatedEntityCount.toLocaleString()} {term.annotatedEntityCount === 1 ? "entity" : "entities"}
+                  </Badge>
                 ) : null}
               </div>
             </CardHeader>
