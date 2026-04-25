@@ -1,6 +1,5 @@
 <script lang="ts">
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import AppSidebar from '$lib/components/layout/AppSidebar.svelte';
@@ -10,7 +9,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" type="image/svg+xml" href="/omnipath-logo-gradient.svg" />
 	<title>OmniPath Explorer</title>
 	<meta
 		name="description"
