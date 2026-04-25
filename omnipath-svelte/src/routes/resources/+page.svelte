@@ -3,8 +3,8 @@
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs/index.js';
 	import { cn } from '$lib/utils.js';
-	import { formatNumber } from '$lib/utils/format.js';
 	import type { ResourceRecord } from '$lib/server/resource';
 	import type { PageData } from './$types';
 
@@ -14,10 +14,12 @@
 	let expandedIds = $state<Set<string>>(new Set());
 	let downloadingIds = $state<Set<string>>(new Set());
 
-	const categories = $derived([
-		'all',
-		...Object.keys(data.summary.categoryCounts).sort((a, b) => a.localeCompare(b))
-	]);
+	const categories = [
+		{ value: 'all', label: 'All' },
+		{ value: 'annotation', label: 'Annotation' },
+		{ value: 'interaction', label: 'Interaction' },
+		{ value: 'membership', label: 'Membership' }
+	] as const;
 
 	const filteredResources = $derived.by(() => {
 		const normalizedQuery = query.trim().toLowerCase();
@@ -35,7 +37,10 @@
 				.toLowerCase();
 
 			const matchesQuery = normalizedQuery.length === 0 || searchableText.includes(normalizedQuery);
-			const matchesCategory = selectedCategory === 'all' || resource.categories.includes(selectedCategory);
+			const matchesCategory =
+				selectedCategory === 'all' ||
+				resource.categories.includes(selectedCategory) ||
+				(selectedCategory === 'membership' && resource.categories.includes('association'));
 
 			return matchesQuery && matchesCategory;
 		});
@@ -44,6 +49,17 @@
 	function sentenceCase(value: string | null | undefined): string {
 		if (!value) return 'Unknown';
 		return value.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+	}
+
+	function handleSubmitSearch() {
+		query = query.trim();
+	}
+
+	function handleSearchKeyDown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			handleSubmitSearch();
+		}
 	}
 
 	function formatFileSize(bytes: number | null | undefined): string {
@@ -98,83 +114,48 @@
 </script>
 
 
-<div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 md:px-6 md:py-5">
-	<div class="min-h-0 flex-1 overflow-y-auto pr-1">
-		<div class="space-y-4">
-			<div class="rounded-[1.4rem] border bg-card p-3 shadow-sm">
-				<div class="flex flex-col gap-3">
-					<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-						<div class="min-w-0 flex-1">
-							<div class="text-xl font-semibold tracking-tight">Resource catalog</div>
-							<p class="mt-1 text-sm text-muted-foreground">
-								Browse curated OmniPath resources directly from the local catalog table.
-							</p>
-						</div>
+<div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 overflow-hidden px-4 py-4 md:px-6 md:py-5">
+	<div class="shrink-0 space-y-3">
+		<div class="rounded-[1.4rem] border bg-card p-2.5 shadow-sm">
+			<div class="flex flex-col gap-2.5 lg:flex-row lg:items-center">
+				<div class="relative min-w-0 flex-1">
+					<Search class="absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						type="search"
+						bind:value={query}
+						onkeydown={handleSearchKeyDown}
+						placeholder="Search resources…"
+						class="h-11 rounded-[1rem] border-0 bg-muted/40 pl-10 text-sm shadow-none sm:text-base"
+					/>
+				</div>
 
-						<div class="relative w-full xl:max-w-xl">
-							<Search class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-							<Input
-								bind:value={query}
-								placeholder="Search resources, IDs, categories, or ontologies…"
-								class="h-11 rounded-[1rem] border-0 bg-muted/40 pl-10 text-sm shadow-none sm:text-base"
-							/>
-						</div>
-					</div>
-
-					<div class="flex flex-wrap gap-2">
-						{#each categories as category (category)}
-							<button
-								type="button"
-								onclick={() => (selectedCategory = category)}
-								class={cn(
-									'rounded-full border px-3.5 py-2 text-sm transition-colors',
-									selectedCategory === category
-										? 'border-primary bg-primary text-primary-foreground'
-										: 'border-border bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-								)}
-							>
-								{category === 'all' ? 'All categories' : sentenceCase(category)}
-							</button>
-						{/each}
-					</div>
-
-					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-sm text-muted-foreground">
-						<span>{formatNumber(data.summary.totalResources)} resources</span>
-						<span>•</span>
-						<span>{formatNumber(data.summary.totalEntities)} entities</span>
-						<span>•</span>
-						<span>{formatNumber(data.summary.totalInteractions)} interactions</span>
-						<span>•</span>
-						<span>{formatNumber(data.summary.totalMemberships)} memberships</span>
-						<span>•</span>
-						<span>{formatNumber(data.summary.totalAnnotations)} annotations</span>
-					</div>
+				<div class="flex items-center gap-2 lg:shrink-0">
+					<Button onclick={handleSubmitSearch} class="h-9 rounded-lg px-3.5 text-sm">Search</Button>
 				</div>
 			</div>
 
-			<section class="space-y-4">
-				<div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-					<p class="text-sm text-muted-foreground">
-						Showing {filteredResources.length} of {data.resources.length} resources.
-					</p>
-					<div class="text-sm text-muted-foreground">
-						{formatNumber(data.summary.totalOntologyTerms)} ontology terms • {formatFileSize(data.summary.totalBytes)} total size
-					</div>
-				</div>
+			<div class="mt-2.5 flex items-center justify-between gap-3">
+				<Tabs value={selectedCategory} onValueChange={(value) => (selectedCategory = value)} class="min-w-0 flex-1">
+					<TabsList class="grid h-auto w-full grid-cols-4 rounded-xl bg-muted/60 p-1">
+						{#each categories as category}
+							<TabsTrigger value={category.value} class="rounded-lg text-sm">
+								{category.label}
+							</TabsTrigger>
+						{/each}
+					</TabsList>
+				</Tabs>
+			</div>
+		</div>
+	</div>
 
-				{#if filteredResources.length > 0}
+	<div class="min-h-0 flex-1 overflow-y-auto pr-1">
+		<section class="space-y-4">
+			{#if filteredResources.length > 0}
 					<div class="grid grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
 						{#each filteredResources as resource (resource.resource_id)}
 							{@const expanded = expandedIds.has(resource.resource_id)}
 							{@const downloading = downloadingIds.has(resource.resource_id)}
 							{@const Icon = iconForCategories(resource.categories)}
-							{@const stats = [
-								{ label: 'Entities', value: resource.entity_count },
-								{ label: 'Interactions', value: resource.interaction_count },
-								{ label: 'Memberships', value: resource.membership_count },
-								{ label: 'Annotations', value: resource.annotation_count },
-								{ label: 'Ontology Terms', value: resource.ontology_term_count }
-							].filter((stat) => stat.value > 0)}
 							<article class="flex h-full flex-col rounded-[1.25rem] border border-border/50 bg-card/70 p-4 transition-all hover:bg-muted/[0.18]">
 								<div class="flex items-start justify-between gap-3">
 									<div class="flex min-w-0 items-start gap-3">
@@ -234,17 +215,6 @@
 												</div>
 											{/if}
 
-											{#if stats.length > 0}
-												<div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-													{#each stats as stat (`${resource.resource_id}-${stat.label}`)}
-														<div class="rounded-lg bg-muted/15 px-3 py-2">
-															<div class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">{stat.label}</div>
-															<div class="mt-1 text-sm font-semibold">{formatNumber(stat.value)}</div>
-														</div>
-													{/each}
-												</div>
-											{/if}
-
 											<dl class="grid gap-2 text-sm">
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Resource ID</dt><dd class="max-w-[65%] text-right font-mono break-words text-foreground/90">{resource.resource_id}</dd></div>
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">License</dt><dd class="max-w-[65%] text-right break-words text-foreground/90">{resource.license || '—'}</dd></div>
@@ -272,7 +242,6 @@
 						No resources matched the current search and filter settings.
 					</div>
 				{/if}
-			</section>
-		</div>
+		</section>
 	</div>
 </div>

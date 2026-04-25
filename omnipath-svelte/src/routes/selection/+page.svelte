@@ -21,7 +21,7 @@
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let draftQuery = $state('');
-	let filters = $state<SearchFilters>({});
+	let filters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 
 	const shouldResolveAnnotationEntities = $derived(tab !== 'interactions');
 	const scope = $derived(
@@ -35,6 +35,9 @@
 	});
 
 	function setTab(next: string) {
+		if (next === 'interactions' && !filters.relation_categories?.length) {
+			filters = { ...filters, relation_categories: ['interaction'] };
+		}
 		const url = new URL($page.url);
 		url.searchParams.set('tab', next);
 		goto(url, { replaceState: true, keepFocus: true, noScroll: true });

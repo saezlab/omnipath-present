@@ -7,7 +7,7 @@ export const POST: RequestHandler = async ({ request }) => {
     const body = (await request.json()) as { resource_ids?: string[] };
     const resourceIds = body.resource_ids || [];
 
-    const upstream = await fetch(`${API_SERVICE_URL}/api/resources/download`, {
+    const upstream = await fetch(`${API_SERVICE_URL}/resources/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resource_ids: resourceIds }),

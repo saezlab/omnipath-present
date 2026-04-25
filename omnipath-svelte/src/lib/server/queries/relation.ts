@@ -239,37 +239,48 @@ export async function countRelations(filters: RelationFilters = {}): Promise<num
   }
 }
 
-let relationFilterOptionsCache:
-  | {
-      value: {
-        predicatesByCategory: Record<string, string[]>;
-        sources: string[];
-        interactionTypes: string[];
-      };
-      expiresAt: number;
-    }
-  | null = null;
-let relationFilterOptionsInFlight:
-  | Promise<{ predicatesByCategory: Record<string, string[]>; sources: string[]; interactionTypes: string[] }>
-  | null = null;
-
-export async function getRelationFilterOptions(): Promise<{
+type RelationFilterOptions = {
   predicatesByCategory: Record<string, string[]>;
   sources: string[];
   interactionTypes: string[];
-}> {
+};
+
+type RelationFilterOptionsCache = {
+  value: RelationFilterOptions;
+  expiresAt: number;
+};
+
+const relationFilterOptionsGlobal = globalThis as typeof globalThis & {
+  __omnipathRelationFilterOptionsCache?: RelationFilterOptionsCache | null;
+  __omnipathRelationFilterOptionsInFlight?: Promise<RelationFilterOptions> | null;
+};
+
+function getCachedRelationFilterOptions(now: number): RelationFilterOptions | null {
+  const cached = relationFilterOptionsGlobal.__omnipathRelationFilterOptionsCache;
+  return cached && cached.expiresAt > now ? cached.value : null;
+}
+
+function setCachedRelationFilterOptions(value: RelationFilterOptions) {
+  relationFilterOptionsGlobal.__omnipathRelationFilterOptionsCache = {
+    value,
+    expiresAt: Date.now() + 30 * 60 * 1000,
+  };
+}
+
+export async function getRelationFilterOptions(): Promise<RelationFilterOptions> {
   const now = Date.now();
-  if (relationFilterOptionsCache && relationFilterOptionsCache.expiresAt > now) {
-    return relationFilterOptionsCache.value;
-  }
-  if (relationFilterOptionsInFlight) {
-    return relationFilterOptionsInFlight;
+  const cached = getCachedRelationFilterOptions(now);
+  if (cached) return cached;
+
+  if (relationFilterOptionsGlobal.__omnipathRelationFilterOptionsInFlight) {
+    return relationFilterOptionsGlobal.__omnipathRelationFilterOptionsInFlight;
   }
 
-  relationFilterOptionsInFlight = (async () => {
+  relationFilterOptionsGlobal.__omnipathRelationFilterOptionsInFlight = (async () => {
     const client = await getPool().connect();
     try {
       const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+
       const [predicateResult, sourceResult, interactionTypeResult] = await Promise.all([
         client.query<{ category: string; predicates: string[] | null }>(
           `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
@@ -281,13 +292,11 @@ export async function getRelationFilterOptions(): Promise<{
            ORDER BY category`,
         ),
         client.query<{ values: string[] | null }>(
-          `SELECT array_agg(value ORDER BY value) AS values
-           FROM (
-             SELECT DISTINCT source.value AS value
-             FROM ${SEARCH_SCHEMA}.entity_relation r
-             CROSS JOIN LATERAL unnest(r.sources) AS source(value)
-             WHERE source.value <> ''
-           ) t`,
+          `SELECT array_agg(resource_id ORDER BY resource_id) AS values
+           FROM ${SEARCH_SCHEMA}.resources
+           WHERE interaction_count > 0
+              OR membership_count > 0
+              OR annotation_count > 0`,
         ),
         client.query<{ values: string[] | null }>(
           `SELECT array_agg(value ORDER BY value) AS values
@@ -309,19 +318,15 @@ export async function getRelationFilterOptions(): Promise<{
         interactionTypes: interactionTypeResult.rows[0]?.values?.filter(Boolean) ?? [],
       };
 
-      relationFilterOptionsCache = {
-        value,
-        expiresAt: Date.now() + 5 * 60 * 1000,
-      };
-
+      setCachedRelationFilterOptions(value);
       return value;
     } finally {
       client.release();
-      relationFilterOptionsInFlight = null;
+      relationFilterOptionsGlobal.__omnipathRelationFilterOptionsInFlight = null;
     }
   })();
 
-  return relationFilterOptionsInFlight;
+  return relationFilterOptionsGlobal.__omnipathRelationFilterOptionsInFlight;
 }
 
 export async function getAssociatedEntityIds(entityPks: number[]): Promise<string[]> {

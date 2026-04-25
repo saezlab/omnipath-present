@@ -149,28 +149,26 @@
 
 {#snippet filterSidebarContent()}
   <div class="space-y-6">
-    <div class="space-y-2">
-      <h4 class="text-sm font-semibold">Ontology prefixes</h4>
-      <div class="space-y-1 max-h-[calc(100vh-14rem)] overflow-y-auto pr-2">
-        {#each prefixes as prefix}
-          <div class="flex items-center justify-between py-0.5 gap-2">
-            <Label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground">
-              <Checkbox
-                checked={selectedPrefixes.includes(prefix)}
-                onCheckedChange={() => togglePrefix(prefix)}
-                class={selectedPrefixes.includes(prefix) ? 'border-primary' : ''}
-              />
-              <span class="truncate font-mono text-xs">{prefix}</span>
-            </Label>
-          </div>
+    <div class="max-h-[calc(100vh-14rem)] space-y-1 overflow-y-auto pr-2">
+      {#each prefixes as prefix}
+        {@const selected = selectedPrefixes.includes(prefix)}
+        <div class="flex items-center justify-between gap-2 py-0.5">
+          <Label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground {selected ? 'font-medium' : ''}">
+            <Checkbox
+              checked={selected}
+              onCheckedChange={() => togglePrefix(prefix)}
+              class={selected ? 'h-4 w-4 flex-shrink-0 border-primary' : 'h-4 w-4 flex-shrink-0'}
+            />
+            <span class="truncate">{prefix}</span>
+          </Label>
+        </div>
+      {:else}
+        {#if loadingPrefixes}
+          <p class="text-sm text-muted-foreground">Loading filters...</p>
         {:else}
-          {#if loadingPrefixes}
-            <p class="text-sm text-muted-foreground">Loading prefixes…</p>
-          {:else}
-            <p class="text-sm text-muted-foreground">No prefixes available</p>
-          {/if}
-        {/each}
-      </div>
+          <p class="text-sm text-muted-foreground">No filters available</p>
+        {/if}
+      {/each}
     </div>
   </div>
 {/snippet}
@@ -208,16 +206,6 @@
 
 {#snippet resultsPane()}
   <div class="h-full overflow-y-auto p-4">
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <div class="text-sm text-muted-foreground">
-        {#if selectedPrefixes.length > 0}
-          {selectedPrefixes.length} prefix filter{selectedPrefixes.length === 1 ? '' : 's'} active
-        {:else}
-          All ontology prefixes
-        {/if}
-      </div>
-    </div>
-
     {#if error}
       <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
     {/if}

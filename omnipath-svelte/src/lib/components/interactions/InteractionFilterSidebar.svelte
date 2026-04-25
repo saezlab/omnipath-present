@@ -5,6 +5,7 @@
   import { Label } from '$lib/components/ui/label/index.js';
   import type { SearchFilters } from '$lib/types/search';
   import { fetchRelationFilterOptions } from '$lib/api/client';
+  import { getEntityTypeEmoji } from '$lib/utils/entity-types';
 
   interface Props {
     filters: SearchFilters;
@@ -73,9 +74,18 @@
       relation_categories: nextCategories.length > 0 ? nextCategories : undefined,
     });
   }
+
+  function formatParticipantType(value: string) {
+    const parts = value.split(':');
+    const label = parts.length >= 3 ? parts.slice(2).join(':') : value;
+    return {
+      label,
+      icon: getEntityTypeEmoji(label),
+    };
+  }
 </script>
 
-{#snippet filterOptionRow(filterKey: keyof SearchFilters, value: string, label: string, selectedValues: string[], onToggle: () => void)}
+{#snippet filterOptionRow(filterKey: keyof SearchFilters, value: string, label: string, selectedValues: string[], onToggle: () => void, icon?: string)}
   <div class="flex items-center justify-between py-0.5 gap-2">
     <Label
       for={`${filterKey}-${value}`}
@@ -87,30 +97,41 @@
         onCheckedChange={onToggle}
         class="h-4 w-4 flex-shrink-0"
       />
-      <span class="truncate">{label}</span>
+      <span class="truncate">
+        {#if icon}<span class="mr-1.5">{icon}</span>{/if}
+        {label}
+      </span>
     </Label>
   </div>
 {/snippet}
 
 {#snippet content()}
   <div class="space-y-6" class:opacity-70={loading}>
-    {#each Object.entries(predicatesByCategory) as [category, predicates]}
+    {#if Object.keys(predicatesByCategory).length > 0}
       <div class="space-y-2">
-        {@render filterOptionRow('relation_categories', category, category, filters.relation_categories || [], () => handleArrayToggle('relation_categories', category))}
-        <div class="space-y-1 max-h-64 overflow-y-auto pr-2 pl-4">
-          {#each predicates as predicate}
-            {@render filterOptionRow('predicates', predicate, predicate, filters.predicates || [], () => handlePredicateToggle(category, predicate))}
+        <h4 class="text-sm font-semibold">Relation types</h4>
+        <div class="space-y-2">
+          {#each Object.entries(predicatesByCategory) as [category, predicates]}
+            <div class="space-y-2">
+              {@render filterOptionRow('relation_categories', category, category, filters.relation_categories || [], () => handleArrayToggle('relation_categories', category))}
+              <div class="space-y-1 max-h-64 overflow-y-auto pr-2 pl-4">
+                {#each predicates as predicate}
+                  {@render filterOptionRow('predicates', predicate, predicate, filters.predicates || [], () => handlePredicateToggle(category, predicate))}
+                {/each}
+              </div>
+            </div>
           {/each}
         </div>
       </div>
-    {/each}
+    {/if}
 
     {#if interactionTypeOptions.length > 0}
       <div class="space-y-2">
         <h4 class="text-sm font-semibold">Participant types</h4>
         <div class="space-y-1 max-h-64 overflow-y-auto pr-2">
           {#each interactionTypeOptions as option}
-            {@render filterOptionRow('interaction_types', option, option, filters.interaction_types || [], () => handleArrayToggle('interaction_types', option))}
+            {@const participantType = formatParticipantType(option)}
+            {@render filterOptionRow('interaction_types', option, participantType.label, filters.interaction_types || [], () => handleArrayToggle('interaction_types', option), participantType.icon)}
           {/each}
         </div>
       </div>
@@ -120,7 +141,7 @@
       <h4 class="text-sm font-semibold">Sources</h4>
       <div class="space-y-1 max-h-64 overflow-y-auto pr-2">
         {#each sourceOptions as option}
-          {@render filterOptionRow('sources', option, option, filters.sources || [], () => handleArrayToggle('sources', option))}
+          {@render filterOptionRow('sources', option, option, filters.sources || [], () => handleArrayToggle('sources', option), '📚')}
         {/each}
       </div>
     </div>

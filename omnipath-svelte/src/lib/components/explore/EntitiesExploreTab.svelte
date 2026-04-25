@@ -342,7 +342,7 @@
 {/if}
 
 <Dialog bind:open={detailsOpen}>
-	<DialogContent class="max-h-[85vh] overflow-hidden sm:max-w-2xl">
+	<DialogContent class="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-2xl">
 		{#if detailsEntity}
 			{@const detailSections = getDescriptionSections(detailsEntity)}
 			{@const detailIdentifiers = getEntityIdentifiers(detailsEntity)}
@@ -351,7 +351,7 @@
 			<DialogHeader>
 				<DialogTitle>{getEntityDisplayName(detailsEntity)}</DialogTitle>
 			</DialogHeader>
-			<div class="min-h-0 space-y-5 overflow-y-auto pr-2">
+			<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
 				<div class="flex flex-wrap items-center gap-2">
 					<Badge variant="secondary">{getEntityTypeLabel(detailsEntity)}</Badge>
 					<span class="font-mono text-xs text-muted-foreground">{getEntityPublicId(detailsEntity)}</span>

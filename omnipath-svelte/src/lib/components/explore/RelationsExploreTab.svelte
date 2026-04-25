@@ -133,7 +133,7 @@
   }
 
   function handleClearFilters() {
-    onFilterChange({});
+    onFilterChange({ relation_categories: ['interaction'] });
   }
 
   function handleRowClick(row: InteractionListRow) {

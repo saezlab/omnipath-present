@@ -26,7 +26,7 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let draftQuery = $state('');
 	let entityFilters = $state<SearchFilters>({ ncbi_tax_id: ['9606'] });
-	let interactionFilters = $state<SearchFilters>({});
+	let interactionFilters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 	let annotationFilters = $state<SearchFilters>({});
 
 	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
