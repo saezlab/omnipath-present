@@ -17,6 +17,9 @@ importers:
       mode-watcher:
         specifier: ^1.1.0
         version: 1.1.0(svelte@5.55.5)
+      openchemlib:
+        specifier: ^9.20.0
+        version: 9.20.0
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -1375,6 +1378,9 @@ packages:
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
+  openchemlib@9.20.0:
+    resolution: {integrity: sha512-ttpQAiwUIjkn6SQrYc1KGy2IS5fP1OaARcafgaVjFykl4/aOqJgnxUtDoAjmFRei4WAUNVTkqVThlIskP36KxA==}
+
   paneforge@1.0.2:
     resolution: {integrity: sha512-KzmIXQH1wCfwZ4RsMohD/IUtEjVhteR+c+ulb/CHYJHX8SuDXoJmChtsc/Xs5Wl8NHS4L5Q7cxL8MG40gSU1bA==}
     peerDependencies:
@@ -2559,6 +2565,8 @@ snapshots:
   node-fetch-native@1.6.7: {}
 
   obug@2.1.1: {}
+
+  openchemlib@9.20.0: {}
 
   paneforge@1.0.2(svelte@5.55.5):
     dependencies:

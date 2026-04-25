@@ -1,23 +1,157 @@
 <script lang="ts">
-	import { Search } from '@lucide/svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { browser } from '$app/environment';
+	import { ArrowRight } from '@lucide/svelte';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import ExploreBrowserShell from '$lib/components/explore/ExploreBrowserShell.svelte';
+	import EntitiesExploreTab from '$lib/components/explore/EntitiesExploreTab.svelte';
+	import RelationsExploreTab from '$lib/components/explore/RelationsExploreTab.svelte';
+	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
+	import { getSelectionStore } from '$lib/stores/selection.svelte';
+	import type { SearchFilters } from '$lib/types/search';
+
+	const SPECIES_OPTIONS = [
+		{ value: '9606', label: 'Human' },
+		{ value: '10090', label: 'Mouse' },
+		{ value: '10116', label: 'Rat' },
+		{ value: '7227', label: 'Fruit fly' },
+		{ value: '6239', label: 'C. elegans' },
+		{ value: '7955', label: 'Zebrafish' }
+	] as const;
+
+	const selection = getSelectionStore();
+
+	let inputRef = $state<HTMLInputElement | null>(null);
+	let draftQuery = $state('');
+	let entityFilters = $state<SearchFilters>({ ncbi_tax_id: ['9606'] });
+	let interactionFilters = $state<SearchFilters>({});
+	let annotationFilters = $state<SearchFilters>({});
+
+	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
+	const query = $derived($page.url.searchParams.get('q') || '');
+	const species = $derived($page.url.searchParams.get('species') || '9606');
+
+	$effect(() => {
+		draftQuery = query;
+	});
+
+	function setTab(next: string) {
+		const url = new URL($page.url);
+		url.searchParams.set('tab', next);
+		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function setQuery(next: string) {
+		const url = new URL($page.url);
+		if (next.trim()) {
+			url.searchParams.set('q', next.trim());
+		} else {
+			url.searchParams.delete('q');
+		}
+		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function setSpecies(value: string | null) {
+		const url = new URL($page.url);
+		if (value) {
+			url.searchParams.set('species', value);
+		} else {
+			url.searchParams.delete('species');
+		}
+		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function submitSearch() {
+		setQuery(draftQuery);
+	}
+
+	function buildSelectionHref(entityIds: string[], annotationIds: string[]) {
+		const params = new URLSearchParams();
+		if (entityIds.length > 0) params.set('entities', entityIds.join(','));
+		if (annotationIds.length > 0) params.set('annotations', annotationIds.join(','));
+		return `/selection${params.toString() ? `?${params.toString()}` : ''}`;
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			const tagName = target?.tagName;
+			const isTypingTarget =
+				tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable;
+
+			if (event.key === '/' && !isTypingTarget) {
+				event.preventDefault();
+				inputRef?.focus();
+				inputRef?.select();
+				return;
+			}
+
+			if ((event.key === 's' || event.key === 'S') && !isTypingTarget && selection.totalSelectionCount > 0) {
+				event.preventDefault();
+				goto(buildSelectionHref(selection.entityIds, selection.annotationIds));
+			}
+		};
+
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	});
+
+	const selectionHref = $derived(buildSelectionHref(selection.entityIds, selection.annotationIds));
+
+	const searchPlaceholder = $derived(
+		tab === 'ontology' ? 'Search ontology terms…' : tab === 'relations' ? 'Search relations…' : 'Search entities…'
+	);
 </script>
 
-<section class="flex h-full w-full flex-col overflow-auto p-6">
-	<div class="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6">
-		<div class="space-y-2">
-			<p class="text-sm font-medium text-primary">SvelteKit migration</p>
-			<h1 class="text-3xl font-bold tracking-tight">Explore OmniPath</h1>
-			<p class="max-w-2xl text-muted-foreground">
-				Search shell placeholder for entities, relations, and ontology annotations. Feature tabs will be
-				ported in later milestones.
-			</p>
-		</div>
+<svelte:window />
 
-		<div class="rounded-xl border bg-card p-6 shadow-sm">
-			<div class="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-muted-foreground">
-				<Search class="h-5 w-5" />
-				<span>Search OmniPath data…</span>
-			</div>
-		</div>
-	</div>
-</section>
+<ExploreBrowserShell
+	{query}
+	{draftQuery}
+	onDraftQueryChange={(value) => (draftQuery = value)}
+	onSubmitSearch={submitSearch}
+	{tab}
+	onTabChange={setTab}
+	tabs={[
+		{ value: 'entity', label: 'entity' },
+		{ value: 'relations', label: 'relations' },
+		{ value: 'ontology', label: 'ontology' }
+	]}
+	searchPlaceholder={searchPlaceholder}
+	bind:searchInputRef={inputRef}
+	{species}
+	onSpeciesChange={setSpecies}
+	showSpeciesPicker={tab === 'entity'}
+	speciesOptions={SPECIES_OPTIONS}
+>
+	{#snippet content()}
+		{#if tab === 'entity'}
+			<EntitiesExploreTab {query} {species} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
+		{:else if tab === 'relations'}
+			<RelationsExploreTab filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
+		{:else}
+			<AnnotationBrowserTab {query} {species} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
+		{/if}
+	{/snippet}
+
+	{#snippet footerCta()}
+		{#if selection.totalSelectionCount > 0}
+			<Button
+				href={selectionHref}
+				size="lg"
+				class="fixed bottom-6 right-6 z-40 h-12 rounded-full px-4 shadow-lg"
+			>
+				<span class="flex items-center gap-2">
+					<span>Open Selection</span>
+					<Badge variant="secondary" class="rounded-full px-2 py-0.5 text-xs">
+						{selection.totalSelectionCount}
+					</Badge>
+					<ArrowRight class="size-4" />
+				</span>
+			</Button>
+		{/if}
+	{/snippet}
+</ExploreBrowserShell>

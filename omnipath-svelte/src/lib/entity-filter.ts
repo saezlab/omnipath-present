@@ -1,5 +1,3 @@
-import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
-
 export function normalizeEntityTypeFilterValue(value: string | null | undefined): string {
   const text = (value || "").trim();
   if (!text) return "";
@@ -16,10 +14,6 @@ export function normalizeInteractionTypeFilterValue(value: string | null | undef
     .map((part) => normalizeEntityTypeFilterValue(part))
     .sort()
     .join("|");
-}
-
-export function normalizedEntityTypeDrizzleSql(column: SQLWrapper): SQL {
-  return sql`LOWER(split_part(${column}, ':', 3)) || ':' || split_part(${column}, ':', 1) || ':' || split_part(${column}, ':', 2)`;
 }
 
 export function normalizedEntityTypeSqlExpression(column: string): string {

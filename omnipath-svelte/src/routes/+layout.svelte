@@ -19,9 +19,9 @@
 </svelte:head>
 
 <ModeWatcher defaultMode="system" />
-<SidebarProvider open>
+<SidebarProvider open class="h-full overflow-hidden">
 	<AppSidebar />
-	<main class="flex min-h-0 w-full flex-1 overflow-hidden">
+	<main class="flex min-h-0 h-full w-full flex-1 overflow-hidden">
 		{@render children()}
 	</main>
 </SidebarProvider>

@@ -166,6 +166,26 @@ export function getEntityDescriptions(entity: EntityLike): string[] {
   return mapEntityAttributesToDescriptions(entity.entityAttributes);
 }
 
+const DESCRIPTION_ATTRIBUTE_TERM_KEYS = [
+  "OM:0603:Function",
+  "OM:0605:Disease",
+  "OM:0604:Subcellular Location",
+] as const;
+
+export function getAllowedEntityDescriptions(entity: EntityLike): string[] {
+  if (!Array.isArray(entity.entityAttributes)) return [];
+
+  const allowedTerms = new Set(DESCRIPTION_ATTRIBUTE_TERM_KEYS.map((term) => term.toLowerCase()));
+
+  return entity.entityAttributes.flatMap((attribute) => {
+    if (!isObject(attribute)) return [];
+    const term = typeof attribute.term === "string" ? attribute.term.trim().toLowerCase() : "";
+    const value = typeof attribute.value === "string" ? attribute.value.trim() : "";
+    if (!term || !value || !allowedTerms.has(term)) return [];
+    return [value];
+  });
+}
+
 function getPreferredName(names: string[]): string | undefined {
   const scored = uniqueStrings(names).map((name, index) => {
     const trimmed = name.trim();
