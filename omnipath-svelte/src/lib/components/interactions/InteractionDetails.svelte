@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { Search, ArrowRight, Layers3, ExternalLink, Minus } from '@lucide/svelte';
+  import { Search, ArrowRight, ExternalLink, Minus } from '@lucide/svelte';
   import { Badge } from '$lib/components/ui/badge/index.js';
-  import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '$lib/components/ui/accordion/index.js';
-  import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table/index.js';
   import EntityBadge from '$lib/components/entity/EntityBadge.svelte';
   import {
     getEntityDisplayName,
@@ -11,6 +9,8 @@
     getEntityTypeLabel,
   } from '$lib/entities/display';
   import type { InteractionDetailsData, InteractionListRow, ParsedAnnotation, EvidenceGroup } from '$lib/types/interactions';
+  import { getEntityTypeEmoji } from '$lib/utils/entity-types';
+  import { cn } from '$lib/utils';
 
   interface Props {
     selectedInteraction: InteractionDetailsData | InteractionListRow | null;
@@ -157,33 +157,86 @@
     return terms.size;
   }
 
+  function formatParticipantType(value: string) {
+    const parts = value.split(":");
+    const label = parts.length >= 3 ? parts.slice(2).join(":") : value;
+    return {
+      label,
+      icon: getEntityTypeEmoji(label),
+    };
+  }
+
+  function buildEvidenceRows(evidence: InteractionDetailsData["evidence"]) {
+    return evidence.map((row, index) => {
+      const subjectSplit = splitPubmedAnnotations(normalizeAnnotationArray(row.subjectAttributes));
+      const relationSplit = splitPubmedAnnotations([
+        ...normalizeAnnotationArray(row.recordAttributes),
+        ...normalizeAnnotationArray(row.evidence),
+      ]);
+      const objectSplit = splitPubmedAnnotations(normalizeAnnotationArray(row.objectAttributes));
+
+      return {
+        key: `${row.source || 'unknown'}-${index}`,
+        source: row.source,
+        pubmedIds: Array.from(new Set([
+          ...subjectSplit.pubmedIds,
+          ...relationSplit.pubmedIds,
+          ...objectSplit.pubmedIds,
+        ])).sort((a, b) => Number(a) - Number(b)),
+        subjectAnnotations: dedupeAnnotations(subjectSplit.annotations),
+        relationAnnotations: dedupeAnnotations(relationSplit.annotations),
+        objectAnnotations: dedupeAnnotations(objectSplit.annotations),
+      };
+    });
+  }
+
   const detailedInteraction = $derived(
     selectedInteraction && "evidence" in selectedInteraction ? selectedInteraction : null
   );
   const evidence = $derived(detailedInteraction?.evidence ?? []);
-  const evidenceGroups = $derived(buildEvidenceGroups(evidence));
-  const annotationTermCount = $derived(getAnnotationTermCount(evidence));
-
+  const evidenceRows = $derived(buildEvidenceRows(evidence));
   const subjectEntity = $derived(selectedInteraction!.subjectEntity);
   const objectEntity = $derived(selectedInteraction!.objectEntity);
-  const subjectId = $derived(getEntityPublicId(subjectEntity));
-  const objectId = $derived(getEntityPublicId(objectEntity));
 </script>
 
-{#if !selectedInteraction}
-  <div class="p-4">
-    <div class="rounded-lg border bg-card p-8">
-      <div class="flex flex-col items-center justify-center text-center">
-        <Search class="mb-4 h-12 w-12 text-muted-foreground" />
-        <p class="mb-2 text-lg font-medium text-muted-foreground">No relation selected</p>
-        <p class="text-sm text-muted-foreground">Select a relation to view detailed evidence</p>
+{#snippet annotationPills(title: string, annotations: ParsedAnnotation[], emptyText: string)}
+  <div class="space-y-2">
+    {#if title}
+      <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{title}</div>
+    {/if}
+    {#if annotations.length === 0}
+      <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Minus class="size-3" />
+        {emptyText}
       </div>
+    {:else}
+      <div class="flex flex-wrap gap-1.5">
+        {#each annotations as annotation}
+          <span class="inline-flex max-w-full flex-col rounded-lg border bg-background px-2.5 py-1.5 text-xs">
+            <span class="truncate font-medium leading-tight">{formatAnnotationText(annotation)}</span>
+            {#if annotation.termId || annotation.unitId}
+              <span class="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+                {[annotation.termId, annotation.unitId].filter(Boolean).join(' · ')}
+              </span>
+            {/if}
+          </span>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#if !selectedInteraction}
+  <div class="p-6">
+    <div class="rounded-xl border bg-card p-8 text-center">
+      <Search class="mx-auto mb-4 size-10 text-muted-foreground" />
+      <p class="text-sm text-muted-foreground">Select a relation to view details.</p>
     </div>
   </div>
 {:else}
-  <div class="space-y-6 p-4 pb-8">
-    <div class="rounded-lg border bg-card p-6">
-      <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-6">
+  <div class="space-y-4 p-6">
+    <section class="rounded-2xl border bg-card/70 p-4">
+      <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
         <div class="min-w-0">
           <EntityBadge
             displayName={getEntityDisplayName(subjectEntity)}
@@ -192,9 +245,11 @@
           />
         </div>
 
-        <div class="flex flex-col items-center gap-2 text-muted-foreground">
-          <ArrowRight class="h-8 w-8" />
-          <Badge variant="outline">{selectedInteraction.relation.predicate || "—"}</Badge>
+        <div class="flex items-center justify-center">
+          <div class="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-sm">
+            <ArrowRight class="size-4 text-muted-foreground" />
+            <span class="font-medium">{selectedInteraction.relation.predicate || '—'}</span>
+          </div>
         </div>
 
         <div class="min-w-0">
@@ -206,193 +261,70 @@
         </div>
       </div>
 
-      <div class="space-y-4 border-t pt-4">
-        {#if selectedInteraction.relation.participantTypes.length > 0}
-          <div class="flex flex-wrap justify-center gap-2">
-            {#each selectedInteraction.relation.participantTypes as participantType}
-              <Badge variant="secondary">{participantType}</Badge>
-            {/each}
-          </div>
-        {/if}
-
-        <div class="grid grid-cols-2 gap-4">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-primary">{selectedInteraction.relation.evidenceCount}</div>
-            <div class="text-xs text-muted-foreground">Evidence{selectedInteraction.relation.evidenceCount !== 1 ? "s" : ""}</div>
-          </div>
-          <div class="text-center">
-            <div class="text-2xl font-bold text-purple-600">{annotationTermCount}</div>
-            <div class="text-xs text-muted-foreground">Annotation Term{annotationTermCount !== 1 ? "s" : ""}</div>
-          </div>
-        </div>
+      <div class="mt-4 flex flex-wrap gap-2 border-t pt-4">
+        <Badge variant="outline">{selectedInteraction.relation.relationCategory}</Badge>
+        <Badge variant="secondary">{selectedInteraction.relation.evidenceCount.toLocaleString()} evidence</Badge>
+        {#each selectedInteraction.relation.sources as source}
+          <Badge variant="secondary">📚 {source}</Badge>
+        {/each}
+        {#each selectedInteraction.relation.participantTypes as participantType}
+          {@const formatted = formatParticipantType(participantType)}
+          <Badge variant="outline">{formatted.icon ? `${formatted.icon} ` : ''}{formatted.label}</Badge>
+        {/each}
       </div>
-    </div>
+    </section>
 
-    <Accordion type="multiple" value={["summary", "evidence"]} class="space-y-4">
-      <AccordionItem value="summary" class="rounded-lg border">
-        <AccordionTrigger class="px-4 py-3 hover:no-underline">
-          <span class="font-medium">Evidence summary table</span>
-        </AccordionTrigger>
-        <AccordionContent class="px-4 pb-4">
-          {#if evidenceLoading}
-            <div class="text-sm text-muted-foreground">Loading evidence…</div>
-          {:else if evidenceGroups.length === 0}
-            <div class="text-sm text-muted-foreground">No evidence rows available.</div>
-          {:else}
-            <div class="overflow-hidden rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Source</TableHead>
-                    <TableHead class="text-center">Evidence</TableHead>
-                    <TableHead class="text-center">Subject ann.</TableHead>
-                    <TableHead class="text-center">Relation ann.</TableHead>
-                    <TableHead class="text-center">Object ann.</TableHead>
-                    <TableHead class="text-center">PubMed</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {#each evidenceGroups as group}
-                    <TableRow>
-                      <TableCell class="font-medium">{group.source || "—"}</TableCell>
-                      <TableCell class="text-center">{group.evidenceCount}</TableCell>
-                      <TableCell class="text-center">{group.subjectAnnotations.length}</TableCell>
-                      <TableCell class="text-center">{group.relationAnnotations.length}</TableCell>
-                      <TableCell class="text-center">{group.objectAnnotations.length}</TableCell>
-                      <TableCell class="text-center">{group.pubmedIds.length}</TableCell>
-                    </TableRow>
-                  {/each}
-                </TableBody>
-              </Table>
-            </div>
-          {/if}
-        </AccordionContent>
-      </AccordionItem>
+    <section class="space-y-3">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold">Evidence</h3>
+        <Badge variant="secondary">{evidence.length.toLocaleString()} rows</Badge>
+      </div>
 
-      <AccordionItem value="evidence" class="rounded-lg border">
-        <AccordionTrigger class="px-4 py-3 hover:no-underline">
-          <div class="flex items-center gap-2">
-            <Layers3 class="h-5 w-5" />
-            <span class="font-medium">Aggregated evidence</span>
-            <Badge variant="secondary">{evidence.length}</Badge>
+      {#if evidenceLoading}
+        <div class="rounded-xl border bg-card p-6 text-sm text-muted-foreground">Loading evidence…</div>
+      {:else if evidenceRows.length === 0}
+        <div class="rounded-xl border bg-card p-6 text-sm text-muted-foreground">No evidence rows available.</div>
+      {:else}
+        <div class="overflow-hidden rounded-2xl border bg-card/70">
+          <div class="grid grid-cols-3 border-b bg-muted/25 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <div>Subject</div>
+            <div>Relation</div>
+            <div>Object</div>
           </div>
-        </AccordionTrigger>
-        <AccordionContent class="px-4 pb-4">
-          {#if evidenceLoading}
-            <div class="text-sm text-muted-foreground">Loading evidence…</div>
-          {:else if evidenceGroups.length === 0}
-            <div class="text-sm text-muted-foreground">No evidence rows available.</div>
-          {:else}
-            <div class="space-y-4">
-              {#each evidenceGroups as group}
-                <div class="rounded-lg border bg-muted/20 p-4">
-                  <div class="mb-4 flex items-start justify-between gap-3">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary" class="text-xs">
-                        {group.evidenceCount} evidence{group.evidenceCount !== 1 ? "s" : ""}
-                      </Badge>
-                    </div>
 
-                    <Badge variant="secondary" class="text-xs">
-                      {group.source || "Unknown source"}
-                    </Badge>
-                  </div>
-
-                  <div class="grid gap-4 lg:grid-cols-3">
-                    <div class="space-y-2">
-                      <div class="text-xs font-medium uppercase tracking-wide text-blue-700">
-                        Subject ({subjectId})
-                      </div>
-                      {#if group.subjectAnnotations.length === 0}
-                        <div class="text-xs text-muted-foreground">No subject annotations</div>
-                      {:else}
-                        <div class="flex flex-wrap gap-2">
-                          {#each group.subjectAnnotations as annotation}
-                            <div class="rounded-md border bg-background px-2.5 py-1.5 text-xs">
-                              <div class="font-medium leading-tight">{formatAnnotationText(annotation)}</div>
-                              {#if annotation.termId || annotation.unitId}
-                                <div class="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-                                  {[annotation.termId, annotation.unitId].filter(Boolean).join(" · ")}
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-
-                    <div class="space-y-2">
-                      <div class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Relation</div>
-                      {#if group.relationAnnotations.length === 0}
-                        <div class="text-xs text-muted-foreground">No relation-level annotations</div>
-                      {:else}
-                        <div class="flex flex-wrap gap-2">
-                          {#each group.relationAnnotations as annotation}
-                            <div class="rounded-md border bg-background px-2.5 py-1.5 text-xs">
-                              <div class="font-medium leading-tight">{formatAnnotationText(annotation)}</div>
-                              {#if annotation.termId || annotation.unitId}
-                                <div class="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-                                  {[annotation.termId, annotation.unitId].filter(Boolean).join(" · ")}
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-
-                    <div class="space-y-2">
-                      <div class="text-xs font-medium uppercase tracking-wide text-purple-700">
-                        Object ({objectId})
-                      </div>
-                      {#if group.objectAnnotations.length === 0}
-                        <div class="text-xs text-muted-foreground">No object annotations</div>
-                      {:else}
-                        <div class="flex flex-wrap gap-2">
-                          {#each group.objectAnnotations as annotation}
-                            <div class="rounded-md border bg-background px-2.5 py-1.5 text-xs">
-                              <div class="font-medium leading-tight">{formatAnnotationText(annotation)}</div>
-                              {#if annotation.termId || annotation.unitId}
-                                <div class="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-                                  {[annotation.termId, annotation.unitId].filter(Boolean).join(" · ")}
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  </div>
-
-                  <div class="mt-4 border-t pt-4">
-                    <div class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">PubMed</div>
-                    {#if group.pubmedIds.length > 0}
-                      <div class="flex flex-wrap gap-2">
-                        {#each group.pubmedIds as pubmedId}
-                          <a
-                            href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
-                            target="_blank"
-                            rel="noreferrer"
-                            class="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs hover:bg-muted"
-                          >
-                            PMID:{pubmedId}
-                            <ExternalLink class="h-3 w-3" />
-                          </a>
-                        {/each}
-                      </div>
-                    {:else}
-                      <div class="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Minus class="h-3 w-3" />
-                        No PubMed references available
-                      </div>
-                    {/if}
-                  </div>
+          {#each evidenceRows as row, index (row.key)}
+            <article class={cn('px-4 py-4', index > 0 ? 'border-t' : '')}>
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">📚 {row.source || 'Unknown source'}</Badge>
+                  <Badge variant="outline">Evidence {index + 1}</Badge>
                 </div>
-              {/each}
-            </div>
-          {/if}
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
+                {#if row.pubmedIds.length > 0}
+                  <div class="flex flex-wrap justify-end gap-1.5">
+                    {#each row.pubmedIds as pubmedId}
+                      <a
+                        href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="inline-flex items-center gap-1 rounded-lg border bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
+                      >
+                        PMID:{pubmedId}
+                        <ExternalLink class="size-3" />
+                      </a>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+
+              <div class="grid gap-4 lg:grid-cols-3">
+                {@render annotationPills('', row.subjectAnnotations, 'No subject annotations')}
+                {@render annotationPills('', row.relationAnnotations, 'No relation annotations')}
+                {@render annotationPills('', row.objectAnnotations, 'No object annotations')}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {/if}
+    </section>
   </div>
 {/if}

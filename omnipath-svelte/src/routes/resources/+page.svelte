@@ -2,8 +2,12 @@
 	import { ChevronDown, ChevronUp, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs/index.js';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu/index.js';
 	import { cn } from '$lib/utils.js';
 	import type { ResourceRecord } from '$lib/server/resource';
 	import type { PageData } from './$types';
@@ -116,34 +120,62 @@
 
 <div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 overflow-hidden px-4 py-4 md:px-6 md:py-5">
 	<div class="shrink-0 space-y-3">
-		<div class="rounded-[1.4rem] border bg-card p-2.5 shadow-sm">
-			<div class="flex flex-col gap-2.5 lg:flex-row lg:items-center">
-				<div class="relative min-w-0 flex-1">
-					<Search class="absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-muted-foreground" />
-					<Input
-						type="search"
-						bind:value={query}
-						onkeydown={handleSearchKeyDown}
-						placeholder="Search resources…"
-						class="h-11 rounded-[1rem] border-0 bg-muted/40 pl-10 text-sm shadow-none sm:text-base"
-					/>
+		<div class="w-full">
+			<div class="overflow-hidden rounded-2xl border border-border bg-card transition-all">
+				<div class="flex h-11 items-center">
+					<div class="flex min-w-0 flex-1 items-center gap-3 px-4">
+						<Search class="h-5 w-5 shrink-0 text-muted-foreground" />
+						<input
+							type="text"
+							bind:value={query}
+							onkeydown={handleSearchKeyDown}
+							placeholder="Search resources…"
+							class="min-w-0 flex-1 bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none"
+						/>
+					</div>
+
+					<DropdownMenu>
+						<DropdownMenuTrigger class="flex h-11 items-center gap-2 px-4 text-sm text-foreground transition-colors hover:bg-muted/50 focus:outline-none">
+							<span>{categories.find((category) => category.value === selectedCategory)?.label ?? 'All'}</span>
+							<ChevronDown class="h-4 w-4 text-muted-foreground" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" class="min-w-[120px]">
+							{#each categories as category}
+								<DropdownMenuItem
+									onclick={() => (selectedCategory = category.value)}
+									class={category.value === selectedCategory ? 'bg-accent' : ''}
+								>
+									{category.label}
+								</DropdownMenuItem>
+							{/each}
+						</DropdownMenuContent>
+					</DropdownMenu>
+
+					<button
+						type="button"
+						onclick={handleSubmitSearch}
+						class="flex h-11 items-center gap-2 bg-primary px-5 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+					>
+						<Search class="h-4 w-4" />
+						<span>Search</span>
+					</button>
 				</div>
 
-				<div class="flex items-center gap-2 lg:shrink-0">
-					<Button onclick={handleSubmitSearch} class="h-9 rounded-lg px-3.5 text-sm">Search</Button>
+				<div class="flex items-center bg-muted/25">
+					{#each categories as category}
+						<button
+							type="button"
+							onclick={() => (selectedCategory = category.value)}
+							class={`h-11 flex-1 text-sm font-medium transition-all ${
+								selectedCategory === category.value
+									? 'bg-secondary text-foreground'
+									: 'text-muted-foreground hover:bg-muted/30 hover:text-foreground'
+							}`}
+						>
+							{category.label}
+						</button>
+					{/each}
 				</div>
-			</div>
-
-			<div class="mt-2.5 flex items-center justify-between gap-3">
-				<Tabs value={selectedCategory} onValueChange={(value) => (selectedCategory = value)} class="min-w-0 flex-1">
-					<TabsList class="grid h-auto w-full grid-cols-4 rounded-xl bg-muted/60 p-1">
-						{#each categories as category}
-							<TabsTrigger value={category.value} class="rounded-lg text-sm">
-								{category.label}
-							</TabsTrigger>
-						{/each}
-					</TabsList>
-				</Tabs>
 			</div>
 		</div>
 	</div>
