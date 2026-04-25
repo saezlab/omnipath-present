@@ -40,3 +40,5 @@ target/
 data/
 omnipath_build.code-workspace
 .next/
+.svelte-kit
+build/

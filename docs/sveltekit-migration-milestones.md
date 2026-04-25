@@ -1,12 +1,12 @@
 # SvelteKit Migration Milestones
 
-This document outlines a staged migration plan from `next-omnipath/` to a new SvelteKit application in `svelte-omnipath/`.
+This document outlines a staged migration plan from `next-omnipath/` to a new SvelteKit application in `omnipath-svelte/`.
 
 The intended approach is **not** to rewrite the existing Next.js app in place. Instead, create a new sibling app, establish the framework and shared foundations, then move functionality over route by route and feature by feature until the SvelteKit app reaches parity.
 
 ## Goals
 
-- Create a new `svelte-omnipath/` frontend alongside `next-omnipath/`.
+- Create a new `omnipath-svelte/` frontend alongside `next-omnipath/`.
 - Preserve the existing OmniPath visual language using Tailwind CSS and shadcn-svelte.
 - Reuse framework-neutral TypeScript logic where possible.
 - Move database/server logic into explicit SvelteKit server-only modules.
@@ -23,50 +23,111 @@ The intended approach is **not** to rewrite the existing Next.js app in place. I
 
 ---
 
-# Milestone 1 — Bootstrap `svelte-omnipath/`
+# Current `omnipath-svelte/` status
+
+A basic SvelteKit project already exists at `omnipath-svelte/`.
+
+Observed setup:
+
+- Svelte 5 / SvelteKit project is initialized.
+- shadcn-svelte is initialized with `style: "vega"`.
+- Tailwind CSS v4 is configured through `@tailwindcss/vite`.
+- UI components are already generated under `src/lib/components/ui/*`.
+- `@tanstack/svelte-query` is installed.
+- `mode-watcher` and `svelte-sonner` are installed.
+- Current global CSS file is `src/routes/layout.css`, not `src/app.css`.
+- Current root layout imports `./layout.css` from `src/routes/+layout.svelte`.
+- Package metadata is now renamed to `"omnipath-svelte"`.
+- Current adapter is `@sveltejs/adapter-node`.
+- `svelte.config.js` no longer has a placeholder alias.
+- The dev and preview scripts currently use temporary side-by-side port `8083` while the Next app still owns `8082`.
+- `.env.example` documents the expected database, API service, Docker, and chat model environment variables.
+- The root route redirects to `/explore` through `src/routes/+page.server.ts`.
+- Placeholder routes exist for `/explore`, `/selection`, `/resources`, and `/chat`.
+- The global app shell now includes the shadcn-svelte sidebar, OmniPath logo, dark-mode toggle, and toast host.
+
+Important follow-ups from this inspection:
+
+- Several runtime dependencies needed for later milestones are not installed yet, including `ai`, AI model providers, `zod`, `drizzle-orm`, and `pg`.
+- The app should switch from temporary local port `8083` to deployment port `8082` when it replaces the Next frontend locally/in Docker.
+- The initial SvelteKit sidebar/layout is in place, but feature-specific sidebar content and full page parity still need to be ported.
+
+---
+
+# Milestone 1 — Bootstrap `omnipath-svelte/`
 
 ## Objective
 
 Create a clean SvelteKit project that can run independently next to the current Next.js app.
 
-## Tasks
+## Status
 
-- Create `svelte-omnipath/` as a sibling of `next-omnipath/`.
-- Initialize SvelteKit with TypeScript.
-- Add `@sveltejs/adapter-node` for production deployment.
-- Configure the dev server to use frontend port `8082` or a temporary alternate port while both apps coexist.
-- Add baseline scripts:
+Complete for the initial bootstrap pass.
+
+Done:
+
+- `omnipath-svelte/` exists as a sibling of `next-omnipath/`.
+- SvelteKit with TypeScript is initialized.
+- Baseline scripts exist:
   - `dev`
   - `build`
   - `preview`
   - `check`
-  - `lint`, if desired
-- Set up project aliases:
-  - `$lib`
-  - `$lib/server`
-- Add environment variable handling for:
+  - `check:watch`
+- `$lib` is available through SvelteKit defaults.
+- Package metadata is renamed from `"my-app"` to `"omnipath-svelte"`.
+- `@sveltejs/adapter-auto` has been replaced with `@sveltejs/adapter-node` for Docker/Node deployment.
+- The placeholder alias has been removed from `svelte.config.js`.
+- Dev/preview use temporary side-by-side port `8083` while both frontends coexist.
+- `.env.example` has been added.
+- `.env.example` documents:
   - `DATABASE_URL`
   - `API_SERVICE_URL`
   - `DOCKERIZED`
   - `CHAT_MODEL_PROVIDER`
-  - model provider API keys
+  - `OPENROUTER_API_KEY`
+  - `OPENROUTER_CHAT_MODEL`
+  - `GOOGLE_GENERATIVE_AI_API_KEY`
+  - `GOOGLE_CHAT_MODEL`
+  - `CEREBRAS_API_KEY`
+  - `CEREBRAS_CHAT_MODEL`
 
-## Initial dependency candidates
+Remaining follow-up:
+
+- Switch dev/preview and Docker runtime to port `8082` when the SvelteKit app replaces the Next frontend.
+
+## Installed dependencies observed
+
+The project already includes SvelteKit, Svelte 5, Tailwind CSS v4, shadcn-svelte/Bits UI, PaneForge, Lucide Svelte, and TanStack Svelte Query.
+
+## Dependencies still needed for later milestones
 
 ```bash
 pnpm add ai @ai-sdk/google @ai-sdk/cerebras @openrouter/ai-sdk-provider zod
 pnpm add drizzle-orm pg
-pnpm add lucide-svelte mode-watcher svelte-sonner
-pnpm add @tanstack/svelte-query
-pnpm add tailwind-merge clsx class-variance-authority
-pnpm add -D @sveltejs/adapter-node drizzle-kit openapi-typescript tsx
+pnpm add nanoid openapi-typescript
+pnpm add -D drizzle-kit tsx dotenv @types/pg
+```
+
+Recently added:
+
+```bash
+pnpm add mode-watcher svelte-sonner
+pnpm add -D @sveltejs/adapter-node
+```
+
+Optional later, depending on feature parity needs:
+
+```bash
+pnpm add cytoscape elkjs openchemlib canvas-confetti shiki
 ```
 
 ## Acceptance criteria
 
-- `svelte-omnipath/` exists and runs with `pnpm dev`.
-- A placeholder SvelteKit route renders successfully.
-- The app can build with `pnpm build`.
+- `omnipath-svelte/` runs with `pnpm dev`.
+- The app builds with `pnpm build`.
+- `svelte.config.js` has no placeholder alias.
+- Adapter choice is production-appropriate.
 - Environment variables are documented in `.env.example`.
 
 ---
@@ -77,62 +138,47 @@ pnpm add -D @sveltejs/adapter-node drizzle-kit openapi-typescript tsx
 
 Replicate the design foundation of the Next.js app in SvelteKit.
 
-## Tasks
+## Status
 
-- Set up Tailwind CSS v4.
-- Initialize shadcn-svelte.
-- Port the CSS variables and theme tokens from:
+Mostly complete for the foundation pass.
 
-```txt
-next-omnipath/src/app/globals.css
+Done:
+
+- Tailwind CSS v4 is set up via `@tailwindcss/vite`.
+- shadcn-svelte is initialized.
+- The project uses `src/routes/layout.css` for global styles.
+- The generated component set already includes the main primitives needed for the migration, including accordion, alert, avatar, badge, button, button-group, card, checkbox, collapsible, command, dialog, dropdown-menu, hover-card, input, input-group, label, popover, progress, radio-group, resizable, scroll-area, select, separator, sheet, sidebar, skeleton, slider, switch, table, tabs, textarea, and tooltip.
+- `@lucide/svelte` is installed and used in the initial Svelte sidebar.
+- `mode-watcher` is installed and wired into the root layout.
+- `svelte-sonner` is installed and wired into the root layout.
+- OmniPath-specific theme tokens from `next-omnipath/src/app/globals.css` have been ported to `omnipath-svelte/src/routes/layout.css`.
+- Existing shadcn-svelte imports were preserved:
+
+```css
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "@fontsource-variable/inter";
 ```
 
-to:
+- Missing OmniPath token names were added:
+  - `--highlight`
+  - `--highlight-foreground`
+  - corresponding `@theme inline` color mappings
+- `.scrollbar-hide` has been re-added.
 
-```txt
-svelte-omnipath/src/app.css
-```
+Still needed:
 
-- Add shadcn-svelte components needed by the current UI:
-  - accordion
-  - alert
-  - avatar
-  - badge
-  - button
-  - card
-  - checkbox
-  - collapsible
-  - command
-  - dialog
-  - dropdown-menu
-  - hover-card
-  - input
-  - label
-  - popover
-  - progress
-  - radio-group
-  - resizable
-  - scroll-area
-  - select
-  - separator
-  - sheet
-  - sidebar
-  - slider
-  - switch
-  - table
-  - tabs
-  - textarea
-  - tooltip
-- Replace React icon usage with `lucide-svelte`.
-- Add dark mode support with `mode-watcher`.
-- Add toast support with `svelte-sonner`.
+- Verify all generated shadcn-svelte primitives against migrated feature UI as pages are ported.
+- Add a temporary component gallery/test page if visual regression checks need a dedicated route.
 
 ## Acceptance criteria
 
-- The SvelteKit app uses the same color tokens, radii, and base typography as the Next app.
+- The SvelteKit app uses OmniPath color tokens, radii, and base typography.
 - Light/dark mode works.
 - Basic shadcn-svelte components render correctly.
 - A temporary component gallery/test page can be used to verify styling.
+- No Next/React-specific styling assumptions remain.
 
 ---
 
@@ -141,6 +187,31 @@ svelte-omnipath/src/app.css
 ## Objective
 
 Port the global application shell before migrating feature pages.
+
+## Current status
+
+Partially complete.
+
+Current files:
+
+```txt
+omnipath-svelte/src/routes/+layout.svelte
+omnipath-svelte/src/routes/+page.server.ts
+omnipath-svelte/src/routes/layout.css
+omnipath-svelte/src/routes/explore/+page.svelte
+omnipath-svelte/src/routes/selection/+page.svelte
+omnipath-svelte/src/routes/resources/+page.svelte
+omnipath-svelte/src/routes/chat/+page.svelte
+omnipath-svelte/src/lib/components/layout/AppSidebar.svelte
+omnipath-svelte/src/lib/components/layout/SiteFooter.svelte
+omnipath-svelte/src/lib/stores/sidebar.svelte.ts
+```
+
+`+layout.svelte` now imports `layout.css`, sets favicon/metadata, mounts `ModeWatcher`, mounts `svelte-sonner`, wraps the app with the shadcn-svelte `SidebarProvider`, renders `AppSidebar`, and renders route children in the main content area.
+
+`+page.svelte` has been removed and replaced by `+page.server.ts`, which redirects `/` to `/explore`.
+
+Placeholder pages exist for `/explore`, `/selection`, `/resources`, and `/chat`.
 
 ## Source files to study
 
@@ -156,25 +227,35 @@ next-omnipath/src/contexts/sidebar-content-context.tsx
 ## Target files
 
 ```txt
-svelte-omnipath/src/routes/+layout.svelte
-svelte-omnipath/src/lib/components/layout/AppSidebar.svelte
-svelte-omnipath/src/lib/components/layout/SiteFooter.svelte
-svelte-omnipath/src/lib/stores/sidebar.ts
+omnipath-svelte/src/routes/+layout.svelte
+omnipath-svelte/src/routes/+page.server.ts
+omnipath-svelte/src/lib/components/layout/AppSidebar.svelte
+omnipath-svelte/src/lib/components/layout/SiteFooter.svelte
+omnipath-svelte/src/lib/stores/sidebar.svelte.ts
 ```
 
 ## Tasks
 
+Done:
+
 - Port the root layout.
+- Replace the default `+page.svelte` with a root redirect to `/explore` via `+page.server.ts`.
 - Port the sidebar navigation.
 - Replace `next/link` with normal `<a href>` links.
-- Replace `usePathname()` with `$page.url.pathname`.
+- Replace `usePathname()` with SvelteKit page state.
 - Replace `next/image` with `<img>`.
-- Replace React context with Svelte stores or Svelte context.
+- Replace React context with a Svelte sidebar-content store.
 - Add route placeholders for:
   - `/explore`
   - `/selection`
   - `/resources`
   - `/chat`
+
+Still needed:
+
+- Port feature-specific sidebar content.
+- Decide whether/where `SiteFooter.svelte` should be rendered in the migrated app shell.
+- Revisit chat navigation once the standalone `/chat` route and floating chat are ported.
 
 ## Acceptance criteria
 
@@ -209,16 +290,35 @@ next-omnipath/drizzle/*
 ## Target layout
 
 ```txt
-svelte-omnipath/src/lib/entities/display.ts
-svelte-omnipath/src/lib/entity-filter.ts
-svelte-omnipath/src/lib/entity-public-id.ts
-svelte-omnipath/src/lib/navigation/url-codecs.ts
-svelte-omnipath/src/lib/ontology-term-id.ts
-svelte-omnipath/src/lib/relations/semantics.ts
-svelte-omnipath/src/lib/utils/*
-svelte-omnipath/src/lib/types/*
-svelte-omnipath/drizzle/*
+omnipath-svelte/src/lib/entities/display.ts
+omnipath-svelte/src/lib/entity-filter.ts
+omnipath-svelte/src/lib/entity-public-id.ts
+omnipath-svelte/src/lib/navigation/url-codecs.ts
+omnipath-svelte/src/lib/ontology-term-id.ts
+omnipath-svelte/src/lib/relations/semantics.ts
+omnipath-svelte/src/lib/utils/*
+omnipath-svelte/src/lib/types/*
+omnipath-svelte/drizzle/*
 ```
+
+## Status
+
+Partially complete.
+
+Done:
+
+- Copied initial shared TypeScript candidates into `omnipath-svelte/src/lib/*`.
+- Copied Drizzle schema/types into `omnipath-svelte/src/lib/drizzle/*`.
+- Added `drizzle-orm` to the SvelteKit app.
+- Updated copied import aliases from `@/...` / `@next-omnipath/drizzle` to `$lib/...`.
+- Removed Next-specific `server-only` imports from copied modules.
+- Added local `EntityWithIdentifiers` typing in `$lib/types/entities.ts` to avoid importing query modules from browser-safe display/type helpers.
+- Confirmed the copied shared code compiles with `pnpm check`.
+
+Still needed:
+
+- Audit mixed modules such as `entity-public-id.ts` and `entity-filter.ts` that contain both browser-safe helpers and Drizzle helpers; split server-only helpers into `$lib/server` if a browser component needs the browser-safe portions.
+- Decide whether top-level Drizzle schema under `$lib/drizzle` is sufficient or whether a root `drizzle/` copy is also needed for migrations/tooling.
 
 ## Tasks
 
@@ -255,18 +355,40 @@ next-omnipath/src/ai/index.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/server/db/client.ts
-svelte-omnipath/src/lib/server/queries/*
-svelte-omnipath/src/lib/server/resource.ts
-svelte-omnipath/src/lib/server/ai/index.ts
+omnipath-svelte/src/lib/server/db/client.ts
+omnipath-svelte/src/lib/server/queries/*
+omnipath-svelte/src/lib/server/resource.ts
+omnipath-svelte/src/lib/server/ai/index.ts
 ```
+
+## Status
+
+Partially complete.
+
+Done:
+
+- Added PostgreSQL/Drizzle runtime dependencies needed by server code (`pg`, `drizzle-orm`) and supporting dev dependencies (`@types/pg`, `drizzle-kit`, `tsx`, `dotenv`).
+- Moved the database client pattern to `omnipath-svelte/src/lib/server/db/client.ts`.
+- The SvelteKit DB client uses `$env/dynamic/private` for `DATABASE_URL`.
+- Moved resource query logic to `omnipath-svelte/src/lib/server/resource.ts`.
+- Confirmed the DB/resource modules compile with `pnpm check` and `pnpm build`.
+
+Deferred:
+
+- AI model provider setup is intentionally pushed later; explore, selection, and resources have priority.
+
+Still needed:
+
+- Move query modules to `$lib/server/queries` for entities, relations, relation evidence, ontology terms, and entity details.
+- Update all imports for the migrated query modules.
+- Confirm database queries can run from SvelteKit server code against a configured `DATABASE_URL`.
 
 ## Tasks
 
 - Move the database client to `$lib/server/db/client.ts`.
 - Remove `server-only`; SvelteKit uses the `$lib/server` convention.
 - Move query modules to `$lib/server/queries`.
-- Move AI model provider setup to `$lib/server/ai`.
+- Move AI model provider setup to `$lib/server/ai` later, after explore/selection/resources work.
 - Update all imports.
 - Confirm database queries can run from SvelteKit server code.
 
@@ -296,25 +418,25 @@ next-omnipath/src/app/api/relations/[id]/evidence/route.ts
 ## Target SvelteKit endpoints
 
 ```txt
-svelte-omnipath/src/routes/app-api/chat/+server.ts
-svelte-omnipath/src/routes/app-api/terms/+server.ts
-svelte-omnipath/src/routes/app-api/relations/[id]/+server.ts
-svelte-omnipath/src/routes/app-api/relations/[id]/evidence/+server.ts
+omnipath-svelte/src/routes/app-api/chat/+server.ts
+omnipath-svelte/src/routes/app-api/terms/+server.ts
+omnipath-svelte/src/routes/app-api/relations/[id]/+server.ts
+omnipath-svelte/src/routes/app-api/relations/[id]/evidence/+server.ts
 ```
 
 ## Additional endpoints likely needed
 
 ```txt
-svelte-omnipath/src/routes/app-api/entities/search/+server.ts
-svelte-omnipath/src/routes/app-api/entities/resolve/+server.ts
-svelte-omnipath/src/routes/app-api/entities/by-public-ids/+server.ts
-svelte-omnipath/src/routes/app-api/entities/[id]/+server.ts
-svelte-omnipath/src/routes/app-api/ontology/search/+server.ts
-svelte-omnipath/src/routes/app-api/ontology/scoped-search/+server.ts
-svelte-omnipath/src/routes/app-api/ontology/prefixes/+server.ts
-svelte-omnipath/src/routes/app-api/relations/search/+server.ts
-svelte-omnipath/src/routes/app-api/relations/filter-options/+server.ts
-svelte-omnipath/src/routes/app-api/resources/download/+server.ts
+omnipath-svelte/src/routes/app-api/entities/search/+server.ts
+omnipath-svelte/src/routes/app-api/entities/resolve/+server.ts
+omnipath-svelte/src/routes/app-api/entities/by-public-ids/+server.ts
+omnipath-svelte/src/routes/app-api/entities/[id]/+server.ts
+omnipath-svelte/src/routes/app-api/ontology/search/+server.ts
+omnipath-svelte/src/routes/app-api/ontology/scoped-search/+server.ts
+omnipath-svelte/src/routes/app-api/ontology/prefixes/+server.ts
+omnipath-svelte/src/routes/app-api/relations/search/+server.ts
+omnipath-svelte/src/routes/app-api/relations/filter-options/+server.ts
+omnipath-svelte/src/routes/app-api/resources/download/+server.ts
 ```
 
 ## Important routing decision
@@ -369,17 +491,23 @@ next-omnipath/src/features/chat-floating/*
 ## Target files
 
 ```txt
-svelte-omnipath/src/routes/app-api/chat/+server.ts
-svelte-omnipath/src/routes/chat/+page.svelte
-svelte-omnipath/src/lib/components/chat/Chat.svelte
-svelte-omnipath/src/lib/components/chat/ChatPanel.svelte
-svelte-omnipath/src/lib/components/chat/Message.svelte
-svelte-omnipath/src/lib/components/chat/ToolResultCard.svelte
-svelte-omnipath/src/lib/components/chat/FloatingChatLauncher.svelte
-svelte-omnipath/src/lib/components/chat/FloatingChatWindow.svelte
-svelte-omnipath/src/lib/chat/types.ts
-svelte-omnipath/src/lib/chat/tool-result-navigation.ts
+omnipath-svelte/src/routes/app-api/chat/+server.ts
+omnipath-svelte/src/routes/chat/+page.svelte
+omnipath-svelte/src/lib/components/chat/Chat.svelte
+omnipath-svelte/src/lib/components/chat/ChatPanel.svelte
+omnipath-svelte/src/lib/components/chat/Message.svelte
+omnipath-svelte/src/lib/components/chat/ToolResultCard.svelte
+omnipath-svelte/src/lib/components/chat/FloatingChatLauncher.svelte
+omnipath-svelte/src/lib/components/chat/FloatingChatWindow.svelte
+omnipath-svelte/src/lib/chat/types.ts
+omnipath-svelte/src/lib/chat/tool-result-navigation.ts
 ```
+
+## Status
+
+Deferred.
+
+AI chat is intentionally pushed back until the data-heavy explore, selection, and resources workflows are further along.
 
 ## Tasks
 
@@ -420,11 +548,29 @@ next-omnipath/src/lib/resource-downloads.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/routes/resources/+page.server.ts
-svelte-omnipath/src/routes/resources/+page.svelte
-svelte-omnipath/src/lib/server/resource.ts
-svelte-omnipath/src/lib/resource-downloads.ts
+omnipath-svelte/src/routes/resources/+page.server.ts
+omnipath-svelte/src/routes/resources/+page.svelte
+omnipath-svelte/src/lib/server/resource.ts
+omnipath-svelte/src/lib/resource-downloads.ts
 ```
+
+## Status
+
+Mostly complete, except downloads.
+
+Done:
+
+- Implemented `omnipath-svelte/src/routes/resources/+page.server.ts` using `listResources()` and `summarizeResources()`.
+- Ported `next-omnipath/src/lib/resource.ts` to `omnipath-svelte/src/lib/server/resource.ts`.
+- Ported the resources catalog UI to Svelte in `omnipath-svelte/src/routes/resources/+page.svelte`.
+- Preserved search, category filters, summary stats, expandable resource cards, status badges, external links, and resource metadata display.
+- Added a clear toast follow-up for downloads instead of silently failing.
+- Confirmed `pnpm check` and `pnpm build` pass.
+
+Still needed:
+
+- Implement resource download endpoint and browser download helper.
+- Ensure frontend-owned downloads use `/app-api/resources/download` or another clear endpoint.
 
 ## Tasks
 
@@ -460,11 +606,11 @@ next-omnipath/src/contexts/sidebar-content-context.tsx
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/navigation/url-codecs.ts
-svelte-omnipath/src/lib/navigation/url-state.ts
-svelte-omnipath/src/lib/stores/selection.ts
-svelte-omnipath/src/lib/stores/entity-data-source.ts
-svelte-omnipath/src/lib/stores/sidebar.ts
+omnipath-svelte/src/lib/navigation/url-codecs.ts
+omnipath-svelte/src/lib/navigation/url-state.ts
+omnipath-svelte/src/lib/stores/selection.ts
+omnipath-svelte/src/lib/stores/entity-data-source.ts
+omnipath-svelte/src/lib/stores/sidebar.svelte.ts
 ```
 
 ## Tasks
@@ -509,9 +655,9 @@ next-omnipath/src/features/explore/components/search-bar.tsx
 ## Target files
 
 ```txt
-svelte-omnipath/src/routes/explore/+page.svelte
-svelte-omnipath/src/lib/components/explore/ExploreBrowserShell.svelte
-svelte-omnipath/src/lib/components/explore/SearchBar.svelte
+omnipath-svelte/src/routes/explore/+page.svelte
+omnipath-svelte/src/lib/components/explore/ExploreBrowserShell.svelte
+omnipath-svelte/src/lib/components/explore/SearchBar.svelte
 ```
 
 ## Tasks
@@ -561,15 +707,15 @@ next-omnipath/src/hooks/use-entity.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/components/explore/EntitiesExploreTab.svelte
-svelte-omnipath/src/lib/components/explore/EntityFilterSidebar.svelte
-svelte-omnipath/src/lib/components/entity-results/SearchResults.svelte
-svelte-omnipath/src/lib/components/entity-results/ResultCard.svelte
-svelte-omnipath/src/lib/components/entity-results/EntityDetailsDialog.svelte
-svelte-omnipath/src/lib/components/entity-results/EntityIdentifiersSection.svelte
-svelte-omnipath/src/lib/components/EntityBadge.svelte
-svelte-omnipath/src/lib/actions/infinite-scroll.ts
-svelte-omnipath/src/lib/stores/media.ts
+omnipath-svelte/src/lib/components/explore/EntitiesExploreTab.svelte
+omnipath-svelte/src/lib/components/explore/EntityFilterSidebar.svelte
+omnipath-svelte/src/lib/components/entity-results/SearchResults.svelte
+omnipath-svelte/src/lib/components/entity-results/ResultCard.svelte
+omnipath-svelte/src/lib/components/entity-results/EntityDetailsDialog.svelte
+omnipath-svelte/src/lib/components/entity-results/EntityIdentifiersSection.svelte
+omnipath-svelte/src/lib/components/EntityBadge.svelte
+omnipath-svelte/src/lib/actions/infinite-scroll.ts
+omnipath-svelte/src/lib/stores/media.ts
 ```
 
 ## Tasks
@@ -615,11 +761,11 @@ next-omnipath/src/lib/queries/relation-evidence.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/components/explore/RelationsExploreTab.svelte
-svelte-omnipath/src/lib/components/interactions/FilterSidebar.svelte
-svelte-omnipath/src/lib/components/interactions/InteractionDetails.svelte
-svelte-omnipath/src/lib/components/interactions/InteractionDetailsSheet.svelte
-svelte-omnipath/src/lib/types/interactions.ts
+omnipath-svelte/src/lib/components/explore/RelationsExploreTab.svelte
+omnipath-svelte/src/lib/components/interactions/FilterSidebar.svelte
+omnipath-svelte/src/lib/components/interactions/InteractionDetails.svelte
+omnipath-svelte/src/lib/components/interactions/InteractionDetailsSheet.svelte
+omnipath-svelte/src/lib/types/interactions.ts
 ```
 
 ## Tasks
@@ -660,11 +806,11 @@ next-omnipath/src/lib/ontology.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/components/explore/AnnotationBrowserTab.svelte
-svelte-omnipath/src/lib/components/ontology/OntologyTermLabel.svelte
-svelte-omnipath/src/lib/stores/ontology-terms.ts
-svelte-omnipath/src/lib/server/queries/ontology-term.ts
-svelte-omnipath/src/lib/server/ontology.ts
+omnipath-svelte/src/lib/components/explore/AnnotationBrowserTab.svelte
+omnipath-svelte/src/lib/components/ontology/OntologyTermLabel.svelte
+omnipath-svelte/src/lib/stores/ontology-terms.ts
+omnipath-svelte/src/lib/server/queries/ontology-term.ts
+omnipath-svelte/src/lib/server/ontology.ts
 ```
 
 ## Tasks
@@ -705,9 +851,9 @@ next-omnipath/src/features/explore/components/annotation-browser-tab.tsx
 ## Target files
 
 ```txt
-svelte-omnipath/src/routes/selection/+page.svelte
-svelte-omnipath/src/lib/components/workspace/SelectionResultsView.svelte
-svelte-omnipath/src/lib/stores/selection-scope.ts
+omnipath-svelte/src/routes/selection/+page.svelte
+omnipath-svelte/src/lib/components/workspace/SelectionResultsView.svelte
+omnipath-svelte/src/lib/stores/selection-scope.ts
 ```
 
 ## Tasks
@@ -751,10 +897,10 @@ next-omnipath/src/features/chat/tool-result-navigation.ts
 ## Target files
 
 ```txt
-svelte-omnipath/src/lib/components/chat/FloatingChatLauncher.svelte
-svelte-omnipath/src/lib/components/chat/FloatingChatWindow.svelte
-svelte-omnipath/src/lib/stores/floating-chat.ts
-svelte-omnipath/src/lib/chat/tool-result-navigation.ts
+omnipath-svelte/src/lib/components/chat/FloatingChatLauncher.svelte
+omnipath-svelte/src/lib/components/chat/FloatingChatWindow.svelte
+omnipath-svelte/src/lib/stores/floating-chat.ts
+omnipath-svelte/src/lib/chat/tool-result-navigation.ts
 ```
 
 ## Tasks
@@ -822,7 +968,7 @@ Investigate whether graph features are active in the current UI. If so, choose o
 
 ## Objective
 
-Make `svelte-omnipath/` deployable as a replacement frontend service.
+Make `omnipath-svelte/` deployable as a replacement frontend service.
 
 ## Tasks
 
@@ -888,7 +1034,7 @@ Validate the SvelteKit app against the Next app and prepare for replacement.
 - Fix route/state mismatches.
 - Fix styling regressions.
 - Fix deployment issues.
-- Switch frontend service from `next-omnipath` to `svelte-omnipath` when parity is acceptable.
+- Switch frontend service from `next-omnipath` to `omnipath-svelte` when parity is acceptable.
 - Keep `next-omnipath/` available for rollback until the SvelteKit app is stable.
 
 ## Acceptance criteria
@@ -900,26 +1046,59 @@ Validate the SvelteKit app against the Next app and prepare for replacement.
 
 ---
 
-# Suggested implementation order
+# Suggested implementation order from the current state
 
-1. Bootstrap `svelte-omnipath/`.
-2. Add Tailwind/shadcn-svelte/theme foundation.
-3. Port global app shell/sidebar.
-4. Move shared TypeScript utilities.
-5. Move server/database/query layer.
-6. Port app-local API endpoints.
-7. Port AI chat endpoint and standalone `/chat` UI.
-8. Port `/resources`.
-9. Port URL state and selection stores.
-10. Port `/explore` shell.
-11. Port entity search tab.
-12. Port relations tab.
-13. Port ontology tab.
-14. Port `/selection`.
-15. Add floating chat integration.
-16. Resolve React-specific dependency leftovers.
-17. Add Docker/deployment parity.
-18. Run parity testing and cut over.
+Because `omnipath-svelte/` now has the initial bootstrap cleanup, OmniPath theme tokens, dark mode/toasts, the global shell/sidebar, shared TypeScript foundations, DB/resource server modules, and an initial `/resources` implementation, continue from this adjusted order:
+
+1. Move remaining server/database query modules for entities, relations, relation evidence, ontology terms, and entity details.
+2. Port app-local data API endpoints needed by explore/selection.
+3. Port URL state and selection stores.
+4. Port `/explore` shell.
+5. Port entity search tab.
+6. Port relations tab.
+7. Port ontology tab.
+8. Port `/selection`.
+9. Implement resource downloads.
+10. Port AI chat endpoint and standalone `/chat` UI.
+11. Add floating chat integration.
+12. Resolve React-specific dependency leftovers.
+13. Add Docker/deployment parity.
+14. Run parity testing and cut over.
+
+Recently completed:
+
+- Bootstrap cleanup:
+  - package renamed to `omnipath-svelte`
+  - placeholder alias removed
+  - adapter switched to `@sveltejs/adapter-node`
+  - `.env.example` added
+  - temporary dev/preview port set to `8083`
+- Theme foundation:
+  - OmniPath tokens ported to `src/routes/layout.css`
+  - `mode-watcher` added for dark mode
+  - `svelte-sonner` added for toasts
+- Global shell/sidebar:
+  - root layout ported
+  - sidebar navigation ported
+  - root redirect to `/explore` added
+  - placeholder routes added for `/explore`, `/selection`, `/resources`, and `/chat`
+- Shared/server/resource foundations:
+  - shared TypeScript candidates copied and import aliases rewritten
+  - Drizzle schema/types copied to `$lib/drizzle`
+  - SvelteKit server DB client added under `$lib/server/db/client.ts`
+  - resource query module added under `$lib/server/resource.ts`
+  - `/resources` now renders real server-loaded resource catalog data when `DATABASE_URL` is configured
+  - AI chat intentionally deprioritized until explore/selection/resources are further along
+
+Latest validation:
+
+```bash
+cd omnipath-svelte
+pnpm check
+pnpm build
+```
+
+Both commands completed successfully with 0 Svelte diagnostics.
 
 ---
 
