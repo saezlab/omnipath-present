@@ -16,14 +16,13 @@ import {
 } from "@/lib/entities/display";
 import { getEntitiesByPks, getEntitiesByPublicIds } from "@/lib/queries/entity";
 import { searchRelations } from "@/lib/queries/relation";
-import { DataCard } from "@/features/interactions-search/components/data-card";
 import { AnnotationFilterSidebar, FilterSidebar } from "@/features/interactions-search/components/filter-sidebar";
 import { InteractionDetailsSheet } from "@/features/interactions-search/components/interaction-details-sheet";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatNumber } from "@/lib/utils";
 import { SearchFilters } from "@/types/search";
-import { Filter, Minus, X } from "lucide-react";
+import { Download, Filter, Minus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const RESULTS_PER_PAGE = 20;
@@ -69,7 +68,6 @@ async function buildRelationExportFilters(filters: SearchFilters) {
   };
 }
 
-type ViewMode = "table" | "network";
 type LayoutMode = "search" | "split" | "ontology";
 
 interface RelationsExploreTabProps {
@@ -188,7 +186,6 @@ export function RelationsExploreTab({
 
   const [selectedInteraction, setSelectedInteraction] = useState<InteractionListRow | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("search");
 
   // Ontology browser is always available for searching terms
@@ -255,16 +252,9 @@ export function RelationsExploreTab({
   };
 
   const searchPanel = (
-    <div className="h-full overflow-hidden p-4">
-      <DataCard
-        className={cn("h-full min-w-0 flex flex-col")}
-        title="Relations"
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        onExport={handleExport}
-      >
-        {/* Mobile filter drawer */}
-        <div className="lg:hidden p-4 border-b">
+    <div className="relative h-full overflow-hidden">
+      {/* Mobile filter drawer */}
+      <div className="lg:hidden p-4 border-b">
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="outline" className="w-full">
@@ -313,28 +303,37 @@ export function RelationsExploreTab({
           </Sheet>
         </div>
 
-        {/* Results */}
-        {viewMode === "table" ? (
-          error ? (
-            <div className="p-6">
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            </div>
-          ) : results.length > 0 ? (
-            <div className="flex flex-col h-full">
+
+      {/* Results */}
+      {error ? (
+          <div className="p-6">
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          </div>
+        ) : results.length > 0 ? (
+          <div className="flex flex-col h-full">
               {/* Fixed Table Header */}
-              <div className="border-b bg-background px-3 h-[57px] flex items-center flex-shrink-0">
-                <Table>
+              <div className="relative border-b bg-background px-3 h-[57px] flex items-center flex-shrink-0">
+                <Table className="pr-28">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[35%] py-2">Source</TableHead>
                       <TableHead className="w-[50px] text-center py-2">Predicate</TableHead>
                       <TableHead className="w-[35%] py-2">Target</TableHead>
-                      <TableHead className="w-[20%] text-center py-2">Evidence</TableHead>
+                      <TableHead className="w-[20%] text-center py-2 pr-28">Evidence</TableHead>
                     </TableRow>
                   </TableHeader>
                 </Table>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExport}
+                  className="absolute right-3 top-1/2 z-10 -translate-y-1/2 gap-2 bg-background/95 shadow-sm backdrop-blur"
+                >
+                  <Download className="h-4 w-4" />
+                  Export
+                </Button>
               </div>
 
               {/* Scrollable Table Body */}
@@ -411,23 +410,21 @@ export function RelationsExploreTab({
                 </Table>
 
               </div>
-            </div>
-          ) : !loading && (
-            <div className="p-6 flex-1 flex items-center justify-center">
-              <p className="text-muted-foreground text-center">
-                {Object.keys(effectiveFilters).length > 0
-                  ? "No relations found matching your criteria."
-                  : "Loading relations..."}
-              </p>
-            </div>
-          )
-        )  : null}
-      </DataCard>
+          </div>
+        ) : !loading && (
+          <div className="p-6 flex-1 flex items-center justify-center">
+            <p className="text-muted-foreground text-center">
+              {Object.keys(effectiveFilters).length > 0
+                ? "No relations found matching your criteria."
+                : "Loading relations..."}
+            </p>
+          </div>
+      )}
     </div>
   );
 
   const ontologyPanel = (
-    <div className="h-full min-h-0 overflow-hidden p-4">
+    <div className="h-full min-h-0 overflow-hidden">
       <div className="h-full overflow-y-auto">
         <AnnotationFilterSidebar
           mode="interactions"
@@ -457,7 +454,7 @@ export function RelationsExploreTab({
                 </ResizablePanel>
                 <ResizableHandle withHandle />
                 <ResizablePanel defaultSize={28} minSize={22} className="min-h-0 border-l bg-background/40">
-                  <div className="h-full overflow-y-auto p-4">
+                  <div className="h-full overflow-y-auto">
                     <FilterSidebar
                       filters={effectiveFilters}
                       onFilterChange={onFilterChange}
@@ -473,7 +470,7 @@ export function RelationsExploreTab({
             <ResizablePanel defaultSize={68} minSize={50} className="min-h-0">
               {searchPanel}
             </ResizablePanel>
-            <ResizableHandle withHandle className="mx-3" />
+            <ResizableHandle withHandle />
             <ResizablePanel defaultSize={32} minSize={25} className="min-h-0">
               {ontologyPanel}
             </ResizablePanel>

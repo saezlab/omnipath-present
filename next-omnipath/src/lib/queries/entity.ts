@@ -100,8 +100,9 @@ export async function searchEntities({
   };
   limit?: number;
   cursor?: number;
-} = {}): Promise<{ entities: Entity[]; nextCursor: number | null }> {
+} = {}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: number | null }> {
   const client = await getPool().connect();
+  const db = getDb();
 
   try {
     const whereParts: string[] = [];
@@ -211,7 +212,33 @@ export async function searchEntities({
     const rows = rowsResult.rows.map(toEntityRow);
     const nextCursor = rows.length === limit ? rows[rows.length - 1].entityPk : null;
 
-    return { entities: rows, nextCursor };
+    if (rows.length === 0) {
+      return { entities: [], nextCursor };
+    }
+
+    const entityPks = rows.map((row) => row.entityPk);
+    const identifierRows = await db
+      .select()
+      .from(entityIdentifier)
+      .where(inArray(entityIdentifier.entityPk, entityPks));
+
+    const identifiersByEntityPk = new Map<number, EntityIdentifier[]>();
+    for (const identifier of identifierRows) {
+      const existing = identifiersByEntityPk.get(identifier.entityPk);
+      if (existing) {
+        existing.push(identifier);
+      } else {
+        identifiersByEntityPk.set(identifier.entityPk, [identifier]);
+      }
+    }
+
+    return {
+      entities: rows.map((row) => ({
+        ...row,
+        identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+      })),
+      nextCursor,
+    };
   } finally {
     client.release();
   }

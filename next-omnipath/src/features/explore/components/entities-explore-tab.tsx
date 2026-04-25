@@ -172,7 +172,7 @@ export function EntitiesExploreTab({
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={28} minSize={22} className="min-h-0 border-l bg-background/40">
-          <div className="h-full overflow-y-auto p-4">{filterPane}</div>
+          <div className="h-full overflow-y-auto">{filterPane}</div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

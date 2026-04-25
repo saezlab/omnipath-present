@@ -21,7 +21,7 @@ export function getEntityTypeValue(entity: EntityLike): string | undefined | nul
 
 export function getEntityTypeLabel(entity: EntityLike): string {
   const entityType = getEntityTypeValue(entity);
-  return entityType ? entityType.split(":")[0] : "Entity";
+  return entityType ? getIdentifierTypeLabel(entityType) : "Entity";
 }
 
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
@@ -41,9 +41,11 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
       if (!isObject(item)) return null;
       const key = typeof item.key === "string"
         ? item.key
-        : typeof item.identifier_type === "string"
-          ? item.identifier_type
-          : null;
+        : typeof item.identifierType === "string"
+          ? item.identifierType
+          : typeof item.identifier_type === "string"
+            ? item.identifier_type
+            : null;
       const value = typeof item.value === "string"
         ? item.value
         : typeof item.identifier === "string"
@@ -56,20 +58,32 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
     .filter((identifier): identifier is EntityIdentifierLike => Boolean(identifier));
 }
 
-function identifierLabel(identifierType: string): string {
+export function getIdentifierTypeLabel(identifierType: string): string {
   const text = identifierType.trim();
   if (!text) return "";
   const parts = text.split(":");
 
-  if (parts.length >= 3 && !/^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
-    return parts[0].toLowerCase();
+  if (parts.length >= 3 && /^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
+    return parts.slice(2).join(":").trim() || text;
   }
 
-  if (parts.length >= 3) {
-    return parts.slice(2).join(":").toLowerCase();
-  }
+  return parts[parts.length - 1]?.trim() || text;
+}
 
-  return text.toLowerCase();
+function identifierLabel(identifierType: string): string {
+  return getIdentifierTypeLabel(identifierType).toLowerCase();
+}
+
+function normalizedIdentifierTypeText(identifierType: string): string {
+  return [identifierType, getIdentifierTypeLabel(identifierType)]
+    .join(" ")
+    .toLowerCase()
+    .replace(/[_-]/g, " ");
+}
+
+function identifierTypeMatches(identifierType: string, types: string[]): boolean {
+  const normalized = normalizedIdentifierTypeText(identifierType);
+  return types.some((type) => normalized.includes(type.toLowerCase().replace(/[_-]/g, " ")));
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
@@ -152,22 +166,38 @@ export function getEntityDescriptions(entity: EntityLike): string[] {
   return mapEntityAttributesToDescriptions(entity.entityAttributes);
 }
 
-function getShortestName(names: string[]): string | undefined {
-  const validNames = names.filter((name) => !/^(MLS|SMR|cid_|ZINC|SID_|CID_)/i.test(name) && name.length > 3);
-  if (validNames.length > 0) {
-    return validNames.reduce((shortest, current) => current.length < shortest.length ? current : shortest);
+function getPreferredName(names: string[]): string | undefined {
+  const scored = uniqueStrings(names).map((name, index) => {
+    const trimmed = name.trim();
+    let score = 0;
+    if (/^https?:\/\//i.test(trimmed)) score += 100;
+    if (/^(MLS|SMR|cid_|ZINC|SID_|CID_|InChI=)/i.test(trimmed)) score += 100;
+    if (/^[A-Z0-9._-]{1,3}$/.test(trimmed)) score += 10;
+    if (/^[A-Z][0-9A-Z]{3,}$/.test(trimmed)) score += 8;
+    if (trimmed.length > 80) score += 25;
+    if (trimmed.length > 40) score += 8;
+    if (trimmed.length < 4) score += 4;
+    if (/^[A-Z][a-z]/.test(trimmed)) score -= 3;
+    return { name: trimmed, score, index };
+  });
+
+  scored.sort((a, b) => a.score - b.score || a.name.length - b.name.length || a.index - b.index);
+  return scored[0]?.name;
+}
+
+export function getIdentifiersByType(entity: EntityLike, types: string[]): string[] {
+  const values: string[] = [];
+  for (const identifier of getEntityIdentifiers(entity)) {
+    const value = identifier.value.trim();
+    if (identifierTypeMatches(identifier.key, types) && value) {
+      values.push(value);
+    }
   }
-  return names[0];
+  return uniqueStrings(values);
 }
 
 function getIdentifierByType(entity: EntityLike, types: string[]): string | undefined {
-  for (const identifier of getEntityIdentifiers(entity)) {
-    const normalized = identifier.key.split(":")[0]?.toLowerCase() || "";
-    if (types.some((type) => normalized.includes(type)) && identifier.value) {
-      return identifier.value;
-    }
-  }
-  return undefined;
+  return getIdentifiersByType(entity, types)[0];
 }
 
 export function getEntityDisplayName(entity: EntityLike): string {
@@ -176,12 +206,12 @@ export function getEntityDisplayName(entity: EntityLike): string {
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
   if (isSmallMoleculeEntity(entity)) {
-    const shortName = getShortestName(names);
-    const chemblId = getIdentifierByType(entity, ["chembl"]);
-    const pubchemId = getIdentifierByType(entity, ["pubchem", "cid"]);
-    if (chemblId) return chemblId;
-    if (shortName && !/^\d+$/.test(shortName)) return shortName;
-    return pubchemId || shortName || publicId;
+    const preferredName = getPreferredName(names);
+    const chebiId = getIdentifierByType(entity, ["chebi"]);
+    const pubchemId = getIdentifierByType(entity, ["pubchem compound", "pubchem"]);
+    const hmdbId = getIdentifierByType(entity, ["hmdb"]);
+    if (preferredName && !/^\d+$/.test(preferredName)) return preferredName;
+    return chebiId || pubchemId || hmdbId || preferredName || publicId;
   }
 
   if (entityTypeLabel === "protein") {
@@ -202,7 +232,17 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
     if (primary && canonicalIdentifier && primary !== canonicalIdentifier) {
       return canonicalIdentifier;
     }
+    const uniprotId = getIdentifierByType(entity, ["uniprot", "uniprotkb"]);
+    if (uniprotId && uniprotId !== primary) return uniprotId;
     return names[0] && names[0] !== primary ? names[0] : undefined;
+  }
+
+  if (isSmallMoleculeEntity(entity)) {
+    return getIdentifierByType(entity, ["chebi"])
+      || getIdentifierByType(entity, ["pubchem compound", "pubchem"])
+      || getIdentifierByType(entity, ["hmdb"])
+      || getIdentifierByType(entity, ["chembl"])
+      || undefined;
   }
 
   if (geneSymbols[0] && names[0] && geneSymbols[0] !== names[0]) {
@@ -213,12 +253,5 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
 }
 
 export function getEntitySmiles(entity: EntityLike): string | null {
-  for (const identifier of getEntityIdentifiers(entity)) {
-    const idType = identifier.key.split(":")[0]?.toLowerCase().trim();
-    if (idType === "biotin tag" || idType === "biotin" || idType === "smiles" || idType === "canonical_smiles") {
-      return identifier.value;
-    }
-  }
-
-  return null;
+  return getIdentifierByType(entity, ["smiles", "canonical smiles", "canonical_smiles", "biotin tag", "biotin"]) || null;
 }

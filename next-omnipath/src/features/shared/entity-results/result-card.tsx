@@ -14,10 +14,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, ChevronDown, ChevronUp, Copy, Loader2, Info } from "lucide-react";
+import { Network, Tag, Shapes, FileText, Database, Plus, Check, FlaskConical, Loader2, Info } from "lucide-react";
 import { useEntitySelection } from "@/contexts/entity-selection-context";
 import { MoleculeStructure } from "./molecule_structure";
 import { EntityDetailsDialog } from "./entity-details-dialog";
+import { EntityIdentifiersSection } from "./entity-identifiers-section";
 import { getUnifiedCvTerms } from "@/lib/cv-terms";
 import {
   classifyEntityIdentifiers,
@@ -32,6 +33,7 @@ import {
   type EntityLike,
 } from "@/lib/entities/display";
 import { useEntity } from "@/hooks/use-entity";
+import { extractOntologyTermId } from "@/lib/ontology-term-id";
 import type { Identifier } from "@/types/entities";
 import type { SearchResult } from "@/types/search-results";
 
@@ -77,16 +79,17 @@ export function CvTermHoverCard({
   children: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const resolvedTermId = extractOntologyTermId(termId) || termId.trim();
 
   const { data: term, isLoading: loading } = useQuery({
-    queryKey: ["cv-term", termId],
-    enabled: isOpen && termId.trim().length > 0,
+    queryKey: ["ontology-term", resolvedTermId],
+    enabled: isOpen && resolvedTermId.length > 0,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const response = await fetch("/api/terms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ term_ids: [termId] }),
+        body: JSON.stringify({ term_ids: [resolvedTermId] }),
       });
 
       if (!response.ok) {
@@ -94,9 +97,9 @@ export function CvTermHoverCard({
       }
 
       const data = await response.json() as {
-        terms?: Record<string, { id: string; name?: string; definition?: string; namespace?: string } | null>;
+        terms?: Record<string, { id: string; name?: string | null; label?: string | null; definition?: string | null; namespace?: string | null; ontologyPrefix?: string | null } | null>;
       };
-      const termData = data.terms?.[termId];
+      const termData = data.terms?.[resolvedTermId];
 
       if (!termData) {
         return null;
@@ -105,9 +108,9 @@ export function CvTermHoverCard({
       return {
         id: termData.id,
         type: "cv_term",
-        name: termData.name,
-        definition: termData.definition,
-        namespace_name: termData.namespace,
+        name: termData.name || termData.label || termData.id,
+        definition: termData.definition || undefined,
+        namespace_name: termData.namespace || termData.ontologyPrefix || undefined,
       } as SearchResult;
     },
   });
@@ -264,94 +267,6 @@ const isSmallMolecule = (result: SearchResult): boolean => isSmallMoleculeEntity
 export type { Identifier } from "@/types/entities";
 export type { SearchResult } from "@/types/search-results";
 
-// Single identifier badge with copy functionality
-function IdentifierBadge({ id, idx }: { id: { type: string; value: string }; idx: number }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(id.value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <span
-      key={`${id.type}-${idx}`}
-      className="group/id inline-flex items-center gap-1 bg-background/80 border rounded px-1.5 py-0.5 hover:bg-background"
-      title={`${id.type}: ${id.value}`}
-    >
-      <span className="text-muted-foreground font-medium">{id.type}:</span>
-      <span className="font-mono truncate max-w-[120px]">{id.value}</span>
-      <button
-        onClick={handleCopy}
-        className="opacity-0 group-hover/id:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded"
-        title="Copy to clipboard"
-      >
-        {copied ? (
-          <Check className="h-3 w-3 text-green-500" />
-        ) : (
-          <Copy className="h-3 w-3 text-muted-foreground" />
-        )}
-      </button>
-    </span>
-  );
-}
-
-// Component to display identifiers in a collapsible section
-function IdentifiersDisplay({ identifiers }: { identifiers: Identifier[] }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (!identifiers || identifiers.length === 0) return null;
-
-  const parsedIdentifiers = identifiers
-    .map(id => {
-      if (!id?.key || !id?.value) return null;
-      const colonIndex = id.key.indexOf(':');
-      const idType = colonIndex > 0 ? id.key.substring(0, colonIndex) : id.key;
-      return { type: idType, value: id.value };
-    })
-    .filter(Boolean) as { type: string; value: string }[];
-
-  if (parsedIdentifiers.length === 0) return null;
-
-  // Show first 3 when collapsed
-  const displayedIdentifiers = isExpanded ? parsedIdentifiers : parsedIdentifiers.slice(0, 3);
-  const hasMore = parsedIdentifiers.length > 3;
-
-  return (
-    <div className="border-t px-3 py-2 bg-muted/30">
-      <div className="flex flex-wrap gap-1.5 text-xs">
-        {displayedIdentifiers.map((id, idx) => (
-          <IdentifierBadge key={`${id.type}-${idx}`} id={id} idx={idx} />
-        ))}
-        {hasMore && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors px-1"
-          >
-            {isExpanded ? (
-              <>
-                <ChevronUp className="h-3 w-3" />
-                <span>Show less</span>
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-3 w-3" />
-                <span>+{parsedIdentifiers.length - 3} more</span>
-              </>
-            )}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
 // Molecule-specific result card
 function MoleculeResultCard({ result }: { result: SearchResult }) {
   const entity = result as EntityLike;
@@ -359,6 +274,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
   const identifiers = useMemo(() => getEntityIdentifiers(entity), [entity]);
   const primaryName = useMemo(() => getEntityDisplayName(entity), [entity]);
   const smiles = useMemo(() => getEntitySmiles(entity), [entity]);
+  const secondaryName = useMemo(() => getEntitySecondaryName(entity), [entity]);
 
   const { addEntity, removeEntity, isSelected } = useEntitySelection();
   const entityId = getEntityPublicId(entity);
@@ -424,6 +340,13 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
         entity={entity}
       />
 
+      <CardHeader className="relative space-y-1 p-3 pr-24 border-b shrink-0">
+        <CardTitle className="text-lg line-clamp-2">{primaryName}</CardTitle>
+        {secondaryName && secondaryName !== primaryName && (
+          <div className="text-sm font-mono text-muted-foreground truncate" title={secondaryName}>{secondaryName}</div>
+        )}
+      </CardHeader>
+
       {/* Molecule structure visualization */}
       {smiles && (
         <CardContent className="p-3 flex-grow flex flex-col items-center">
@@ -438,7 +361,7 @@ function MoleculeResultCard({ result }: { result: SearchResult }) {
       )}
 
       {/* Identifiers section */}
-      <IdentifiersDisplay identifiers={identifiers} />
+      <EntityIdentifiersSection identifiers={identifiers} />
 
       <CardFooter className="flex items-center justify-between shrink-0 border-t p-2.5">
         {/* Stats */}
@@ -732,7 +655,7 @@ export function ResultCard({ result }: { result: SearchResult | EntityLike }) {
       )}
 
       {/* Identifiers section */}
-      {type === 'entity' && <IdentifiersDisplay identifiers={identifiers} />}
+      {type === 'entity' && <EntityIdentifiersSection identifiers={identifiers} />}
 
       <CardFooter className={`flex items-center justify-between shrink-0 p-2.5 ${(descriptionSections.length > 0 || identifiers.length > 0) ? 'border-t' : ''}`}>
         {/* Stats */}

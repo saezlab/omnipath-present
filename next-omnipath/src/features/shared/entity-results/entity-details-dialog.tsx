@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Database, Loader2, Network, Shapes, Tag } from "lucide-react";
 import { MoleculeStructure } from "./molecule_structure";
+import { EntityIdentifiersSection } from "./entity-identifiers-section";
 import { RelationsExploreTab } from "@/features/explore/components/relations-explore-tab";
 import type { SearchFilters } from "@/types/search";
 import EntitySearchWorkspace from "@/features/explore/components/entity-search-workspace";
@@ -16,7 +17,9 @@ import { getEntityTypeEmoji } from "@/lib/utils/entity-types";
 import {
   getEntityDescriptions,
   getEntityDisplayName,
+  getEntityIdentifiers,
   getEntityPublicId,
+  getEntitySecondaryName,
   getEntitySmiles,
   getEntityTypeLabel,
   type EntityLike,
@@ -44,6 +47,8 @@ function EntityCardHeader({
   const entityTypeLabel = getEntityTypeLabel(entity);
   const descriptionEntries = getDescriptionEntries(getEntityDescriptions(entity));
   const displayName = getEntityDisplayName(entity);
+  const secondaryName = getEntitySecondaryName(entity);
+  const identifiers = useMemo(() => getEntityIdentifiers(entity), [entity]);
   const smiles = useMemo(() => getEntitySmiles(entity), [entity]);
   const entityTypeEmoji = getEntityTypeEmoji(entityTypeLabel);
   const sources = entity.sources || [];
@@ -64,7 +69,12 @@ function EntityCardHeader({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2 mb-2">
-          <h2 className="text-xl font-semibold truncate">{displayName}</h2>
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold truncate">{displayName}</h2>
+            {secondaryName && secondaryName !== displayName && (
+              <div className="text-sm font-mono text-muted-foreground truncate" title={secondaryName}>{secondaryName}</div>
+            )}
+          </div>
           <Badge variant="secondary" className="flex items-center gap-1 shrink-0">
             {entityTypeEmoji && <span>{entityTypeEmoji}</span>}
             {entityTypeLabel}
@@ -97,6 +107,7 @@ function EntityCardHeader({
             </div>
           )}
         </div>
+        <EntityIdentifiersSection identifiers={identifiers} className="mt-3 rounded-md border bg-background/50 [&>div]:border-t-0" />
       </div>
     </div>
   );

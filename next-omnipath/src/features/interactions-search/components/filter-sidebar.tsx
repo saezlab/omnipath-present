@@ -8,11 +8,11 @@ import { Label } from "@/components/ui/label"
 import { SearchFilters } from "@/types/search"
 import { X, Filter, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { EntityHoverCard, CvTermHoverCard } from "@/features/shared/entity-results/result-card"
 import { useOntologyTerms } from "@/features/ontology/use-ontology-terms"
 import { getRelationFilterOptions } from "@/lib/queries/relation"
 import { getOntologyPrefixes, searchOntologyTerms } from "@/lib/queries/ontology-term"
+import { extractOntologyTermId } from "@/lib/ontology-term-id"
 
 interface FilterOption {
   value: string;
@@ -30,8 +30,7 @@ interface FilterSidebarProps {
 }
 
 function extractTermId(value: string): string | null {
-  const match = value.match(/(MI|OM|GO|HP|KW|DO|MP|CHEBI|CL|UBERON|MONDO):\d{4,}|WP\d+|R-[A-Z]+-\d+/);
-  return match ? match[0] : null;
+  return extractOntologyTermId(value);
 }
 
 const PREFIX_NAMES: Record<string, string> = {
@@ -317,31 +316,35 @@ export function FilterSidebar({
     return content;
   }
 
+  const header = (
+    <div className="flex items-center justify-between w-full">
+      <div className="flex items-center gap-2">
+        <Filter className="h-5 w-5 text-primary" />
+        <h3 className="font-semibold text-lg">Filters</h3>
+      </div>
+      {activeFilterCount > 0 && onClearFilters && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClearFilters}
+          className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+          Clear all ({activeFilterCount})
+        </Button>
+      )}
+    </div>
+  );
+
   return (
-    <Card className="h-full overflow-hidden flex flex-col">
-      <CardHeader className="border-b flex-shrink-0 h-[57px] flex items-center py-3">
-        <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-primary" />
-            <h3 className="font-semibold text-lg">Filters</h3>
-          </div>
-          {activeFilterCount > 0 && onClearFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClearFilters}
-              className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-              Clear all ({activeFilterCount})
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 min-h-0 overflow-y-auto py-4">
+    <div className="h-full overflow-hidden flex flex-col bg-transparent">
+      <div className="border-b flex-shrink-0 h-[57px] flex items-center px-3 py-3">
+        {header}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4">
         {content}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -662,17 +665,21 @@ export function AnnotationFilterSidebar({
     return content;
   }
 
+  const header = (
+    <div className="flex items-center gap-2">
+      <Filter className="h-5 w-5 text-primary" />
+      <h3 className="font-semibold text-lg">Ontology Browser</h3>
+    </div>
+  );
+
   return (
-    <Card className="h-full overflow-hidden flex flex-col">
-      <CardHeader className="border-b flex-shrink-0 h-[57px] flex items-center py-3">
-        <div className="flex items-center gap-2">
-          <Filter className="h-5 w-5 text-primary" />
-          <h3 className="font-semibold text-lg">Ontology Browser</h3>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 min-h-0 overflow-y-auto py-4">
+    <div className="h-full overflow-hidden flex flex-col bg-transparent">
+      <div className="border-b flex-shrink-0 h-[57px] flex items-center px-3 py-3">
+        {header}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4">
         {content}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
