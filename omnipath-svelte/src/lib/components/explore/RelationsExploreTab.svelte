@@ -6,6 +6,7 @@
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table/index.js';
   import EntityBadge from '$lib/components/entity/EntityBadge.svelte';
+  import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
   import InteractionFilterSidebar from '$lib/components/interactions/InteractionFilterSidebar.svelte';
   import InteractionDetailsSheet from '$lib/components/interactions/InteractionDetailsSheet.svelte';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
@@ -15,6 +16,7 @@
     getEntityPublicId,
     getEntitySecondaryName,
     getEntityTypeLabel,
+    type EntityLike,
   } from '$lib/entities/display';
   import type { SearchFilters } from '$lib/types/search';
   import type { InteractionListRow } from '$lib/types/interactions';
@@ -40,6 +42,8 @@
   let error = $state<string | null>(null);
   let selectedInteraction = $state<InteractionListRow | null>(null);
   let detailsOpen = $state(false);
+  let detailsEntity = $state<EntityLike | null>(null);
+  let entityDetailsOpen = $state(false);
 
   const activeFilterCount = $derived(
     Object.entries(filters).reduce((count, [, value]) => {
@@ -140,6 +144,11 @@
     selectedInteraction = row;
     detailsOpen = true;
   }
+
+  function openEntityDetails(entity: EntityLike) {
+    detailsEntity = entity;
+    entityDetailsOpen = true;
+  }
 </script>
 
 {#snippet searchPanel()}
@@ -234,11 +243,20 @@
                   class="cursor-pointer hover:bg-muted/50"
                 >
                   <TableCell class="w-[35%] max-w-0">
-                    <EntityBadge
-                      displayName={getEntityDisplayName(sourceEntity)}
-                      canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
-                      entityType={getEntityTypeLabel(sourceEntity)}
-                    />
+                    <button
+                      type="button"
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        openEntityDetails(sourceEntity);
+                      }}
+                      class="block w-full cursor-pointer rounded-lg p-0.5 text-left transition-all hover:bg-primary/10 hover:ring-2 hover:ring-primary/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <EntityBadge
+                        displayName={getEntityDisplayName(sourceEntity)}
+                        canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
+                        entityType={getEntityTypeLabel(sourceEntity)}
+                      />
+                    </button>
                   </TableCell>
                   <TableCell class="w-[50px] text-center">
                     <div class="flex justify-center">
@@ -250,11 +268,20 @@
                     </div>
                   </TableCell>
                   <TableCell class="w-[35%] max-w-0">
-                    <EntityBadge
-                      displayName={getEntityDisplayName(targetEntity)}
-                      canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
-                      entityType={getEntityTypeLabel(targetEntity)}
-                    />
+                    <button
+                      type="button"
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        openEntityDetails(targetEntity);
+                      }}
+                      class="block w-full cursor-pointer rounded-lg p-0.5 text-left transition-all hover:bg-primary/10 hover:ring-2 hover:ring-primary/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <EntityBadge
+                        displayName={getEntityDisplayName(targetEntity)}
+                        canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
+                        entityType={getEntityTypeLabel(targetEntity)}
+                      />
+                    </button>
                   </TableCell>
                   <TableCell class="w-[20%] text-center">
                     <Badge variant="outline">
@@ -327,4 +354,6 @@
     onOpenChange={(open) => { detailsOpen = open; }}
     interaction={selectedInteraction}
   />
+
+  <EntityDetailsDialog bind:open={entityDetailsOpen} entity={detailsEntity} />
 </div>
