@@ -12,6 +12,24 @@
 #   GOLD_ROOT_DIR=../omnipath_build/data/gold
 
 services:
+    postgres:
+        image: postgres:18
+        environment:
+            POSTGRES_DB: omnipath
+            POSTGRES_USER: omnipath
+            POSTGRES_PASSWORD: omnipath
+        ports:
+            - "55432:5432"
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U omnipath -d omnipath"]
+            interval: 5s
+            timeout: 5s
+            retries: 20
+        volumes:
+            - postgres18_data:/var/lib/postgresql
+        networks:
+            - dokploy-network
+
     # API Service - FastAPI wrapper for ontograph + graph-native exports
     api-service:
         build:
@@ -22,15 +40,16 @@ services:
             ONTOLOGY_DATA_DIR: /data
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
-            MEILISEARCH_HOST: http://omnipath-meilisearch:7700
-            MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
-            DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+            DATABASE_URL: ${DATABASE_URL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
         volumes:
             - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
             - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
             - ontology_cache:/app/cache
         networks:
             - dokploy-network
+        depends_on:
+            postgres:
+                condition: service_healthy
         healthcheck:
             test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
             interval: 30s
@@ -51,11 +70,10 @@ services:
         restart: unless-stopped
         environment:
             # These are used at runtime for server-side requests
-            MEILISEARCH_HOST: http://omnipath-meilisearch:7700
-            MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY}
             API_SERVICE_URL: http://api-service:8081
             DOCKERIZED: "true"
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+            DATABASE_URL: ${DATABASE_URL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
             OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
         ports:
@@ -64,6 +82,8 @@ services:
             - dokploy-network
         depends_on:
             omnipath-meilisearch:
+                condition: service_healthy
+            postgres:
                 condition: service_healthy
             api-service:
                 condition: service_healthy
@@ -75,3 +95,4 @@ networks:
 volumes:
     ontology_cache:
         name: ${ONTOLOGY_CACHE_VOLUME_NAME:-omnipath-ontology-cache}
+    postgres18_data:
