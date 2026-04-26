@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Search, ArrowRight, ExternalLink, Minus } from '@lucide/svelte';
+  import { Search, ExternalLink, Minus } from '@lucide/svelte';
   import { Badge } from '$lib/components/ui/badge/index.js';
   import EntityBadge from '$lib/components/entity/EntityBadge.svelte';
   import {
@@ -19,12 +19,24 @@
 
   let { selectedInteraction, evidenceLoading = false }: Props = $props();
 
-  function splitLabelAndId(value: string): { label: string; id?: string } {
-    const colonIndex = value.indexOf(":");
-    if (colonIndex <= 0) return { label: value };
+  function parseAnnotationTerm(value: string): { term: string; termId?: string } {
+    const text = value.trim();
+    const parts = text.split(":");
+
+    // Format: PREFIX:NUMBER:Label (e.g., OM:1228:Source, MI:0840:positive)
+    if (parts.length >= 3) {
+      return {
+        termId: `${parts[0]}:${parts[1]}`,
+        term: parts.slice(2).join(":").trim(),
+      };
+    }
+
+    // Fallback: simple label:id split (e.g., pubmed:12345)
+    const colonIndex = text.indexOf(":");
+    if (colonIndex <= 0) return { term: text };
     return {
-      label: value.substring(0, colonIndex),
-      id: value.substring(colonIndex + 1),
+      term: text.substring(0, colonIndex),
+      termId: text.substring(colonIndex + 1),
     };
   }
 
@@ -36,15 +48,15 @@
       const record = item as Record<string, unknown>;
       if (typeof record.term !== "string" || !record.term.trim()) return [];
 
-      const term = splitLabelAndId(record.term);
-      const unit = typeof record.unit === "string" ? splitLabelAndId(record.unit) : undefined;
+      const term = parseAnnotationTerm(record.term);
+      const unit = typeof record.unit === "string" ? parseAnnotationTerm(record.unit) : undefined;
 
       return [{
-        term: term.label,
-        termId: term.id,
+        term: term.term,
+        termId: term.termId,
         value: typeof record.value === "string" ? record.value : undefined,
-        unit: unit?.label,
-        unitId: unit?.id,
+        unit: unit?.term,
+        unitId: unit?.termId,
       }];
     });
   }
@@ -247,7 +259,6 @@
 
         <div class="flex items-center justify-center">
           <div class="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-sm">
-            <ArrowRight class="size-4 text-muted-foreground" />
             <span class="font-medium">{selectedInteraction.relation.predicate || '—'}</span>
           </div>
         </div>
