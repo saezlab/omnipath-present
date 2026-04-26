@@ -110,7 +110,25 @@
 	async function handleDownload(resource: ResourceRecord) {
 		try {
 			downloadingIds = new Set(downloadingIds).add(resource.resource_id);
-			toast.info('Resource downloads will be wired to /app-api/resources/download in a follow-up milestone.');
+			const response = await fetch(`/app-api/resources/${encodeURIComponent(resource.resource_id)}/download`);
+			if (!response.ok) {
+				const text = await response.text();
+				throw new Error(text || `Download failed (${response.status})`);
+			}
+			const disposition = response.headers.get('Content-Disposition') || '';
+			const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+			const fileName = match?.[1] ? decodeURIComponent(match[1]) : `${resource.resource_id}.zip`;
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.URL.revokeObjectURL(url);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Download failed');
 		} finally {
 			downloadingIds = new Set([...downloadingIds].filter((id) => id !== resource.resource_id));
 		}
