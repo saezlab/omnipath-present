@@ -27,6 +27,7 @@ ENV API_SERVICE_URL=$API_SERVICE_URL
 ENV DOCKERIZED=$DOCKERIZED
 
 RUN pnpm build
+RUN pnpm prune --prod
 
 FROM base AS runner
 WORKDIR /app
@@ -37,6 +38,7 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 sveltekit
 
 COPY --from=builder /app/build ./build
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
 USER sveltekit

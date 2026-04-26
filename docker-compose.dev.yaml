@@ -36,8 +36,6 @@ services:
             OMNIPATH_PARQUET_DIR: /data/parquet
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
-            MEILISEARCH_HOST: http://omnipath-meilisearch:7700
-            MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY:-devkey123}
             DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
         ports:
             - "8081:8081"
