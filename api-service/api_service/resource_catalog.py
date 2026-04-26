@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 
 def get_data_root() -> Path:
-    return Path(os.getenv("ONTOLOGY_DATA_DIR", "./data")).expanduser().resolve()
+    return Path(os.getenv("OMNIPATH_PARQUET_DIR", os.getenv("ONTOLOGY_DATA_DIR", "./data"))).expanduser().resolve()
 
 
 def get_resources_parquet_path() -> Path:

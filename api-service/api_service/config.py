@@ -14,12 +14,22 @@ class OntologyConfig:
 
 
 # Data directory for local OBO files
-DATA_DIR = os.getenv("ONTOLOGY_DATA_DIR", "./data")
+ONTOLOGY_DIR = os.getenv("ONTOLOGY_DATA_DIR", "./data")
 
 
-def _discover_local_ontologies(data_dir: str) -> dict[str, OntologyConfig]:
+def _find_obo(ontology_dir: str, filename: str) -> str | None:
+    """Find an OBO file by name, searching recursively in the data directory."""
+    root = Path(ontology_dir)
+    if not root.exists():
+        return None
+    for path in root.rglob(filename):
+        return str(path)
+    return None
+
+
+def _discover_local_ontologies(ontology_dir: str) -> dict[str, OntologyConfig]:
     result: dict[str, OntologyConfig] = {}
-    path = Path(data_dir)
+    path = Path(ontology_dir)
     if not path.exists():
         return result
 
@@ -46,9 +56,11 @@ def _discover_local_ontologies(data_dir: str) -> dict[str, OntologyConfig]:
 
 
 # Core ontologies - preloaded at startup
+omnipath_source = _find_obo(ONTOLOGY_DIR, "omnipath_mi.obo") or f"{ONTOLOGY_DIR}/omnipath_mi.obo"
+
 CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "omnipath": OntologyConfig(
-        source=f"{DATA_DIR}/omnipath_mi.obo",
+        source=omnipath_source,
         description="OmniPath extended PSI-MI CV (combined ontology)",
         preload=True,
     ),
@@ -65,7 +77,7 @@ CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
 }
 
 # Merge in all local OBO files produced by the build/output pipeline.
-CORE_ONTOLOGIES.update(_discover_local_ontologies(DATA_DIR))
+CORE_ONTOLOGIES.update(_discover_local_ontologies(ONTOLOGY_DIR))
 
 # Cache directory for downloaded ontologies
 CACHE_DIR = os.getenv("ONTOLOGY_CACHE_DIR", "./cache")

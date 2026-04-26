@@ -5,6 +5,8 @@
 #   DATA_DIR=../omnipath_build/data/combined
 #   - entity.parquet, entity_relation.parquet, entity_relation_evidence.parquet
 #   - relation_annotation_term.parquet, ontology_term.parquet, resources.parquet
+# OBO files for ontology loading come from ONTOLOGY_DIR (silver layer):
+#   ONTOLOGY_DIR=../omnipath_build/data/silver
 
 services:
     postgres:
@@ -30,16 +32,18 @@ services:
             dockerfile: omnipath-present/api-service/Dockerfile
         restart: unless-stopped
         environment:
-            ONTOLOGY_DATA_DIR: /data
+            ONTOLOGY_DATA_DIR: /data/obo
+            OMNIPATH_PARQUET_DIR: /data/parquet
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
             MEILISEARCH_HOST: http://omnipath-meilisearch:7700
             MEILISEARCH_API_KEY: ${MEILISEARCH_API_KEY:-devkey123}
-            DATABASE_URL: ${DATABASE_URL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
         ports:
             - "8081:8081"
         volumes:
-            - ${DATA_DIR:-../omnipath_build/data/combined}:/data:ro
+            - ${DATA_DIR:-../omnipath_build/data/combined}:/data/parquet:ro
+            - ${ONTOLOGY_DIR:-../omnipath_build/data/silver}:/data/obo:ro
             - ${GOLD_ROOT_DIR:-../omnipath_build/data/gold}:/gold:ro
             - ./api-service/cache:/app/cache
             # Mount source for hot reload during development

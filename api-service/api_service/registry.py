@@ -60,7 +60,11 @@ class OntologyRegistry:
         # Load on-demand if configured
         if ontology_id in self._configs:
             config = self._configs[ontology_id]
-            return self._load_ontology(ontology_id, config)
+            try:
+                return self._load_ontology(ontology_id, config)
+            except Exception as e:
+                logger.error(f"Failed to load {ontology_id}: {e}")
+                return None
         
         # Try loading from OBO Foundry catalog
         logger.info(f"Attempting to load {ontology_id} from OBO Foundry")

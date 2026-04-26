@@ -8,15 +8,14 @@ from typing import Any
 
 import polars as pl
 
-ONTOLOGY_DATA_DIR = os.getenv("ONTOLOGY_DATA_DIR", "./data")
-DATA_DIR = Path(ONTOLOGY_DATA_DIR)
+PARQUET_DIR = Path(os.getenv("OMNIPATH_PARQUET_DIR", os.getenv("ONTOLOGY_DATA_DIR", "./data")))
 
-ENTITY_PARQUET = DATA_DIR / "entity.parquet"
-RELATIONS_PARQUET = DATA_DIR / "entity_relation.parquet"
-RELATION_EVIDENCE_PARQUET = DATA_DIR / "entity_relation_evidence.parquet"
-RELATION_ANNOTATION_TERM_PARQUET = DATA_DIR / "relation_annotation_term.parquet"
-ONTOLOGY_TERM_PARQUET = DATA_DIR / "ontology_term.parquet"
-RESOURCES_PARQUET = DATA_DIR / "resources.parquet"
+ENTITY_PARQUET = PARQUET_DIR / "entity.parquet"
+RELATIONS_PARQUET = PARQUET_DIR / "entity_relation.parquet"
+RELATION_EVIDENCE_PARQUET = PARQUET_DIR / "entity_relation_evidence.parquet"
+RELATION_ANNOTATION_TERM_PARQUET = PARQUET_DIR / "relation_annotation_term.parquet"
+ONTOLOGY_TERM_PARQUET = PARQUET_DIR / "ontology_term.parquet"
+RESOURCES_PARQUET = PARQUET_DIR / "resources.parquet"
 
 VALID_RELATION_CATEGORIES = {"interaction", "membership", "annotation"}
 

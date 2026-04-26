@@ -114,7 +114,10 @@ def _get_search_documents(ontology_id: str) -> list[dict[str, object]]:
     if client is None:
         return []
 
-    pronto_ontology = client._ontology._ontology
+    try:
+        pronto_ontology = client._ontology._ontology
+    except Exception:
+        return []
     documents: list[dict[str, object]] = []
 
     for term in pronto_ontology.terms():
@@ -275,6 +278,9 @@ def _normalize_identifiers(identifiers: list[str]) -> list[str]:
     return normalized
 
 
+SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
+
+
 @app.post("/entities/resolve", response_model=EntityResolveResponse)
 def resolve_entities(request: EntityResolveRequest):
     """Resolve raw identifiers to candidate entity primary keys using Postgres."""
@@ -288,7 +294,7 @@ def resolve_entities(request: EntityResolveRequest):
     except ImportError as exc:
         raise HTTPException(status_code=500, detail="Postgres driver is not installed") from exc
 
-    query = """
+    query = f"""
         SELECT
             ei.identifier,
             e.entity_pk,
@@ -298,9 +304,9 @@ def resolve_entities(request: EntityResolveRequest):
             e.taxonomy_id,
             e.entity_attributes,
             e.sources
-        FROM entity_identifier ei
-        JOIN entity e ON e.entity_pk = ei.entity_pk
-        WHERE {where_clause}
+        FROM {SEARCH_SCHEMA}.entity_identifier ei
+        JOIN {SEARCH_SCHEMA}.entity e ON e.entity_pk = ei.entity_pk
+        WHERE {{where_clause}}
         ORDER BY e.entity_pk
     """
 
@@ -385,7 +391,10 @@ async def get_terms_batch(request: TermsRequest):
 @app.post("/terms/search", response_model=TermSearchResponse)
 async def search_terms(request: TermSearchRequest):
     """Search ontology terms by name/synonym across all configured ontologies."""
-    ontology_ids = list(registry.list_available().keys())
+    ontology_ids = [
+        ont_id for ont_id in registry.list_available()
+        if registry.is_loaded(ont_id)
+    ]
 
     results = {
         query: search_terms_by_name(query, ontology_ids=ontology_ids, limit=request.limit)

@@ -4,9 +4,12 @@
 #   Staging: docker compose --env-file .env.staging -p omnipath-staging up -d
 #   Prod:    docker compose --env-file .env.prod -p omnipath-prod up -d
 #
-# DATA_DIR must be set to the path of a versioned data directory, e.g.:
+# DATA_DIR must be set to the path of a versioned parquet data directory, e.g.:
 #   DATA_DIR=../data/releases/latest  (staging, symlink)
 #   DATA_DIR=../data/releases/v-20260225-071916  (prod, pinned)
+#
+# ONTOLOGY_DIR must be set to the path of OBO ontology files, e.g.:
+#   ONTOLOGY_DIR=../omnipath_build/data/silver
 #
 # GOLD_ROOT_DIR must be set to the root of gold resource zip outputs, e.g.:
 #   GOLD_ROOT_DIR=../omnipath_build/data/gold
@@ -37,12 +40,14 @@ services:
             dockerfile: api-service/Dockerfile.prod
         restart: unless-stopped
         environment:
-            ONTOLOGY_DATA_DIR: /data
+            ONTOLOGY_DATA_DIR: /data/obo
+            OMNIPATH_PARQUET_DIR: /data/parquet
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
-            DATABASE_URL: ${DATABASE_URL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
         volumes:
-            - ${DATA_DIR:?DATA_DIR must be set}:/data:ro
+            - ${DATA_DIR:?DATA_DIR must be set}:/data/parquet:ro
+            - ${ONTOLOGY_DIR:?ONTOLOGY_DIR must be set}:/data/obo:ro
             - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
             - ontology_cache:/app/cache
         networks:

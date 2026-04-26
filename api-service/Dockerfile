@@ -23,6 +23,7 @@ RUN mkdir -p /app/data /app/cache
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV ONTOLOGY_DATA_DIR=/app/data
+ENV OMNIPATH_PARQUET_DIR=/app/data
 ENV ONTOLOGY_CACHE_DIR=/app/cache
 
 EXPOSE 8081
