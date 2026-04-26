@@ -118,9 +118,9 @@
 							type="button"
 							onclick={() => onTabChange(item.value)}
 							class={`h-11 flex-1 text-sm font-medium capitalize transition-all ${
-								tab === item.value
-									? 'bg-secondary text-foreground'
-									: 'text-muted-foreground hover:bg-muted/30 hover:text-foreground'
+										tab === item.value
+											? 'bg-[#DDEBCE] text-foreground dark:bg-[#006165]'
+											: 'text-muted-foreground hover:bg-muted/30 hover:text-foreground'
 							}`}
 						>
 							<span class="inline-flex items-center gap-2">
