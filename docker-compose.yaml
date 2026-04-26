@@ -57,19 +57,18 @@ services:
             retries: 3
             start_period: 30s
 
-    # Next.js Frontend
-    next-omnipath:
+    # SvelteKit Frontend
+    omnipath-svelte:
         build:
-            context: ./next-omnipath
+            context: ./omnipath-svelte
             dockerfile: Dockerfile
             args:
-                NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-production}
-                NEXT_PUBLIC_DOMAIN: ${NEXT_PUBLIC_DOMAIN:-localhost}
+                PUBLIC_ENVIRONMENT: ${PUBLIC_ENVIRONMENT:-production}
+                PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
                 API_SERVICE_URL: http://api-service:8081
                 DOCKERIZED: "true"
         restart: unless-stopped
         environment:
-            # These are used at runtime for server-side requests
             API_SERVICE_URL: http://api-service:8081
             DOCKERIZED: "true"
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
@@ -81,8 +80,6 @@ services:
         networks:
             - dokploy-network
         depends_on:
-            omnipath-meilisearch:
-                condition: service_healthy
             postgres:
                 condition: service_healthy
             api-service:
@@ -96,3 +93,4 @@ volumes:
     ontology_cache:
         name: ${ONTOLOGY_CACHE_VOLUME_NAME:-omnipath-ontology-cache}
     postgres18_data:
+        name: ${POSTGRES_DATA_VOLUME_NAME:-omnipath-postgres18-data}

@@ -1,5 +1,5 @@
 # Development docker-compose: Runs backend services only
-# Use this with `npm run dev` in next-omnipath for local frontend development
+# Use this with `pnpm dev` in omnipath-svelte for local frontend development
 #
 # Services read from DATA_DIR (defaults to omnipath_build latest output):
 #   DATA_DIR=../omnipath_build/data/combined
@@ -49,4 +49,7 @@ services:
                 condition: service_healthy
 
 volumes:
+    ontology_cache:
+        name: ${ONTOLOGY_CACHE_VOLUME_NAME:-omnipath-ontology-cache}
     postgres18_data:
+        name: ${POSTGRES_DATA_VOLUME_NAME:-omnipath-postgres18-data}

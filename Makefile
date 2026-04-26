@@ -19,8 +19,8 @@ dev:
 	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"
 	@echo ""
-	@echo "Starting Next.js dev server..."
-	cd next-omnipath && npm run dev
+	@echo "Starting SvelteKit dev server..."
+	cd omnipath-svelte && pnpm dev
 
 # Stop Docker services
 stop:

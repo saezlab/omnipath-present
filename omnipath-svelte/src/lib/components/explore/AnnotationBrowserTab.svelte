@@ -270,7 +270,7 @@
                 </div>
               </CardHeader>
               <CardContent>
-                <p class="line-clamp-4 text-sm text-muted-foreground">
+                <p class="max-h-24 overflow-y-auto text-sm text-muted-foreground">
                   {term.definition || 'No definition available for this ontology term.'}
                 </p>
               </CardContent>
