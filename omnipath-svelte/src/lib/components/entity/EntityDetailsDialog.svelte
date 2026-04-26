@@ -126,7 +126,7 @@
 					</div>
 				{/if}
 				{#if detailSections.length > 0}
-					<div class="space-y-4">
+					<div class="max-h-72 space-y-4 overflow-y-auto">
 						{#each detailSections as section}
 							<section class="space-y-1.5">
 								<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
