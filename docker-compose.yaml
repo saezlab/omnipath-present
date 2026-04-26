@@ -77,7 +77,7 @@ services:
             API_SERVICE_URL: http://api-service:8081
             DOCKERIZED: "true"
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-            DATABASE_URL: ${DATABASE_URL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
             OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
         ports:
