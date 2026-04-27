@@ -23,7 +23,7 @@
 	let draftQuery = $state('');
 	let filters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 
-	const shouldResolveAnnotationEntities = $derived(tab !== 'interactions');
+	const shouldResolveAnnotationEntities = $derived(tab === 'interactions');
 	const scope = $derived(
 		getSelectionScope(selection.entityIds, selection.annotationIds, {
 			resolveAnnotationEntities: shouldResolveAnnotationEntities
@@ -80,9 +80,14 @@
 		scope.selectedEntityIds.length === 0 && scope.selectedAnnotationIds.length === 0
 	);
 	const hasSelection = $derived(selection.selectedEntities.length > 0 || selection.selectedAnnotations.length > 0);
+	const isSelectionEmpty = $derived(
+		tab === 'interactions'
+			? isInteractionSelectionEmpty
+			: selection.selectedEntities.length === 0 && selection.selectedAnnotations.length === 0
+	);
 </script>
 
-{#if !scope.isLoading && ((tab === 'interactions' && isInteractionSelectionEmpty) || (tab !== 'interactions' && scope.scopedEntityIds.length === 0))}
+{#if !(tab === 'interactions' && scope.isLoading) && isSelectionEmpty}
 	<div class="flex flex-1 items-center justify-center p-8">
 		<Card class="w-full max-w-2xl border-dashed">
 			<CardContent class="space-y-4 py-12 text-center">
@@ -128,12 +133,13 @@
 					{query}
 					{filters}
 					onFiltersChange={(f) => (filters = f)}
-					scopedEntityIds={scope.scopedEntityIds}
+					selectedEntityPks={selection.selectedEntityPks}
+					selectedAnnotationIds={scope.selectedAnnotationIds}
 				/>
 			{:else if tab === 'interactions'}
 				<RelationsExploreTab {filters} onFilterChange={(f) => (filters = f)} scopedEntityIds={scope.scopedEntityIds} scopedAnnotationIds={scope.selectedAnnotationIds} />
 			{:else}
-				<AnnotationBrowserTab {query} scopedEntityIds={scope.scopedEntityIds} {filters} onFiltersChange={(f) => (filters = f)} />
+				<AnnotationBrowserTab {query} {filters} onFiltersChange={(f) => (filters = f)} selectedEntityPks={selection.selectedEntityPks} selectedAnnotationIds={scope.selectedAnnotationIds} />
 			{/if}
 		{/snippet}
 

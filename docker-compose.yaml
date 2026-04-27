@@ -16,7 +16,9 @@
 
 services:
     postgres:
-        image: postgres:18
+        build:
+            context: ./postgres
+            dockerfile: Dockerfile
         environment:
             POSTGRES_DB: omnipath
             POSTGRES_USER: omnipath
@@ -30,6 +32,7 @@ services:
             retries: 20
         volumes:
             - postgres18_data:/var/lib/postgresql
+            - ./postgres/init-scripts:/docker-entrypoint-initdb.d:ro
         networks:
             - dokploy-network
 

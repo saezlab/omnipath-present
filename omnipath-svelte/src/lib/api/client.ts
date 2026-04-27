@@ -7,6 +7,43 @@ export async function fetchEntitiesSearch(params: {
   cursor?: number | null;
   filters?: SearchFilters;
 }) {
+  const hasLargeFilters = params.filters && (
+    (params.filters.entity_pks?.length ?? 0) > 50 ||
+    (params.filters.annotation_term_ids?.length ?? 0) > 10
+  );
+
+  if (hasLargeFilters) {
+    const res = await fetch("/app-api/entities/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: params.query || "",
+        limit: params.limit ?? 20,
+        cursor: params.cursor,
+        filters: params.filters,
+      }),
+    });
+    if (!res.ok) throw new Error("Failed to fetch entities");
+    return res.json() as Promise<{
+      entities: Array<{
+        entityPk: number;
+        canonicalIdentifier: string;
+        canonicalIdentifierType: string;
+        entityType: string | null;
+        taxonomyId: string | null;
+        entityAttributes: unknown;
+        sources: string[];
+        identifiers: Array<{
+          id: number;
+          entityPk: number;
+          identifier: string;
+          identifierType: string;
+        }>;
+      }>;
+      nextCursor: number | null;
+    }>;
+  }
+
   const url = new URL("/app-api/entities/search", window.location.origin);
   if (params.query) url.searchParams.set("q", params.query);
   if (params.limit) url.searchParams.set("limit", String(params.limit));
@@ -164,20 +201,25 @@ export async function fetchOntologySearch(params: {
 }
 
 export async function fetchScopedOntologySearch(params: {
-  entityIds: string[];
+  entityPks?: number[];
+  termIds?: string[];
   query?: string;
   prefixes?: string[];
   limit?: number;
   offset?: number;
 }) {
-  const url = new URL("/app-api/ontology/scoped-search", window.location.origin);
-  if (params.query) url.searchParams.set("q", params.query);
-  if (params.limit != null) url.searchParams.set("limit", String(params.limit));
-  if (params.offset != null) url.searchParams.set("offset", String(params.offset));
-  if (params.prefixes?.length) url.searchParams.set("prefixes", params.prefixes.join(","));
-  if (params.entityIds?.length) url.searchParams.set("entityIds", params.entityIds.join(","));
-
-  const res = await fetch(url);
+  const res = await fetch("/app-api/ontology/scoped-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entityPks: params.entityPks || [],
+      termIds: params.termIds || [],
+      query: params.query || "",
+      prefixes: params.prefixes,
+      limit: params.limit ?? 24,
+      offset: params.offset ?? 0,
+    }),
+  });
   if (!res.ok) throw new Error("Failed to fetch scoped ontology terms");
   return res.json() as Promise<
     Array<{
@@ -198,6 +240,20 @@ export async function fetchOntologyPrefixes() {
   return res.json() as Promise<{ prefixes: string[] }>;
 }
 
+export async function fetchScopedOntologyPrefixCounts(params: {
+  entityPks?: number[];
+  annotationTermIds?: string[];
+  query?: string;
+}) {
+  const res = await fetch("/app-api/ontology/prefix-counts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to fetch scoped ontology prefix counts");
+  return res.json() as Promise<Array<{ prefix: string; scopedCount: number }>>;
+}
+
 export async function fetchTerms(termIds: string[]) {
   const res = await fetch("/app-api/terms", {
     method: "POST",
@@ -206,4 +262,40 @@ export async function fetchTerms(termIds: string[]) {
   });
   if (!res.ok) throw new Error("Failed to fetch terms");
   return res.json() as Promise<{ terms: Record<string, unknown | null> }>;
+}
+
+export async function fetchScopedEntityFacetCounts(params: {
+  entityIds?: Array<string | number>;
+  annotationTermIds?: string[];
+  entityTypes?: string[];
+  sources?: string[];
+  query?: string;
+}) {
+  const res = await fetch("/app-api/entities/scoped-facets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to fetch scoped entity facet counts");
+  return res.json() as Promise<
+    Array<{ facetName: string; facetValue: string; scopedCount: number }>
+  >;
+}
+
+export async function fetchScopedRelationFacetCounts(params: {
+  entityIds?: Array<string | number>;
+  annotationTermIds?: string[];
+  predicates?: string[];
+  interactionTypes?: string[];
+  sources?: string[];
+}) {
+  const res = await fetch("/app-api/relations/scoped-facets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to fetch scoped relation facet counts");
+  return res.json() as Promise<
+    Array<{ facetName: string; facetValue: string; facetCategory?: string | null; scopedCount: number }>
+  >;
 }

@@ -131,7 +131,7 @@
 		{#if tab === 'entity'}
 			<EntitiesExploreTab {query} {species} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
 		{:else if tab === 'relations'}
-			<RelationsExploreTab filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
+			<RelationsExploreTab {query} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
 		{:else}
 			<AnnotationBrowserTab {query} {species} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
 		{/if}

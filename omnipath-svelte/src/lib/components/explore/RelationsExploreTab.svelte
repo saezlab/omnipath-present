@@ -10,7 +10,7 @@
   import InteractionFilterSidebar from '$lib/components/interactions/InteractionFilterSidebar.svelte';
   import InteractionDetailsSheet from '$lib/components/interactions/InteractionDetailsSheet.svelte';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-  import { fetchRelationsSearch, fetchEntitiesByPks } from '$lib/api/client';
+  import { fetchRelationsSearch, fetchEntitiesByPks, fetchEntitiesSearch } from '$lib/api/client';
   import {
     getEntityDisplayName,
     getEntityPublicId,
@@ -25,11 +25,12 @@
   interface Props {
     filters: SearchFilters;
     onFilterChange: (filters: SearchFilters) => void;
+    query?: string;
     scopedEntityIds?: string[];
     scopedAnnotationIds?: string[];
   }
 
-  let { filters, onFilterChange, scopedEntityIds, scopedAnnotationIds }: Props = $props();
+  let { filters, onFilterChange, query = '', scopedEntityIds, scopedAnnotationIds }: Props = $props();
 
   const isMobile = new IsMobile();
   const RESULTS_PER_PAGE = 20;
@@ -45,6 +46,9 @@
   let detailsEntity = $state<EntityLike | null>(null);
   let entityDetailsOpen = $state(false);
 
+  let queryEntityIds = $state<string[]>([]);
+  let queryEntityIdsLoading = $state(false);
+
   const activeFilterCount = $derived(
     Object.entries(filters).reduce((count, [, value]) => {
       if (Array.isArray(value)) return count + value.length;
@@ -55,8 +59,33 @@
 
   const effectiveFilters = $derived({
     ...filters,
+    ...(queryEntityIds.length > 0 ? { entity_ids: queryEntityIds } : {}),
     ...(scopedEntityIds && scopedEntityIds.length > 0 ? { scope_entity_ids: scopedEntityIds } : {}),
     ...(scopedAnnotationIds && scopedAnnotationIds.length > 0 ? { scope_annotation_ids: scopedAnnotationIds } : {}),
+  });
+
+  // Resolve query text to entity IDs for relation scoping.
+  $effect(() => {
+    const q = query.trim();
+    if (!q) {
+      queryEntityIds = [];
+      return;
+    }
+
+    let cancelled = false;
+    queryEntityIdsLoading = true;
+    fetchEntitiesSearch({ query: q, limit: 200, cursor: null })
+      .then((data) => {
+        if (cancelled) return;
+        queryEntityIds = data.entities.map((e) => `${e.canonicalIdentifierType}|${e.canonicalIdentifier}`);
+      })
+      .catch(() => {
+        if (!cancelled) queryEntityIds = [];
+      })
+      .finally(() => {
+        if (!cancelled) queryEntityIdsLoading = false;
+      });
+    return () => { cancelled = true; };
   });
 
   // Reactive reset: only read external dependencies in the effect body.
@@ -193,6 +222,9 @@
                 onFilterChange={onFilterChange}
                 onClearFilters={handleClearFilters}
                 isMobile
+                scopedEntityIds={scopedEntityIds}
+                scopedAnnotationIds={scopedAnnotationIds}
+                queryEntityIds={queryEntityIds}
               />
             </div>
           </SheetContent>
@@ -333,6 +365,9 @@
           filters={effectiveFilters}
           onFilterChange={onFilterChange}
           onClearFilters={handleClearFilters}
+          scopedEntityIds={scopedEntityIds}
+          scopedAnnotationIds={scopedAnnotationIds}
+          queryEntityIds={queryEntityIds}
         />
       </div>
     </div>

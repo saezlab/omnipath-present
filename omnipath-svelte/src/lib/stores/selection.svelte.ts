@@ -20,6 +20,7 @@ import {
 export interface SelectedEntity {
   id: string;
   entityId?: string | number;
+  entityPk?: number;
   name: string;
   type?: string;
   cv_terms?: string[];
@@ -355,11 +356,18 @@ export function getSelectionStore() {
     return annotationIds.includes(String(id).trim());
   }
 
+  const selectedEntityPks = $derived(
+    selectedEntities
+      .map((e) => (typeof e.entityPk === "number" ? e.entityPk : typeof e.entityId === "number" ? e.entityId : null))
+      .filter((pk): pk is number => pk !== null)
+  );
+
   return {
     get selectedEntities() { return selectedEntities; },
     get selectedAnnotations() { return selectedAnnotations; },
     get entityIds() { return entityIds; },
     get annotationIds() { return annotationIds; },
+    get selectedEntityPks() { return selectedEntityPks; },
     setEntityIds,
     setAnnotationIds,
     addEntity,

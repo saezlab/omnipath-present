@@ -4,32 +4,77 @@
   import { Checkbox } from '$lib/components/ui/checkbox/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
   import type { SearchFilters } from '$lib/types/search';
-  import { fetchRelationFilterOptions } from '$lib/api/client';
+  import { fetchScopedRelationFacetCounts } from '$lib/api/client';
   import { getEntityTypeEmoji } from '$lib/utils/entity-types';
+  import { formatNumber } from '$lib/utils/format';
 
   interface Props {
     filters: SearchFilters;
     onFilterChange: (filters: SearchFilters) => void;
     onClearFilters?: () => void;
     isMobile?: boolean;
+    scopedEntityIds?: string[];
+    scopedAnnotationIds?: string[];
+    queryEntityIds?: string[];
   }
 
-  let { filters, onFilterChange, onClearFilters, isMobile = false }: Props = $props();
+  let { filters, onFilterChange, onClearFilters, isMobile = false, scopedEntityIds, scopedAnnotationIds, queryEntityIds }: Props = $props();
 
   let predicatesByCategory = $state<Record<string, string[]>>({});
   let interactionTypeOptions = $state<string[]>([]);
   let sourceOptions = $state<string[]>([]);
+  let scopedFacetCounts = $state<Map<string, { count: number; category?: string | null }>>(new Map());
   let loading = $state(true);
 
+  // Fetch facet counts (scoped when selection present, global otherwise) and build filter options.
+  // Counts reflect the current scope AND all OTHER active filters (cross-facet filtering).
   $effect(() => {
+    const mergedEntityIds = [
+      ...(scopedEntityIds || []),
+      ...(queryEntityIds || []),
+    ];
+    const scope = {
+      entityIds: mergedEntityIds.length ? mergedEntityIds : undefined,
+      annotationTermIds: scopedAnnotationIds?.length ? scopedAnnotationIds : undefined,
+      predicates: filters.predicates,
+      interactionTypes: filters.interaction_types,
+      sources: filters.sources,
+    };
+
     let cancelled = false;
     loading = true;
-    fetchRelationFilterOptions()
-      .then((options) => {
+    fetchScopedRelationFacetCounts(scope)
+      .then((counts) => {
         if (cancelled) return;
-        predicatesByCategory = options.predicatesByCategory;
-        interactionTypeOptions = options.interactionTypes;
-        sourceOptions = options.sources;
+        const map = new Map<string, { count: number; category?: string | null }>();
+        const categories: Record<string, string[]> = {};
+        const types: string[] = [];
+        const sources: string[] = [];
+
+        for (const c of counts) {
+          map.set(`${c.facetName}:${c.facetValue}`, { count: c.scopedCount, category: c.facetCategory });
+          if (c.facetName === 'predicate' && c.facetCategory) {
+            if (!categories[c.facetCategory]) categories[c.facetCategory] = [];
+            categories[c.facetCategory].push(c.facetValue);
+          } else if (c.facetName === 'participant_type') {
+            types.push(c.facetValue);
+          } else if (c.facetName === 'source') {
+            sources.push(c.facetValue);
+          }
+        }
+
+        scopedFacetCounts = map;
+        predicatesByCategory = categories;
+        interactionTypeOptions = types;
+        sourceOptions = sources;
+      })
+      .catch(() => {
+        if (!cancelled) {
+          scopedFacetCounts = new Map();
+          predicatesByCategory = {};
+          interactionTypeOptions = [];
+          sourceOptions = [];
+        }
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -83,9 +128,13 @@
       icon: getEntityTypeEmoji(label),
     };
   }
+
+  function getCount(filterName: string, value: string): number | undefined {
+    return scopedFacetCounts.get(`${filterName}:${value}`)?.count;
+  }
 </script>
 
-{#snippet filterOptionRow(filterKey: keyof SearchFilters, value: string, label: string, selectedValues: string[], onToggle: () => void, icon?: string)}
+{#snippet filterOptionRow(filterKey: keyof SearchFilters, value: string, label: string, selectedValues: string[], onToggle: () => void, icon?: string, count?: number)}
   <div class="flex items-center justify-between py-0.5 gap-2">
     <Label
       for={`${filterKey}-${value}`}
@@ -102,6 +151,11 @@
         {label}
       </span>
     </Label>
+    {#if count != null}
+      <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">
+        {formatNumber(count)}
+      </span>
+    {/if}
   </div>
 {/snippet}
 
@@ -116,7 +170,7 @@
               {@render filterOptionRow('relation_categories', category, category, filters.relation_categories || [], () => handleArrayToggle('relation_categories', category))}
               <div class="space-y-1 max-h-64 overflow-y-auto pr-2 pl-4">
                 {#each predicates as predicate}
-                  {@render filterOptionRow('predicates', predicate, predicate, filters.predicates || [], () => handlePredicateToggle(category, predicate))}
+                  {@render filterOptionRow('predicates', predicate, predicate, filters.predicates || [], () => handlePredicateToggle(category, predicate), undefined, getCount('predicate', predicate))}
                 {/each}
               </div>
             </div>
@@ -131,7 +185,7 @@
         <div class="space-y-1 max-h-64 overflow-y-auto pr-2">
           {#each interactionTypeOptions as option}
             {@const participantType = formatParticipantType(option)}
-            {@render filterOptionRow('interaction_types', option, participantType.label, filters.interaction_types || [], () => handleArrayToggle('interaction_types', option), participantType.icon)}
+            {@render filterOptionRow('interaction_types', option, participantType.label, filters.interaction_types || [], () => handleArrayToggle('interaction_types', option), participantType.icon, getCount('participant_type', option))}
           {/each}
         </div>
       </div>
@@ -141,7 +195,7 @@
       <h4 class="text-sm font-semibold">Sources</h4>
       <div class="space-y-1 max-h-64 overflow-y-auto pr-2">
         {#each sourceOptions as option}
-          {@render filterOptionRow('sources', option, option, filters.sources || [], () => handleArrayToggle('sources', option), '📚')}
+          {@render filterOptionRow('sources', option, option, filters.sources || [], () => handleArrayToggle('sources', option), '📚', getCount('source', option))}
         {/each}
       </div>
     </div>

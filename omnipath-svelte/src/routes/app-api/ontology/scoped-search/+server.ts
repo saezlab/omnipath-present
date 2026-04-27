@@ -4,15 +4,18 @@ import { jsonBigIntSafe } from "$lib/server/api-utils";
 
 export const GET: RequestHandler = async ({ url }) => {
   const query = url.searchParams.get("q") || "";
-  const entityIdsParam = url.searchParams.get("entityIds");
-  const entityIds = entityIdsParam ? entityIdsParam.split(",") : [];
+  const entityPksParam = url.searchParams.get("entityPks");
+  const entityPks = entityPksParam ? entityPksParam.split(",").map(Number).filter(Number.isFinite) : [];
+  const termIdsParam = url.searchParams.get("termIds");
+  const termIds = termIdsParam ? termIdsParam.split(",") : [];
   const prefixesParam = url.searchParams.get("prefixes");
   const prefixes = prefixesParam ? prefixesParam.split(",") : undefined;
   const limit = Number(url.searchParams.get("limit") || "24");
   const offset = Number(url.searchParams.get("offset") || "0");
 
   const result = await searchScopedOntologyTerms({
-    entityIds,
+    entityPks,
+    termIds,
     query,
     prefixes,
     limit: Number.isFinite(limit) ? limit : 24,
@@ -24,7 +27,8 @@ export const GET: RequestHandler = async ({ url }) => {
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
-    entityIds?: string[];
+    entityPks?: number[];
+    termIds?: string[];
     query?: string;
     prefixes?: string[];
     limit?: number;
@@ -32,7 +36,8 @@ export const POST: RequestHandler = async ({ request }) => {
   };
 
   const result = await searchScopedOntologyTerms({
-    entityIds: body.entityIds || [],
+    entityPks: body.entityPks || [],
+    termIds: body.termIds || [],
     query: body.query || "",
     prefixes: body.prefixes,
     limit: body.limit ?? 24,

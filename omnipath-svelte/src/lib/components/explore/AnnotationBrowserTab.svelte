@@ -7,7 +7,7 @@
   import { Label } from '$lib/components/ui/label/index.js';
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-  import { fetchOntologySearch, fetchScopedOntologySearch, fetchOntologyPrefixes } from '$lib/api/client';
+  import { fetchOntologySearch, fetchScopedOntologySearch, fetchOntologyPrefixes, fetchScopedOntologyPrefixCounts } from '$lib/api/client';
   import { getSelectionStore } from '$lib/stores/selection.svelte';
   import type { SearchFilters } from '$lib/types/search';
 
@@ -16,10 +16,12 @@
     species?: string;
     filters: SearchFilters;
     onFiltersChange: (filters: SearchFilters) => void;
-    scopedEntityIds?: string[];
+    selectedEntityIds?: string[];
+    selectedEntityPks?: number[];
+    selectedAnnotationIds?: string[];
   }
 
-  let { query, species, filters, onFiltersChange, scopedEntityIds }: Props = $props();
+  let { query, species, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
 
   const isMobile = new IsMobile();
   const selection = getSelectionStore();
@@ -42,9 +44,10 @@
   let offset = $state(0);
   let error = $state<string | null>(null);
   let prefixes = $state<string[]>([]);
+  let prefixCounts = $state<Map<string, number>>(new Map());
   let loadingPrefixes = $state(true);
 
-  const isScoped = $derived(!!scopedEntityIds?.length);
+  const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
   const selectedPrefixes = $derived(filters.ontology_prefixes || []);
 
   // Fetch prefixes once on mount
@@ -65,12 +68,39 @@
     return () => { cancelled = true; };
   });
 
+  // Fetch scoped prefix counts when scope or query changes
+  $effect(() => {
+    const q = query;
+    const ePks = selectedEntityPks || [];
+    const tIds = selectedAnnotationIds || [];
+
+    let cancelled = false;
+    fetchScopedOntologyPrefixCounts({
+      entityPks: ePks.length > 0 ? ePks : undefined,
+      annotationTermIds: tIds.length > 0 ? tIds : undefined,
+      query: q || undefined,
+    })
+      .then((counts) => {
+        if (cancelled) return;
+        const map = new Map<string, number>();
+        for (const c of counts) {
+          map.set(c.prefix, c.scopedCount);
+        }
+        prefixCounts = map;
+      })
+      .catch(() => {
+        if (!cancelled) prefixCounts = new Map();
+      });
+    return () => { cancelled = true; };
+  });
+
   // Reactive reset: only read external dependencies in the effect body.
   $effect(() => {
     const q = query;
     const pfx = selectedPrefixes;
     const scoped = isScoped;
-    const entityIds = scopedEntityIds || [];
+    const ePks = selectedEntityPks || [];
+    const tIds = selectedAnnotationIds || [];
 
     results = [];
     offset = 0;
@@ -79,7 +109,7 @@
     error = null;
 
     const fetcher = scoped
-      ? fetchScopedOntologySearch({ entityIds, query: q, prefixes: pfx.length > 0 ? pfx : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
+      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, prefixes: pfx.length > 0 ? pfx : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
       : fetchOntologySearch({ query: q, prefixes: pfx.length > 0 ? pfx : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
 
     fetcher
@@ -103,7 +133,8 @@
     try {
       const page = isScoped
         ? await fetchScopedOntologySearch({
-            entityIds: scopedEntityIds || [],
+            entityPks: selectedEntityPks || [],
+            termIds: selectedAnnotationIds || [],
             query,
             prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
             limit: RESULTS_PER_PAGE,
@@ -152,6 +183,7 @@
     <div class="max-h-[calc(100vh-14rem)] space-y-1 overflow-y-auto pr-2">
       {#each prefixes as prefix}
         {@const selected = selectedPrefixes.includes(prefix)}
+        {@const count = prefixCounts.get(prefix)}
         <div class="flex items-center justify-between gap-2 py-0.5">
           <Label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground {selected ? 'font-medium' : ''}">
             <Checkbox
@@ -161,6 +193,9 @@
             />
             <span class="truncate">{prefix}</span>
           </Label>
+          {#if count != null}
+            <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">{count.toLocaleString()}</span>
+          {/if}
         </div>
       {:else}
         {#if loadingPrefixes}

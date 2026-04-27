@@ -7,7 +7,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
 	import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
-	import { fetchEntitiesSearch, fetchEntityFilterOptions } from '$lib/api/client';
+	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts } from '$lib/api/client';
 	import {
 		getEntityDisplayName,
 		getEntityPublicId,
@@ -26,10 +26,12 @@
 		species?: string;
 		filters: SearchFilters;
 		onFiltersChange: (filters: SearchFilters) => void;
-		scopedEntityIds?: string[];
+		selectedEntityIds?: string[];
+		selectedEntityPks?: number[];
+		selectedAnnotationIds?: string[];
 	}
 
-	let { query, species, filters, onFiltersChange, scopedEntityIds }: Props = $props();
+	let { query, species, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
 
 	const isMobile = new IsMobile();
 	const selection = getSelectionStore();
@@ -49,16 +51,18 @@
 	let loadingMore = $state(false);
 	let hasMore = $state(true);
 	let cursor = $state<number | null>(null);
-	let filterOptionsLoading = $state(true);
+	let facetCountsLoading = $state(true);
 	let entityTypeOptions = $state<FilterOption[]>([]);
 	let sourceOptions = $state<FilterOption[]>([]);
+	let scopedFacetCounts = $state<Map<string, number>>(new Map());
 	let detailsEntity = $state<EntityResult | null>(null);
 	let detailsOpen = $state(false);
 
 	const effectiveFilters = $derived({
 		...filters,
 		...(species ? { ncbi_tax_id: filters.ncbi_tax_id ?? [species] } : {}),
-		...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {})
+		...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
+		...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 	});
 
 	const activeFilterCount = $derived(
@@ -69,26 +73,46 @@
 		}, 0)
 	);
 
+	// Fetch facet counts (scoped when selection present, global otherwise) and build filter options.
+	// Counts reflect the current scope AND query AND all OTHER active filters (cross-facet filtering).
 	$effect(() => {
+		const scope = {
+			entityIds: selectedEntityPks?.length ? selectedEntityPks : undefined,
+			annotationTermIds: selectedAnnotationIds?.length ? selectedAnnotationIds : undefined,
+			entityTypes: filters.entity_types,
+			sources: filters.sources,
+			query: query || undefined,
+		};
+
 		let cancelled = false;
-		filterOptionsLoading = true;
-		fetchEntityFilterOptions()
-			.then((options) => {
+		facetCountsLoading = true;
+		fetchScopedEntityFacetCounts(scope)
+			.then((counts) => {
 				if (cancelled) return;
-				entityTypeOptions = options.entity_types.map(mapEntityTypeOption);
-				sourceOptions = options.sources.map((value) => ({
-					value,
-					displayName: value,
-					icon: '📚'
-				}));
+				const map = new Map<string, number>();
+				const types: FilterOption[] = [];
+				const sources: FilterOption[] = [];
+				for (const c of counts) {
+					map.set(`${c.facetName}:${c.facetValue}`, c.scopedCount);
+					if (c.facetName === 'entity_type') {
+						types.push(mapEntityTypeOption(c.facetValue));
+					} else if (c.facetName === 'source') {
+						sources.push({ value: c.facetValue, displayName: c.facetValue, icon: '📚' });
+					}
+				}
+				scopedFacetCounts = map;
+				entityTypeOptions = types;
+				sourceOptions = sources;
 			})
 			.catch(() => {
-				if (cancelled) return;
-				entityTypeOptions = [];
-				sourceOptions = [];
+				if (!cancelled) {
+					scopedFacetCounts = new Map();
+					entityTypeOptions = [];
+					sourceOptions = [];
+				}
 			})
 			.finally(() => {
-				if (!cancelled) filterOptionsLoading = false;
+				if (!cancelled) facetCountsLoading = false;
 			});
 		return () => {
 			cancelled = true;
@@ -143,8 +167,9 @@
 
 	function handleClearFilters() {
 		onFiltersChange({
-			...(species && !scopedEntityIds?.length ? { ncbi_tax_id: [species] } : {}),
-			...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {})
+			...(species && !(selectedEntityPks?.length || selectedAnnotationIds?.length) ? { ncbi_tax_id: [species] } : {}),
+			...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
+			...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 		});
 	}
 
@@ -152,7 +177,8 @@
 		onFiltersChange({
 			...filters,
 			...next,
-			...(scopedEntityIds && scopedEntityIds.length > 0 ? { entity_ids: scopedEntityIds } : {})
+			...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
+			...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 		});
 	}
 
@@ -168,31 +194,35 @@
 	}
 
 	function mapEntityTypeOption(value: string): FilterOption {
-		const match = value.match(/^(.+):([A-Z]+:\d+)$/);
-		let displayName = value;
-		let id: string | null = null;
+		// Handle raw format from DB: "MI:0326:Protein"
+		const rawMatch = value.match(/^([A-Z]+):(\d+):(.+)$/);
+		if (rawMatch) {
+			const displayName = rawMatch[3];
+			return {
+				value,
+				displayName,
+				icon: getEntityTypeEmoji(displayName),
+				id: `${rawMatch[1]}:${rawMatch[2]}`,
+			};
+		}
 
-		if (match) {
-			displayName = match[1];
-			id = match[2];
-		} else {
-			const parts = value.split(':');
-			if (parts.length > 1) {
-				displayName = parts.slice(0, -1).join(':');
-				const possiblePrefix = parts[parts.length - 2];
-				if (['MI', 'OM'].includes(possiblePrefix)) {
-					id = `${possiblePrefix}:${parts[parts.length - 1]}`;
-				} else if ((parts[parts.length - 1] || '').length < 20) {
-					id = parts[parts.length - 1];
-				}
-			}
+		// Handle old formatted value: "protein:MI:0326"
+		const formattedMatch = value.match(/^(.+):([A-Z]+:\d+)$/);
+		if (formattedMatch) {
+			const displayName = formattedMatch[1];
+			return {
+				value,
+				displayName,
+				icon: getEntityTypeEmoji(displayName),
+				id: formattedMatch[2],
+			};
 		}
 
 		return {
 			value,
-			displayName,
+			displayName: value,
 			icon: getEntityTypeEmoji(value),
-			id
+			id: null,
 		};
 	}
 
@@ -282,7 +312,7 @@
 				</div>
 			</div>
 		{/if}
-		<div class={mobile ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4'} class:opacity-70={filterOptionsLoading}>
+		<div class={mobile ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4'} class:opacity-70={facetCountsLoading}>
 			{@render filterSection('Entity Types', 'entity_types', entityTypeOptions, filters.entity_types || [])}
 			{@render filterSection('Data Sources', 'sources', sourceOptions, filters.sources || [])}
 		</div>
@@ -298,6 +328,7 @@
 			<div class="max-h-64 space-y-1 overflow-y-auto pr-2">
 				{#each options as option}
 					{@const selected = selectedValues.includes(option.value)}
+					{@const count = scopedFacetCounts.get(`${filterKey === 'entity_types' ? 'entity_type' : 'source'}:${option.value}`)}
 					<div class="flex items-center justify-between gap-2 py-0.5">
 						<Label
 							for={`${filterKey}-${option.value}`}
@@ -314,11 +345,16 @@
 								{option.displayName}
 							</span>
 						</Label>
+						{#if count != null}
+							<span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">
+								{formatNumber(count)}
+							</span>
+						{/if}
 					</div>
 				{/each}
 			</div>
 		</div>
-	{:else if filterOptionsLoading}
+	{:else if facetCountsLoading}
 		<div class="space-y-2">
 			<h4 class="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
 				{title}
@@ -405,6 +441,7 @@
 						selection.addEntity({
 							id: publicId,
 							entityId: publicId,
+							entityPk: result.entityPk,
 							name: displayName,
 							type: entityTypeLabel,
 							fullResult: result
