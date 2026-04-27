@@ -137,9 +137,10 @@ export async function searchEntities({
         e.entity_pk = ANY(${eidParam}::bigint[])
         OR EXISTS (
           SELECT 1
-          FROM ${SEARCH_SCHEMA}.entity_annotation ea
-          WHERE ea.entity_pk = e.entity_pk
-            AND ea.term_entity_pk IN (
+          FROM ${SEARCH_SCHEMA}.entity_relation er
+          WHERE er.relation_category = 'annotation'
+            AND er.subject_entity_pk = e.entity_pk
+            AND er.object_entity_pk IN (
               SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${termParam}::text[])
             )
         )
@@ -153,9 +154,10 @@ export async function searchEntities({
       const param = pushParam(terms);
       whereParts.push(`EXISTS (
         SELECT 1
-        FROM ${SEARCH_SCHEMA}.entity_annotation ea
-        WHERE ea.entity_pk = e.entity_pk
-          AND ea.term_entity_pk IN (
+        FROM ${SEARCH_SCHEMA}.entity_relation er
+        WHERE er.relation_category = 'annotation'
+          AND er.subject_entity_pk = e.entity_pk
+          AND er.object_entity_pk IN (
             SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${param}::text[])
           )
       )`);
@@ -198,13 +200,14 @@ export async function searchEntities({
       if (terms.length) {
         const param = pushParam(terms);
         whereParts.push(`EXISTS (
-          SELECT 1
-          FROM ${SEARCH_SCHEMA}.entity_annotation ea
-          WHERE ea.entity_pk = e.entity_pk
-            AND ea.term_entity_pk IN (
-              SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${param}::text[])
-            )
-        )`);
+        SELECT 1
+        FROM ${SEARCH_SCHEMA}.entity_relation er
+        WHERE er.relation_category = 'annotation'
+          AND er.subject_entity_pk = e.entity_pk
+          AND er.object_entity_pk IN (
+            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${param}::text[])
+          )
+      )`);
       }
     }
 
@@ -497,7 +500,7 @@ export async function getScopedEntityFacetCounts({
 }
 
 /** Rebuild all bitmap tables from current database snapshots.
- *  Call this immediately after REFRESH MATERIALIZED VIEW entity_annotation.
+ *  Populated by omnipath_build; this is a convenience wrapper for manual rebuilds.
  */
 export async function rebuildAllBitmaps(): Promise<void> {
   const client = await getPool().connect();

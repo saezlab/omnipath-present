@@ -176,25 +176,26 @@ async function searchScopedOntologyTermsRelational({
   if (hasTermIds) {
     const termParam = pushParam(termIds);
     cteParts.push(`scope_entity_pks AS MATERIALIZED (
-      SELECT DISTINCT ea.entity_pk
-      FROM ${schema}.entity_annotation ea
-      WHERE ea.term_entity_pk IN (
-        SELECT e.entity_pk FROM ${schema}.entity e WHERE e.canonical_identifier = ANY(${termParam}::text[])
-      )
+      SELECT DISTINCT er.subject_entity_pk AS entity_pk
+      FROM ${schema}.entity_relation er
+      WHERE er.relation_category = 'annotation'
+        AND er.object_entity_pk IN (
+          SELECT e.entity_pk FROM ${schema}.entity e WHERE e.canonical_identifier = ANY(${termParam}::text[])
+        )
     )`);
   }
 
   let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.entity_annotation ea WHERE ea.entity_pk IN (SELECT entity_pk FROM scope_entity_pks)`
-    : `FROM ${schema}.entity_annotation ea WHERE ea.entity_pk = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
+    ? `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks)`
+    : `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND er.subject_entity_pk = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.entity_annotation ea WHERE ea.entity_pk IN (SELECT entity_pk FROM scope_entity_pks) OR ea.entity_pk = ANY(${ePksParam}::bigint[])`;
+    scopeTermPksFrom = `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND (er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks) OR er.subject_entity_pk = ANY(${ePksParam}::bigint[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
-    SELECT DISTINCT ea.term_entity_pk
+    SELECT DISTINCT er.object_entity_pk AS term_entity_pk
     ${scopeTermPksFrom}
   )`);
 
@@ -552,7 +553,7 @@ export async function getScopedOntologyPrefixCounts({
 }
 
 /** Rebuild all bitmap tables from current database snapshots.
- *  Call this immediately after REFRESH MATERIALIZED VIEW entity_annotation.
+ *  Populated by omnipath_build; this is a convenience wrapper for manual rebuilds.
  */
 export async function rebuildAllBitmaps(): Promise<void> {
   const client = await getPool().connect();
@@ -586,11 +587,12 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
       `SELECT DISTINCT
          es.canonical_identifier,
          es.canonical_identifier_type
-       FROM ${SEARCH_SCHEMA}.entity_annotation ea
-       JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_pk = ea.entity_pk
-       WHERE ea.term_entity_pk IN (
-         SELECT e.entity_pk FROM ${SEARCH_SCHEMA}.entity e WHERE e.canonical_identifier = ANY($1::text[])
-       )`,
+       FROM ${SEARCH_SCHEMA}.entity_relation er
+       JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_pk = er.subject_entity_pk
+       WHERE er.relation_category = 'annotation'
+         AND er.object_entity_pk IN (
+           SELECT e.entity_pk FROM ${SEARCH_SCHEMA}.entity e WHERE e.canonical_identifier = ANY($1::text[])
+         )`,
       [normalized],
     );
     return result.rows.map((row) => toPublicEntityId(row));

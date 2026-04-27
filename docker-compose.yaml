@@ -32,7 +32,6 @@ services:
             retries: 20
         volumes:
             - postgres18_data:/var/lib/postgresql
-            - ./postgres/init-scripts:/docker-entrypoint-initdb.d:ro
         networks:
             - dokploy-network
 
