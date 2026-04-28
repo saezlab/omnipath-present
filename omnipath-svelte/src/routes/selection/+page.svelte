@@ -23,7 +23,7 @@
 	let draftQuery = $state('');
 	let filters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 
-	const shouldResolveAnnotationEntities = $derived(tab === 'interactions');
+	const shouldResolveAnnotationEntities = $derived(tab === 'relations');
 	const scope = $derived(
 		getSelectionScope(selection.entityIds, selection.annotationIds, {
 			resolveAnnotationEntities: shouldResolveAnnotationEntities
@@ -35,7 +35,7 @@
 	});
 
 	function setTab(next: string) {
-		if (next === 'interactions' && !filters.relation_categories?.length) {
+		if (next === 'relations' && !filters.relation_categories?.length) {
 			filters = { ...filters, relation_categories: ['interaction'] };
 		}
 		const url = new URL($page.url);
@@ -76,25 +76,25 @@
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
 
-	const isInteractionSelectionEmpty = $derived(
+	const isRelationSelectionEmpty = $derived(
 		scope.selectedEntityIds.length === 0 && scope.selectedAnnotationIds.length === 0
 	);
 	const hasSelection = $derived(selection.selectedEntities.length > 0 || selection.selectedAnnotations.length > 0);
 	const isSelectionEmpty = $derived(
-		tab === 'interactions'
-			? isInteractionSelectionEmpty
+		tab === 'relations'
+			? isRelationSelectionEmpty
 			: selection.selectedEntities.length === 0 && selection.selectedAnnotations.length === 0
 	);
 </script>
 
-{#if !(tab === 'interactions' && scope.isLoading) && isSelectionEmpty}
+{#if !(tab === 'relations' && scope.isLoading) && isSelectionEmpty}
 	<div class="flex flex-1 items-center justify-center p-8">
 		<Card class="w-full max-w-2xl border-dashed">
 			<CardContent class="space-y-4 py-12 text-center">
 				<h1 class="text-2xl font-semibold">Selection is empty</h1>
 				<p class="text-muted-foreground">
-					Use Explore to add entities or annotations. Selection will scope entities, interactions, and
-					annotations to that shared subset.
+				Use Explore to add entities or annotations. Selection will scope entities, relations, and
+				annotations to that shared subset.
 				</p>
 				{#if selection.selectedAnnotations.length > 0}
 					<div class="flex flex-wrap justify-center gap-2">
@@ -116,13 +116,13 @@
 		onTabChange={setTab}
 		tabs={[
 			{ value: 'entities', label: 'Entities' },
-			{ value: 'interactions', label: 'Interactions' },
+			{ value: 'relations', label: 'Relations' },
 			{ value: 'annotations', label: 'Annotations' }
 		]}
 		searchPlaceholder={tab === 'annotations'
 			? 'Search scoped annotations…'
-			: tab === 'interactions'
-				? 'Search scoped interactions…'
+			: tab === 'relations'
+				? 'Search scoped relations…'
 				: 'Search scoped entities…'}
 		bind:searchInputRef={inputRef}
 		showSpeciesPicker={false}
@@ -136,7 +136,7 @@
 					selectedEntityPks={selection.selectedEntityPks}
 					selectedAnnotationIds={scope.selectedAnnotationIds}
 				/>
-			{:else if tab === 'interactions'}
+			{:else if tab === 'relations'}
 				<RelationsExploreTab {filters} onFilterChange={(f) => (filters = f)} scopedEntityIds={selection.entityIds} scopedAnnotationIds={scope.selectedAnnotationIds} />
 			{:else}
 				<AnnotationBrowserTab {query} {filters} onFiltersChange={(f) => (filters = f)} selectedEntityPks={selection.selectedEntityPks} selectedAnnotationIds={scope.selectedAnnotationIds} />
@@ -159,7 +159,7 @@
 						<SheetHeader class="border-b px-6 py-5 pr-12">
 							<SheetTitle class="text-xl">Current selection</SheetTitle>
 							<SheetDescription>
-								This selection scopes the entities, interactions, and annotations tabs.
+								This selection scopes the entities, relations, and annotations tabs.
 							</SheetDescription>
 						</SheetHeader>
 						<div class="flex min-h-0 flex-1 flex-col">
