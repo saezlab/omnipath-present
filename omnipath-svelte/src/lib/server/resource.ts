@@ -5,6 +5,7 @@ import { getDb } from '$lib/server/db/client';
 export interface ResourceRecord {
 	resource_id: string;
 	resource_name: string;
+	resource_kind: string | null;
 	description: string | null;
 	homepage_url: string | null;
 	license: string | null;
@@ -47,6 +48,7 @@ export async function listResources(): Promise<ResourceRecord[]> {
 	return rows.map((row) => ({
 		resource_id: row.resourceId,
 		resource_name: row.resourceName || row.resourceId,
+		resource_kind: row.resourceKind,
 		description: row.description,
 		homepage_url: row.homepageUrl,
 		license: row.license,

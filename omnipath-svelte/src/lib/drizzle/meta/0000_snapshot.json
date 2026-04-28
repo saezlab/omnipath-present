@@ -1,0 +1,1064 @@
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "prevId": "",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.entity_relation": {
+      "name": "entity_relation",
+      "schema": "",
+      "columns": {
+        "relation_pk": {
+          "name": "relation_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "subject_entity_pk": {
+          "name": "subject_entity_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "predicate": {
+          "name": "predicate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_entity_pk": {
+          "name": "object_entity_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation_category": {
+          "name": "relation_category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_types": {
+          "name": "participant_types",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"\"}'"
+        },
+        "evidence_count": {
+          "name": "evidence_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sources": {
+          "name": "sources",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"\"}'"
+        }
+      },
+      "indexes": {
+        "entity_relation_category_predicate_idx": {
+          "name": "entity_relation_category_predicate_idx",
+          "columns": [
+            {
+              "expression": "relation_category",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "predicate",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_relation_object_category_idx": {
+          "name": "entity_relation_object_category_idx",
+          "columns": [
+            {
+              "expression": "object_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "relation_category",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_relation_object_idx": {
+          "name": "entity_relation_object_idx",
+          "columns": [
+            {
+              "expression": "object_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_relation_subject_category_idx": {
+          "name": "entity_relation_subject_category_idx",
+          "columns": [
+            {
+              "expression": "subject_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "relation_category",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_relation_subject_idx": {
+          "name": "entity_relation_subject_idx",
+          "columns": [
+            {
+              "expression": "subject_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_relation_subject_predicate_idx": {
+          "name": "entity_relation_subject_predicate_idx",
+          "columns": [
+            {
+              "expression": "subject_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "predicate",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entity_relation_subject_entity_pk_fkey": {
+          "name": "entity_relation_subject_entity_pk_fkey",
+          "tableFrom": "entity_relation",
+          "tableTo": "entity",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "subject_entity_pk"
+          ],
+          "columnsTo": [
+            "entity_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entity_relation_object_entity_pk_fkey": {
+          "name": "entity_relation_object_entity_pk_fkey",
+          "tableFrom": "entity_relation",
+          "tableTo": "entity",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "object_entity_pk"
+          ],
+          "columnsTo": [
+            "entity_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_identifier": {
+      "name": "entity_identifier",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "entity_pk": {
+          "name": "entity_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identifier_type": {
+          "name": "identifier_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "entity_identifier_entity_pk_idx": {
+          "name": "entity_identifier_entity_pk_idx",
+          "columns": [
+            {
+              "expression": "entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entity_identifier_identifier_lower_hash_idx": {
+          "name": "entity_identifier_identifier_lower_hash_idx",
+          "columns": [
+            {
+              "expression": "lower(identifier)",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": true
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hash",
+          "with": {}
+        },
+        "entity_identifier_value_hash_idx": {
+          "name": "entity_identifier_value_hash_idx",
+          "columns": [
+            {
+              "expression": "identifier",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hash",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entity_identifier_entity_pk_fkey": {
+          "name": "entity_identifier_entity_pk_fkey",
+          "tableFrom": "entity_identifier",
+          "tableTo": "entity",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "entity_pk"
+          ],
+          "columnsTo": [
+            "entity_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.entity": {
+      "name": "entity",
+      "schema": "",
+      "columns": {
+        "entity_pk": {
+          "name": "entity_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "canonical_identifier": {
+          "name": "canonical_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "canonical_identifier_type": {
+          "name": "canonical_identifier_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "taxonomy_id": {
+          "name": "taxonomy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_attributes": {
+          "name": "entity_attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sources": {
+          "name": "sources",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"\"}'"
+        }
+      },
+      "indexes": {
+        "entity_cv_term_idx": {
+          "name": "entity_cv_term_idx",
+          "columns": [
+            {
+              "expression": "canonical_identifier",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "where": "((entity_type = 'OM:0012:Cv Term'::text) AND (canonical_identifier_type = 'OM:0204:Cv Term Accession'::text))",
+          "with": {}
+        },
+        "entity_taxonomy_idx": {
+          "name": "entity_taxonomy_idx",
+          "columns": [
+            {
+              "expression": "taxonomy_id",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.annotation_term_entity_bitmap": {
+      "name": "annotation_term_entity_bitmap",
+      "schema": "",
+      "columns": {
+        "term_entity_pk": {
+          "name": "term_entity_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "entity_bitmap": {
+          "name": "entity_bitmap",
+          "type": "roaringbitmap",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "global_count": {
+          "name": "global_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.resources": {
+      "name": "resources",
+      "schema": "",
+      "columns": {
+        "resource_id": {
+          "name": "resource_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "resource_name": {
+          "name": "resource_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "homepage_url": {
+          "name": "homepage_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "license": {
+          "name": "license",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pubmed_id": {
+          "name": "pubmed_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resource_kind": {
+          "name": "resource_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "categories": {
+          "name": "categories",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"\"}'"
+        },
+        "annotation_ontologies": {
+          "name": "annotation_ontologies",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"\"}'"
+        },
+        "entity_count": {
+          "name": "entity_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "interaction_count": {
+          "name": "interaction_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "membership_count": {
+          "name": "membership_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "annotation_count": {
+          "name": "annotation_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "identifier_count": {
+          "name": "identifier_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ontology_term_count": {
+          "name": "ontology_term_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_size_bytes": {
+          "name": "total_size_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_downloaded_at": {
+          "name": "last_downloaded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_built_at": {
+          "name": "last_built_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "build_status": {
+          "name": "build_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "resources_build_status_idx": {
+          "name": "resources_build_status_idx",
+          "columns": [
+            {
+              "expression": "build_status",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "resources_resource_name_trgm_idx": {
+          "name": "resources_resource_name_trgm_idx",
+          "columns": [
+            {
+              "expression": "resource_name",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "gin_trgm_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.annotation_term_relation_bitmap": {
+      "name": "annotation_term_relation_bitmap",
+      "schema": "",
+      "columns": {
+        "term_entity_pk": {
+          "name": "term_entity_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "relation_bitmap": {
+          "name": "relation_bitmap",
+          "type": "roaringbitmap",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "global_count": {
+          "name": "global_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_relation_evidence": {
+      "name": "entity_relation_evidence",
+      "schema": "",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation_evidence_pk": {
+          "name": "relation_evidence_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "relation_pk": {
+          "name": "relation_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "record_attributes": {
+          "name": "record_attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subject_attributes": {
+          "name": "subject_attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "object_attributes": {
+          "name": "object_attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "entity_relation_evidence_relation_idx": {
+          "name": "entity_relation_evidence_relation_idx",
+          "columns": [
+            {
+              "expression": "relation_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entity_relation_evidence_relation_pk_fkey": {
+          "name": "entity_relation_evidence_relation_pk_fkey",
+          "tableFrom": "entity_relation_evidence",
+          "tableTo": "entity_relation",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "relation_pk"
+          ],
+          "columnsTo": [
+            "relation_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.facet_entity_bitmap": {
+      "name": "facet_entity_bitmap",
+      "schema": "",
+      "columns": {
+        "facet_name": {
+          "name": "facet_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facet_value": {
+          "name": "facet_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_bitmap": {
+          "name": "entity_bitmap",
+          "type": "roaringbitmap",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_count": {
+          "name": "entity_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "facet_entity_bitmap_pkey": {
+          "name": "facet_entity_bitmap_pkey",
+          "columns": [
+            "facet_value",
+            "facet_name"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.facet_relation_bitmap": {
+      "name": "facet_relation_bitmap",
+      "schema": "",
+      "columns": {
+        "facet_name": {
+          "name": "facet_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facet_value": {
+          "name": "facet_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation_bitmap": {
+          "name": "relation_bitmap",
+          "type": "roaringbitmap",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation_count": {
+          "name": "relation_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facet_category": {
+          "name": "facet_category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "facet_relation_bitmap_pkey": {
+          "name": "facet_relation_bitmap_pkey",
+          "columns": [
+            "facet_value",
+            "facet_name"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.relation_annotation_term": {
+      "name": "relation_annotation_term",
+      "schema": "",
+      "columns": {
+        "relation_pk": {
+          "name": "relation_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation_evidence_pk": {
+          "name": "relation_evidence_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "term_entity_pk": {
+          "name": "term_entity_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "relation_annotation_term_relation_idx": {
+          "name": "relation_annotation_term_relation_idx",
+          "columns": [
+            {
+              "expression": "relation_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "relation_annotation_term_scope_term_relation_idx": {
+          "name": "relation_annotation_term_scope_term_relation_idx",
+          "columns": [
+            {
+              "expression": "scope",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "term_entity_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            },
+            {
+              "expression": "relation_pk",
+              "asc": true,
+              "nulls": "last",
+              "opclass": "int8_ops",
+              "isExpression": false
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "relation_annotation_term_relation_pk_fkey": {
+          "name": "relation_annotation_term_relation_pk_fkey",
+          "tableFrom": "relation_annotation_term",
+          "tableTo": "entity_relation",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "relation_pk"
+          ],
+          "columnsTo": [
+            "relation_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "relation_annotation_term_relation_evidence_pk_fkey": {
+          "name": "relation_annotation_term_relation_evidence_pk_fkey",
+          "tableFrom": "relation_annotation_term",
+          "tableTo": "entity_relation_evidence",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "relation_evidence_pk"
+          ],
+          "columnsTo": [
+            "relation_evidence_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "relation_annotation_term_term_entity_pk_fkey": {
+          "name": "relation_annotation_term_term_entity_pk_fkey",
+          "tableFrom": "relation_annotation_term",
+          "tableTo": "entity",
+          "schemaTo": "public",
+          "columnsFrom": [
+            "term_entity_pk"
+          ],
+          "columnsTo": [
+            "entity_pk"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "relation_annotation_term_pkey": {
+          "name": "relation_annotation_term_pkey",
+          "columns": [
+            "term_entity_pk",
+            "scope",
+            "relation_evidence_pk"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {
+    "public.ontology_term_annotation_counts": {
+      "name": "ontology_term_annotation_counts",
+      "schema": "public",
+      "columns": {
+        "term_entity_pk": {
+          "name": "term_entity_pk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "term_id": {
+          "name": "term_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "annotated_entity_count": {
+          "name": "annotated_entity_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "annotated_relation_count": {
+          "name": "annotated_relation_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "annotated_item_count": {
+          "name": "annotated_item_count",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "isExisting": false,
+      "definition": "WITH entity_counts AS ( SELECT term_entity_1.entity_pk AS term_entity_pk, count(DISTINCT er.subject_entity_pk) AS annotated_entity_count FROM entity_relation er JOIN entity term_entity_1 ON term_entity_1.entity_pk = er.object_entity_pk WHERE er.relation_category = 'annotation'::text AND term_entity_1.entity_type = 'OM:0012:Cv Term'::text AND term_entity_1.canonical_identifier_type = 'OM:0204:Cv Term Accession'::text GROUP BY term_entity_1.entity_pk ), relation_counts AS ( SELECT relation_annotation_term.term_entity_pk, count(DISTINCT relation_annotation_term.relation_pk) AS annotated_relation_count FROM relation_annotation_term GROUP BY relation_annotation_term.term_entity_pk ) SELECT term_entity.entity_pk AS term_entity_pk, term_entity.canonical_identifier AS term_id, COALESCE(ec.annotated_entity_count, 0::bigint) AS annotated_entity_count, COALESCE(rc.annotated_relation_count, 0::bigint) AS annotated_relation_count, COALESCE(ec.annotated_entity_count, 0::bigint) + COALESCE(rc.annotated_relation_count, 0::bigint) AS annotated_item_count FROM entity term_entity LEFT JOIN entity_counts ec ON ec.term_entity_pk = term_entity.entity_pk LEFT JOIN relation_counts rc ON rc.term_entity_pk = term_entity.entity_pk WHERE term_entity.entity_type = 'OM:0012:Cv Term'::text AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'::text",
+      "materialized": true
+    }
+  },
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {
+      "entity_relation": {
+        "columns": {
+          "participant_types": {
+            "isArray": true,
+            "dimensions": 1,
+            "rawType": "text"
+          },
+          "sources": {
+            "isArray": true,
+            "dimensions": 1,
+            "rawType": "text"
+          }
+        }
+      },
+      "entity": {
+        "columns": {
+          "sources": {
+            "isArray": true,
+            "dimensions": 1,
+            "rawType": "text"
+          }
+        }
+      },
+      "resources": {
+        "columns": {
+          "categories": {
+            "isArray": true,
+            "dimensions": 1,
+            "rawType": "text"
+          },
+          "annotation_ontologies": {
+            "isArray": true,
+            "dimensions": 1,
+            "rawType": "text"
+          }
+        }
+      }
+    }
+  }
+}

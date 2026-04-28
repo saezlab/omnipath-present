@@ -173,7 +173,7 @@ export async function fetchEntitiesByPks(pks: number[]) {
 
 export async function fetchOntologySearch(params: {
   query?: string;
-  prefixes?: string[];
+  sources?: string[];
   limit?: number;
   offset?: number;
 }) {
@@ -181,7 +181,7 @@ export async function fetchOntologySearch(params: {
   if (params.query) url.searchParams.set("q", params.query);
   if (params.limit != null) url.searchParams.set("limit", String(params.limit));
   if (params.offset != null) url.searchParams.set("offset", String(params.offset));
-  if (params.prefixes?.length) url.searchParams.set("prefixes", params.prefixes.join(","));
+  if (params.sources?.length) url.searchParams.set("sources", params.sources.join(","));
 
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch ontology terms");
@@ -204,7 +204,7 @@ export async function fetchScopedOntologySearch(params: {
   entityPks?: number[];
   termIds?: string[];
   query?: string;
-  prefixes?: string[];
+  sources?: string[];
   limit?: number;
   offset?: number;
 }) {
@@ -215,7 +215,7 @@ export async function fetchScopedOntologySearch(params: {
       entityPks: params.entityPks || [],
       termIds: params.termIds || [],
       query: params.query || "",
-      prefixes: params.prefixes,
+      sources: params.sources,
       limit: params.limit ?? 24,
       offset: params.offset ?? 0,
     }),
@@ -252,6 +252,20 @@ export async function fetchScopedOntologyPrefixCounts(params: {
   });
   if (!res.ok) throw new Error("Failed to fetch scoped ontology prefix counts");
   return res.json() as Promise<Array<{ prefix: string; scopedCount: number }>>;
+}
+
+export async function fetchScopedOntologySourceCounts(params: {
+  entityPks?: number[];
+  annotationTermIds?: string[];
+  query?: string;
+}) {
+  const res = await fetch("/app-api/ontology/source-counts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to fetch scoped ontology source counts");
+  return res.json() as Promise<Array<{ source: string; scopedCount: number }>>;
 }
 
 export async function fetchTerms(termIds: string[]) {

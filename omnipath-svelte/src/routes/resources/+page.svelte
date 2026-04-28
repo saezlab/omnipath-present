@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, ChevronUp, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from '@lucide/svelte';
+	import { BookOpenText, ChevronDown, ChevronUp, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import {
@@ -22,7 +22,8 @@
 		{ value: 'all', label: 'All' },
 		{ value: 'annotation', label: 'Annotation' },
 		{ value: 'interaction', label: 'Interaction' },
-		{ value: 'membership', label: 'Membership' }
+		{ value: 'membership', label: 'Membership' },
+		{ value: 'ontology', label: 'Ontology' }
 	] as const;
 
 	const filteredResources = $derived.by(() => {
@@ -33,6 +34,7 @@
 				resource.resource_name,
 				resource.resource_id,
 				resource.description,
+				resource.resource_kind,
 				...(resource.categories || []),
 				...(resource.annotation_ontologies || [])
 			]
@@ -43,6 +45,7 @@
 			const matchesQuery = normalizedQuery.length === 0 || searchableText.includes(normalizedQuery);
 			const matchesCategory =
 				selectedCategory === 'all' ||
+				resource.resource_kind === selectedCategory ||
 				resource.categories.includes(selectedCategory) ||
 				(selectedCategory === 'membership' && resource.categories.includes('association'));
 
@@ -94,7 +97,9 @@
 		}).format(date);
 	}
 
-	function iconForCategories(categories: string[]) {
+	function iconForResource(resource: ResourceRecord) {
+		if (resource.resource_kind === 'ontology') return BookOpenText;
+		const categories = resource.categories;
 		if (categories.includes('interaction')) return Network;
 		if (categories.includes('annotation')) return Layers3;
 		if (categories.includes('membership') || categories.includes('association')) return Tags;
@@ -205,7 +210,7 @@
 						{#each filteredResources as resource (resource.resource_id)}
 							{@const expanded = expandedIds.has(resource.resource_id)}
 							{@const downloading = downloadingIds.has(resource.resource_id)}
-							{@const Icon = iconForCategories(resource.categories)}
+							{@const Icon = iconForResource(resource)}
 							<article class="flex h-full flex-col rounded-[1.25rem] border border-border/50 bg-card/70 p-4 transition-all hover:bg-muted/[0.18]">
 								<div class="flex items-start justify-between gap-3">
 									<div class="flex min-w-0 items-start gap-3">

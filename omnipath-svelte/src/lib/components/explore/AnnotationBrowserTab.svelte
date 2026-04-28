@@ -7,7 +7,7 @@
   import { Label } from '$lib/components/ui/label/index.js';
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-  import { fetchOntologySearch, fetchScopedOntologySearch, fetchOntologyPrefixes, fetchScopedOntologyPrefixCounts } from '$lib/api/client';
+  import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologySourceCounts } from '$lib/api/client';
   import { getSelectionStore } from '$lib/stores/selection.svelte';
   import type { SearchFilters } from '$lib/types/search';
 
@@ -43,53 +43,35 @@
   let hasMore = $state(true);
   let offset = $state(0);
   let error = $state<string | null>(null);
-  let prefixes = $state<string[]>([]);
-  let prefixCounts = $state<Map<string, number>>(new Map());
-  let loadingPrefixes = $state(true);
+  let sourceOptions = $state<Array<{ value: string; count: number }>>([]);
+  let loadingSources = $state(true);
 
   const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
-  const selectedPrefixes = $derived(filters.ontology_prefixes || []);
+  const selectedSources = $derived(filters.sources || []);
 
-  // Fetch prefixes once on mount
-  $effect(() => {
-    let cancelled = false;
-    loadingPrefixes = true;
-    fetchOntologyPrefixes()
-      .then((data) => {
-        if (cancelled) return;
-        prefixes = data.prefixes;
-      })
-      .catch(() => {
-        if (!cancelled) prefixes = [];
-      })
-      .finally(() => {
-        if (!cancelled) loadingPrefixes = false;
-      });
-    return () => { cancelled = true; };
-  });
-
-  // Fetch scoped prefix counts when scope or query changes
+  // Fetch source counts from annotation terms available in the current scope.
   $effect(() => {
     const q = query;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
 
     let cancelled = false;
-    fetchScopedOntologyPrefixCounts({
+    loadingSources = true;
+    fetchScopedOntologySourceCounts({
       entityPks: ePks.length > 0 ? ePks : undefined,
       annotationTermIds: tIds.length > 0 ? tIds : undefined,
       query: q || undefined,
     })
       .then((counts) => {
         if (cancelled) return;
-        const map = new Map<string, number>();
-        for (const c of counts) {
-          map.set(c.prefix, c.scopedCount);
-        }
-        prefixCounts = map;
+        sourceOptions = counts
+          .map((c) => ({ value: c.source, count: c.scopedCount }));
       })
       .catch(() => {
-        if (!cancelled) prefixCounts = new Map();
+        if (!cancelled) sourceOptions = [];
+      })
+      .finally(() => {
+        if (!cancelled) loadingSources = false;
       });
     return () => { cancelled = true; };
   });
@@ -97,7 +79,7 @@
   // Reactive reset: only read external dependencies in the effect body.
   $effect(() => {
     const q = query;
-    const pfx = selectedPrefixes;
+    const sources = selectedSources;
     const scoped = isScoped;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
@@ -109,8 +91,8 @@
     error = null;
 
     const fetcher = scoped
-      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, prefixes: pfx.length > 0 ? pfx : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
-      : fetchOntologySearch({ query: q, prefixes: pfx.length > 0 ? pfx : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
+      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, sources: sources.length > 0 ? sources : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
+      : fetchOntologySearch({ query: q, sources: sources.length > 0 ? sources : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
 
     fetcher
       .then((page) => {
@@ -136,13 +118,13 @@
             entityPks: selectedEntityPks || [],
             termIds: selectedAnnotationIds || [],
             query,
-            prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
+            sources: selectedSources.length > 0 ? selectedSources : undefined,
             limit: RESULTS_PER_PAGE,
             offset,
           })
         : await fetchOntologySearch({
             query,
-            prefixes: selectedPrefixes.length > 0 ? selectedPrefixes : undefined,
+            sources: selectedSources.length > 0 ? selectedSources : undefined,
             limit: RESULTS_PER_PAGE,
             offset,
           });
@@ -156,49 +138,46 @@
     }
   }
 
-  function togglePrefix(prefix: string) {
-    const next = selectedPrefixes.includes(prefix)
-      ? selectedPrefixes.filter((p) => p !== prefix)
-      : [...selectedPrefixes, prefix];
+  function toggleSource(source: string) {
+    const next = selectedSources.includes(source)
+      ? selectedSources.filter((item) => item !== source)
+      : [...selectedSources, source];
     onFiltersChange({
       ...filters,
-      ontology_prefixes: next.length > 0 ? next : undefined,
+      sources: next.length > 0 ? next : undefined,
     });
   }
 
   function handleClearFilters() {
     onFiltersChange({
       ...filters,
-      ontology_prefixes: undefined,
+      sources: undefined,
     });
   }
 
-  function formatUsageCount(count: number) {
-    return `${count.toLocaleString()} ${count === 1 ? 'use' : 'uses'}`;
+  function formatCount(count: number, singular: string, plural: string = `${singular}s`) {
+    return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
   }
 </script>
 
 {#snippet filterSidebarContent()}
   <div class="space-y-6">
     <div class="max-h-[calc(100vh-14rem)] space-y-1 overflow-y-auto pr-2">
-      {#each prefixes as prefix}
-        {@const selected = selectedPrefixes.includes(prefix)}
-        {@const count = prefixCounts.get(prefix)}
+      {#each sourceOptions as source}
+        {@const selected = selectedSources.includes(source.value)}
         <div class="flex items-center justify-between gap-2 py-0.5">
           <Label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground {selected ? 'font-medium' : ''}">
             <Checkbox
               checked={selected}
-              onCheckedChange={() => togglePrefix(prefix)}
+              onCheckedChange={() => toggleSource(source.value)}
               class={selected ? 'h-4 w-4 flex-shrink-0 border-primary' : 'h-4 w-4 flex-shrink-0'}
             />
-            <span class="truncate">{prefix}</span>
+            <span class="truncate">{source.value}</span>
           </Label>
-          {#if count != null}
-            <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">{count.toLocaleString()}</span>
-          {/if}
+          <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">{source.count.toLocaleString()}</span>
         </div>
       {:else}
-        {#if loadingPrefixes}
+        {#if loadingSources}
           <p class="text-sm text-muted-foreground">Loading filters...</p>
         {:else}
           <p class="text-sm text-muted-foreground">No filters available</p>
@@ -219,7 +198,7 @@
             <Filter class="h-5 w-5 text-primary" />
             <h3 class="font-semibold text-lg">Filters</h3>
           </div>
-          {#if selectedPrefixes.length > 0}
+          {#if selectedSources.length > 0}
             <Button
               variant="ghost"
               size="sm"
@@ -227,7 +206,7 @@
               class="flex items-center gap-1 text-muted-foreground hover:text-foreground"
             >
               <X class="h-4 w-4" />
-              Clear all ({selectedPrefixes.length})
+              Clear all ({selectedSources.length})
             </Button>
           {/if}
         </div>
@@ -293,13 +272,13 @@
                   {#if term.ontologyPrefix}
                     <Badge variant="outline">{term.ontologyPrefix}</Badge>
                   {/if}
-                  {#if term.annotatedItemCount !== undefined}
+                  {#if term.annotatedEntityCount !== undefined && term.annotatedEntityCount > 0}
                     <Badge variant="outline" class="border-primary/20 bg-primary/5 text-primary">
-                      {formatUsageCount(term.annotatedItemCount)}
+                      {formatCount(term.annotatedEntityCount, 'entity', 'entities')}
                     </Badge>
-                  {:else if term.annotatedEntityCount !== undefined}
+                  {:else if term.annotatedRelationCount !== undefined && term.annotatedRelationCount > 0}
                     <Badge variant="outline" class="border-primary/20 bg-primary/5 text-primary">
-                      {term.annotatedEntityCount.toLocaleString()} {term.annotatedEntityCount === 1 ? 'entity' : 'entities'}
+                      {formatCount(term.annotatedRelationCount, 'relation')}
                     </Badge>
                   {/if}
                 </div>
@@ -359,8 +338,8 @@
           <Button variant="outline" class="w-full">
             <Filter class="mr-2 size-4" />
             Filters
-            {#if selectedPrefixes.length > 0}
-              <Badge variant="secondary" class="ml-2">{selectedPrefixes.length}</Badge>
+            {#if selectedSources.length > 0}
+              <Badge variant="secondary" class="ml-2">{selectedSources.length}</Badge>
             {/if}
           </Button>
         </SheetTrigger>

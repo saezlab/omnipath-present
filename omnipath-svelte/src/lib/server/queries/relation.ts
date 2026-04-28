@@ -82,7 +82,7 @@ function normalizeStringValues(values: string[] | undefined): string[] {
   return Array.from(new Set((values || []).map((value) => value.trim()).filter(Boolean)));
 }
 
-function buildRelationSearchWhere(filters: RelationFilters) {
+function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
   const whereParts: string[] = [];
   const params: unknown[] = [];
 
@@ -98,15 +98,21 @@ function buildRelationSearchWhere(filters: RelationFilters) {
   const annotationTermPredicate = (placeholder: string) => `(
       EXISTS (
         SELECT 1
-        FROM relation_annotation_term rat
+        FROM ${schema}.relation_annotation_term rat
         WHERE rat.relation_pk = entity_relation.relation_pk
-          AND rat.term_id = ANY(${placeholder})
+          AND rat.term_entity_pk IN (
+            SELECT term_entity.entity_pk
+            FROM ${schema}.entity term_entity
+            WHERE term_entity.entity_type = 'OM:0012:Cv Term'
+              AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
+              AND term_entity.canonical_identifier = ANY(${placeholder})
+          )
       )
       OR (
         entity_relation.relation_category = 'annotation'
         AND EXISTS (
           SELECT 1
-          FROM entity term_entity
+          FROM ${schema}.entity term_entity
           WHERE term_entity.entity_pk = entity_relation.object_entity_pk
             AND term_entity.canonical_identifier = ANY(${placeholder})
         )
@@ -115,8 +121,8 @@ function buildRelationSearchWhere(filters: RelationFilters) {
         entity_relation.relation_category = 'membership'
         AND EXISTS (
           SELECT 1
-          FROM entity_relation participant_annotation
-          JOIN entity term_entity ON term_entity.entity_pk = participant_annotation.object_entity_pk
+          FROM ${schema}.entity_relation participant_annotation
+          JOIN ${schema}.entity term_entity ON term_entity.entity_pk = participant_annotation.object_entity_pk
           WHERE participant_annotation.relation_category = 'annotation'
             AND participant_annotation.subject_entity_pk IN (
               entity_relation.subject_entity_pk,
@@ -193,10 +199,10 @@ export async function searchRelations({
 } = {}): Promise<{ relations: EntityRelation[] }> {
   const client = await getPool().connect();
   try {
-    const { whereClause, params } = buildRelationSearchWhere(filters);
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const { whereClause, params } = buildRelationSearchWhere(filters, SEARCH_SCHEMA);
 
     const pageParams = [...params, limit, offset];
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const relationsResult = await client.query<{
       relation_pk: string | number;
       subject_entity_pk: string | number;
@@ -225,8 +231,8 @@ export async function searchRelations({
 export async function countRelations(filters: RelationFilters = {}): Promise<number> {
   const client = await getPool().connect();
   try {
-    const { whereClause, params } = buildRelationSearchWhere(filters);
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const { whereClause, params } = buildRelationSearchWhere(filters, SEARCH_SCHEMA);
     const result = await client.query<{ count: string }>(
       `SELECT count(*) AS count
        FROM ${SEARCH_SCHEMA}.entity_relation
