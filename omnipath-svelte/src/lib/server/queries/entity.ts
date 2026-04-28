@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, getPool } from "$lib/server/db/client";
 import { entity, entityIdentifier, type Entity, type EntityIdentifier } from "$lib/drizzle";
-import { entityTypeLabelSqlExpression, normalizeEntityTypeFilterValue, normalizedEntityTypeSqlExpression, taxonomyScopedEntityTypeLabels } from "$lib/entity-filter";
+import { entityTypeLabelSqlExpression, taxonomyScopedEntityTypeLabels } from "$lib/entity-filter";
 import { normalizeStringValues } from "$lib/entity-public-id";
 import { publicEntityIdWhere } from "$lib/server/entity-public-id";
 
@@ -164,10 +164,10 @@ export async function searchEntities({
     }
 
     if (filters.entity_types?.length) {
-      const normalizedTypes = filters.entity_types.map(normalizeEntityTypeFilterValue).filter(Boolean);
-      if (normalizedTypes.length) {
-        const param = pushParam(normalizedTypes);
-        whereParts.push(`${normalizedEntityTypeSqlExpression("e.entity_type")} = ANY(${param}::text[])`);
+      const types = normalizeStringValues(filters.entity_types);
+      if (types.length) {
+        const param = pushParam(types);
+        whereParts.push(`e.entity_type = ANY(${param}::text[])`);
       }
     }
 
@@ -298,7 +298,7 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
         client.query<{ values: string[] | null }>(
           `SELECT array_agg(value ORDER BY value) AS values
            FROM (
-             SELECT DISTINCT LOWER(split_part(entity_type, ':', 3)) || ':' || split_part(entity_type, ':', 1) || ':' || split_part(entity_type, ':', 2) AS value
+             SELECT DISTINCT entity_type AS value
              FROM ${SEARCH_SCHEMA}.entity
              WHERE entity_type IS NOT NULL
            ) t`,
