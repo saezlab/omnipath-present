@@ -232,6 +232,7 @@ export async function fetchScopedOntologySearch(params: {
       synonyms: string[];
       sources: string[];
       annotatedEntityCount: number;
+      annotatedRelationCount: number;
     }>
   >;
 }

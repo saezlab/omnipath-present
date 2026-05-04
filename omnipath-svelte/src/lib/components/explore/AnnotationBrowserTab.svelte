@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Filter, Network, Plus, X } from '@lucide/svelte';
+  import { Box, Check, Filter, Link, Network, Plus, X } from '@lucide/svelte';
   import { Badge } from '$lib/components/ui/badge/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Card, CardContent } from '$lib/components/ui/card/index.js';
@@ -37,7 +37,7 @@
     ontologyId: string | null;
     sources: string[];
     annotatedEntityCount: number;
-    annotatedRelationCount?: number;
+    annotatedRelationCount: number;
     annotatedItemCount?: number;
   }>>([]);
   let loading = $state(false);
@@ -159,15 +159,6 @@
     });
   }
 
-  function formatCount(count: number, singular: string, plural: string = `${singular}s`) {
-    return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
-  }
-
-  function formatEntityCount(term: (typeof results)[number]) {
-    const count = term.annotatedEntityCount || 0;
-    return formatCount(count, 'entity', 'entities');
-  }
-
   function openHierarchy(term: (typeof results)[number]) {
     hierarchyTerm = term;
     hierarchyOpen = true;
@@ -250,15 +241,26 @@
           {#each results as term}
             {@const selected = selection.isAnnotationSelected(term.termId)}
             <div class="w-full max-w-md overflow-hidden rounded-lg border border-border bg-card">
-              <div class="flex items-center gap-3.5 px-4 py-3">
+              <div class="flex items-center gap-3 px-4 py-3">
                 <Network class="size-5 shrink-0 text-muted-foreground" />
-                <div class="flex min-w-0 flex-1 items-baseline gap-2">
+                <div class="flex min-w-0 flex-1 items-center gap-2">
                   <h3 class="truncate text-base font-medium text-foreground">
                     {term.label || term.termId}
                   </h3>
-                  <p class="truncate text-sm text-muted-foreground">
-                    {formatEntityCount(term)}
-                  </p>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
+                  {#if term.annotatedEntityCount > 0}
+                    <span class="flex items-center gap-0.5" title="Annotated entities">
+                      <Box class="size-3.5" />
+                      {term.annotatedEntityCount.toLocaleString()}
+                    </span>
+                  {/if}
+                  {#if term.annotatedRelationCount > 0}
+                    <span class="flex items-center gap-0.5" title="Annotated relations">
+                      <Link class="size-3.5" />
+                      {term.annotatedRelationCount.toLocaleString()}
+                    </span>
+                  {/if}
                 </div>
               </div>
               <div class="flex border-t border-border">
