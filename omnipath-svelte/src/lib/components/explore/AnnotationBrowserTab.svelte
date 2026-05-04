@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { Check, Filter, Tag, X } from '@lucide/svelte';
+  import { Check, Filter, Network, Plus, X } from '@lucide/svelte';
   import { Badge } from '$lib/components/ui/badge/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
-  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card/index.js';
+  import { Card, CardContent } from '$lib/components/ui/card/index.js';
   import { Checkbox } from '$lib/components/ui/checkbox/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-  import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologySourceCounts } from '$lib/api/client';
+  import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologyIdCounts } from '$lib/api/client';
   import { getSelectionStore } from '$lib/stores/selection.svelte';
+  import OntologyHierarchyDialog from './OntologyHierarchyDialog.svelte';
   import type { SearchFilters } from '$lib/types/search';
 
   interface Props {
@@ -33,6 +34,7 @@
     label: string | null;
     definition: string | null;
     synonyms: string[];
+    ontologyId: string | null;
     sources: string[];
     annotatedEntityCount: number;
     annotatedRelationCount?: number;
@@ -43,35 +45,37 @@
   let hasMore = $state(true);
   let offset = $state(0);
   let error = $state<string | null>(null);
-  let sourceOptions = $state<Array<{ value: string; count: number }>>([]);
-  let loadingSources = $state(true);
+  let ontologyOptions = $state<Array<{ value: string; count: number }>>([]);
+  let loadingOntologies = $state(true);
+  let hierarchyOpen = $state(false);
+  let hierarchyTerm = $state<(typeof results)[number] | null>(null);
 
   const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
-  const selectedSources = $derived(filters.sources || []);
+  const selectedOntologyIds = $derived(filters.ontology_ids || []);
 
-  // Fetch source counts from annotation terms available in the current scope.
+  // Fetch ontology-id counts from annotation terms available in the current scope.
   $effect(() => {
     const q = query;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
 
     let cancelled = false;
-    loadingSources = true;
-    fetchScopedOntologySourceCounts({
+    loadingOntologies = true;
+    fetchScopedOntologyIdCounts({
       entityPks: ePks.length > 0 ? ePks : undefined,
       annotationTermIds: tIds.length > 0 ? tIds : undefined,
       query: q || undefined,
     })
       .then((counts) => {
         if (cancelled) return;
-        sourceOptions = counts
-          .map((c) => ({ value: c.source, count: c.scopedCount }));
+        ontologyOptions = counts
+          .map((c) => ({ value: c.ontologyId, count: c.scopedCount }));
       })
       .catch(() => {
-        if (!cancelled) sourceOptions = [];
+        if (!cancelled) ontologyOptions = [];
       })
       .finally(() => {
-        if (!cancelled) loadingSources = false;
+        if (!cancelled) loadingOntologies = false;
       });
     return () => { cancelled = true; };
   });
@@ -79,7 +83,7 @@
   // Reactive reset: only read external dependencies in the effect body.
   $effect(() => {
     const q = query;
-    const sources = selectedSources;
+    const ontologyIds = selectedOntologyIds;
     const scoped = isScoped;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
@@ -91,8 +95,8 @@
     error = null;
 
     const fetcher = scoped
-      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, sources: sources.length > 0 ? sources : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
-      : fetchOntologySearch({ query: q, sources: sources.length > 0 ? sources : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
+      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, ontologyIds: ontologyIds.length > 0 ? ontologyIds : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
+      : fetchOntologySearch({ query: q, ontologyIds: ontologyIds.length > 0 ? ontologyIds : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
 
     fetcher
       .then((page) => {
@@ -118,13 +122,13 @@
             entityPks: selectedEntityPks || [],
             termIds: selectedAnnotationIds || [],
             query,
-            sources: selectedSources.length > 0 ? selectedSources : undefined,
+            ontologyIds: selectedOntologyIds.length > 0 ? selectedOntologyIds : undefined,
             limit: RESULTS_PER_PAGE,
             offset,
           })
         : await fetchOntologySearch({
             query,
-            sources: selectedSources.length > 0 ? selectedSources : undefined,
+            ontologyIds: selectedOntologyIds.length > 0 ? selectedOntologyIds : undefined,
             limit: RESULTS_PER_PAGE,
             offset,
           });
@@ -138,46 +142,56 @@
     }
   }
 
-  function toggleSource(source: string) {
-    const next = selectedSources.includes(source)
-      ? selectedSources.filter((item) => item !== source)
-      : [...selectedSources, source];
+  function toggleOntologyId(ontologyId: string) {
+    const next = selectedOntologyIds.includes(ontologyId)
+      ? selectedOntologyIds.filter((item) => item !== ontologyId)
+      : [...selectedOntologyIds, ontologyId];
     onFiltersChange({
       ...filters,
-      sources: next.length > 0 ? next : undefined,
+      ontology_ids: next.length > 0 ? next : undefined,
     });
   }
 
   function handleClearFilters() {
     onFiltersChange({
       ...filters,
-      sources: undefined,
+      ontology_ids: undefined,
     });
   }
 
   function formatCount(count: number, singular: string, plural: string = `${singular}s`) {
     return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
   }
+
+  function formatEntityCount(term: (typeof results)[number]) {
+    const count = term.annotatedEntityCount || 0;
+    return formatCount(count, 'entity', 'entities');
+  }
+
+  function openHierarchy(term: (typeof results)[number]) {
+    hierarchyTerm = term;
+    hierarchyOpen = true;
+  }
 </script>
 
 {#snippet filterSidebarContent()}
   <div class="space-y-6">
     <div class="max-h-[calc(100vh-14rem)] space-y-1 overflow-y-auto pr-2">
-      {#each sourceOptions as source}
-        {@const selected = selectedSources.includes(source.value)}
+      {#each ontologyOptions as ontology}
+        {@const selected = selectedOntologyIds.includes(ontology.value)}
         <div class="flex items-center justify-between gap-2 py-0.5">
           <Label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-normal leading-5 text-foreground {selected ? 'font-medium' : ''}">
             <Checkbox
               checked={selected}
-              onCheckedChange={() => toggleSource(source.value)}
+              onCheckedChange={() => toggleOntologyId(ontology.value)}
               class={selected ? 'h-4 w-4 flex-shrink-0 border-primary' : 'h-4 w-4 flex-shrink-0'}
             />
-            <span class="truncate">{source.value}</span>
+            <span class="truncate">{ontology.value}</span>
           </Label>
-          <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">{source.count.toLocaleString()}</span>
+          <span class="text-xs text-muted-foreground tabular-nums flex-shrink-0">{ontology.count.toLocaleString()}</span>
         </div>
       {:else}
-        {#if loadingSources}
+        {#if loadingOntologies}
           <p class="text-sm text-muted-foreground">Loading filters...</p>
         {:else}
           <p class="text-sm text-muted-foreground">No filters available</p>
@@ -198,7 +212,7 @@
             <Filter class="h-5 w-5 text-primary" />
             <h3 class="font-semibold text-lg">Filters</h3>
           </div>
-          {#if selectedSources.length > 0}
+          {#if selectedOntologyIds.length > 0}
             <Button
               variant="ghost"
               size="sm"
@@ -206,7 +220,7 @@
               class="flex items-center gap-1 text-muted-foreground hover:text-foreground"
             >
               <X class="h-4 w-4" />
-              Clear all ({selectedSources.length})
+              Clear all ({selectedOntologyIds.length})
             </Button>
           {/if}
         </div>
@@ -232,63 +246,61 @@
       </div>
     {:else if results.length > 0}
       <div class="space-y-4">
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
           {#each results as term}
             {@const selected = selection.isAnnotationSelected(term.termId)}
-            <Card class="h-full transition-shadow hover:shadow-sm">
-              <CardHeader class="space-y-3 pb-3">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="space-y-1 min-w-0">
-                    <CardTitle class="text-base leading-tight">{term.label || term.termId}</CardTitle>
-                    <CardDescription class="font-mono text-xs">{term.termId}</CardDescription>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={selected ? 'default' : 'outline'}
-                    onclick={() => {
-                      if (selected) {
-                        selection.removeAnnotation(term.termId);
-                      } else {
-                        selection.addAnnotation({
-                          id: term.termId,
-                          label: term.label || term.termId,
-                          namespace: term.ontologyPrefix || undefined,
-                          definition: term.definition,
-                        });
-                      }
-                    }}
-                    class="shrink-0"
-                  >
-                    {#if selected}
-                      <Check class="size-4 mr-1" />
-                      Selected
-                    {:else}
-                      <Tag class="size-4 mr-1" />
-                      Add
-                    {/if}
-                  </Button>
+            <div class="w-full max-w-md overflow-hidden rounded-lg border border-border bg-card">
+              <div class="flex items-center gap-3.5 px-4 py-3">
+                <Network class="size-5 shrink-0 text-muted-foreground" />
+                <div class="flex min-w-0 flex-1 items-baseline gap-2">
+                  <h3 class="truncate text-base font-medium text-foreground">
+                    {term.label || term.termId}
+                  </h3>
+                  <p class="truncate text-sm text-muted-foreground">
+                    {formatEntityCount(term)}
+                  </p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  {#if term.ontologyPrefix}
-                    <Badge variant="outline">{term.ontologyPrefix}</Badge>
+              </div>
+              <div class="flex border-t border-border">
+                <button
+                  type="button"
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    if (selected) {
+                      selection.removeAnnotation(term.termId);
+                    } else {
+                      selection.addAnnotation({
+                        id: term.termId,
+                        label: term.label || term.termId,
+                        namespace: term.ontologyPrefix || undefined,
+                        definition: term.definition,
+                      });
+                    }
+                  }}
+                  class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                >
+                  {#if selected}
+                    <Check class="size-4" />
+                    Selected
+                  {:else}
+                    <Plus class="size-4" />
+                    Add
                   {/if}
-                  {#if term.annotatedEntityCount !== undefined && term.annotatedEntityCount > 0}
-                    <Badge variant="outline" class="border-primary/20 bg-primary/5 text-primary">
-                      {formatCount(term.annotatedEntityCount, 'entity', 'entities')}
-                    </Badge>
-                  {:else if term.annotatedRelationCount !== undefined && term.annotatedRelationCount > 0}
-                    <Badge variant="outline" class="border-primary/20 bg-primary/5 text-primary">
-                      {formatCount(term.annotatedRelationCount, 'relation')}
-                    </Badge>
-                  {/if}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p class="max-h-24 overflow-y-auto text-sm text-muted-foreground">
-                  {term.definition || 'No definition available for this ontology term.'}
-                </p>
-              </CardContent>
-            </Card>
+                </button>
+                <div class="w-px bg-border"></div>
+                <button
+                  type="button"
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    openHierarchy(term);
+                  }}
+                  class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                >
+                  <Network class="size-4" />
+                  Explore
+                </button>
+              </div>
+            </div>
           {/each}
         </div>
 
@@ -338,8 +350,8 @@
           <Button variant="outline" class="w-full">
             <Filter class="mr-2 size-4" />
             Filters
-            {#if selectedSources.length > 0}
-              <Badge variant="secondary" class="ml-2">{selectedSources.length}</Badge>
+            {#if selectedOntologyIds.length > 0}
+              <Badge variant="secondary" class="ml-2">{selectedOntologyIds.length}</Badge>
             {/if}
           </Button>
         </SheetTrigger>
@@ -367,3 +379,5 @@
     </div>
   </div>
 {/if}
+
+<OntologyHierarchyDialog bind:open={hierarchyOpen} term={hierarchyTerm} />

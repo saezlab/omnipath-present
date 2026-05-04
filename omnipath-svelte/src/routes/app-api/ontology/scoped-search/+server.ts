@@ -8,8 +8,8 @@ export const GET: RequestHandler = async ({ url }) => {
   const entityPks = entityPksParam ? entityPksParam.split(",").map(Number).filter(Number.isFinite) : [];
   const termIdsParam = url.searchParams.get("termIds");
   const termIds = termIdsParam ? termIdsParam.split(",") : [];
-  const sourcesParam = url.searchParams.get("sources");
-  const sources = sourcesParam ? sourcesParam.split(",") : undefined;
+  const ontologyIdsParam = url.searchParams.get("ontologyIds");
+  const ontologyIds = ontologyIdsParam ? ontologyIdsParam.split(",") : undefined;
   const limit = Number(url.searchParams.get("limit") || "24");
   const offset = Number(url.searchParams.get("offset") || "0");
 
@@ -17,7 +17,7 @@ export const GET: RequestHandler = async ({ url }) => {
     entityPks,
     termIds,
     query,
-    sources,
+    ontologyIds,
     limit: Number.isFinite(limit) ? limit : 24,
     offset: Number.isFinite(offset) ? offset : 0,
   });
@@ -30,7 +30,7 @@ export const POST: RequestHandler = async ({ request }) => {
     entityPks?: number[];
     termIds?: string[];
     query?: string;
-    sources?: string[];
+    ontologyIds?: string[];
     limit?: number;
     offset?: number;
   };
@@ -39,7 +39,7 @@ export const POST: RequestHandler = async ({ request }) => {
     entityPks: body.entityPks || [],
     termIds: body.termIds || [],
     query: body.query || "",
-    sources: body.sources,
+    ontologyIds: body.ontologyIds,
     limit: body.limit ?? 24,
     offset: body.offset ?? 0,
   });

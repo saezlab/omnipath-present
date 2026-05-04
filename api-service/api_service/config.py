@@ -90,6 +90,8 @@ PREFIX_TO_ONTOLOGY: dict[str, str] = {
     "MI": "omnipath",
     "OM": "omnipath",
     "HP": "hpo",
+    "KW": "uniprot_keywords",
+    "CHEBI": "chebi",
 }
 
 
