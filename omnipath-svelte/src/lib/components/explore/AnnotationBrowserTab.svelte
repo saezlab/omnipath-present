@@ -6,6 +6,7 @@
   import { Checkbox } from '$lib/components/ui/checkbox/index.js';
   import { Label } from '$lib/components/ui/label/index.js';
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
+  import * as Tooltip from '$lib/components/ui/tooltip/index.js';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
   import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologyIdCounts } from '$lib/api/client';
   import { getSelectionStore } from '$lib/stores/selection.svelte';
@@ -163,6 +164,18 @@
     hierarchyTerm = term;
     hierarchyOpen = true;
   }
+
+  function entityCountTooltip(scoped: boolean) {
+    return scoped
+      ? 'Entities in the current scope annotated with this term'
+      : 'Entities annotated with this term';
+  }
+
+  function relationCountTooltip(scoped: boolean) {
+    return scoped
+      ? 'Relations in the current scope annotated with this term'
+      : 'Relations annotated with this term';
+  }
 </script>
 
 {#snippet filterSidebarContent()}
@@ -250,16 +263,30 @@
                 </div>
                 <div class="flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
                   {#if term.annotatedEntityCount > 0}
-                    <span class="flex items-center gap-0.5" title="Annotated entities">
-                      <Box class="size-3.5" />
-                      {term.annotatedEntityCount.toLocaleString()}
-                    </span>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger>
+                        {#snippet child({ props })}
+                          <span {...props} class="flex items-center gap-0.5">
+                            <Box class="size-3.5" />
+                            {term.annotatedEntityCount.toLocaleString()}
+                          </span>
+                        {/snippet}
+                      </Tooltip.Trigger>
+                      <Tooltip.Content sideOffset={6}>{entityCountTooltip(isScoped)}</Tooltip.Content>
+                    </Tooltip.Root>
                   {/if}
-                  {#if term.annotatedRelationCount > 0}
-                    <span class="flex items-center gap-0.5" title="Annotated relations">
-                      <Link class="size-3.5" />
-                      {term.annotatedRelationCount.toLocaleString()}
-                    </span>
+                  {#if !isScoped && term.annotatedRelationCount > 0}
+                    <Tooltip.Root>
+                      <Tooltip.Trigger>
+                        {#snippet child({ props })}
+                          <span {...props} class="flex items-center gap-0.5">
+                            <Link class="size-3.5" />
+                            {term.annotatedRelationCount.toLocaleString()}
+                          </span>
+                        {/snippet}
+                      </Tooltip.Trigger>
+                      <Tooltip.Content sideOffset={6}>{relationCountTooltip(isScoped)}</Tooltip.Content>
+                    </Tooltip.Root>
                   {/if}
                 </div>
               </div>

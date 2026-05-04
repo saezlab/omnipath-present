@@ -298,11 +298,12 @@ async function searchScopedOntologyTermsRelational({
        ${scopeTermPksFrom}
        GROUP BY er.object_entity_pk
      )
-     SELECT terms.*, scope_term_counts.annotated_entity_count, COALESCE(relation_counts.global_count, 0) AS annotated_relation_count
+     SELECT
+       terms.*,
+       scope_term_counts.annotated_entity_count,
+       0 AS annotated_relation_count
      FROM scope_term_counts
      JOIN ${ontologyTermsTable(schema)} ON terms.term_entity_pk = scope_term_counts.term_entity_pk
-     LEFT JOIN ${schema}.annotation_term_relation_bitmap relation_counts
-       ON relation_counts.term_entity_pk = terms.term_entity_pk
      WHERE true
      ${whereClause}
      ORDER BY scope_term_counts.annotated_entity_count DESC, terms.term_id ASC
@@ -429,15 +430,13 @@ async function searchScopedOntologyTermsBitmap({
        terms.synonyms,
        terms.sources,
        sc.scoped_count AS annotated_entity_count,
-       COALESCE(relation_counts.global_count, 0) AS annotated_relation_count
+       0 AS annotated_relation_count
      FROM ${ontologyTermsTable(schema)}
      JOIN ${schema}.annotation_term_entity_bitmap b ON b.term_entity_pk = terms.term_entity_pk
      CROSS JOIN scope_bitmap sb
      CROSS JOIN LATERAL (
        SELECT rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) AS scoped_count
      ) sc
-     LEFT JOIN ${schema}.annotation_term_relation_bitmap relation_counts
-       ON relation_counts.term_entity_pk = terms.term_entity_pk
      WHERE sc.scoped_count > 0
        ${whereClause}
      ORDER BY sc.scoped_count DESC, terms.term_id ASC

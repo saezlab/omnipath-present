@@ -2,13 +2,11 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
-	import { ArrowRight } from '@lucide/svelte';
-	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
 	import ExploreBrowserShell from '$lib/components/explore/ExploreBrowserShell.svelte';
 	import EntitiesExploreTab from '$lib/components/explore/EntitiesExploreTab.svelte';
 	import RelationsExploreTab from '$lib/components/explore/RelationsExploreTab.svelte';
 	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
+	import SelectionSheet from '$lib/components/selection/SelectionSheet.svelte';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import type { SearchFilters } from '$lib/types/search';
 
@@ -28,6 +26,7 @@
 	let entityFilters = $state<SearchFilters>({ ncbi_tax_id: ['9606'] });
 	let interactionFilters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 	let annotationFilters = $state<SearchFilters>({});
+	let selectionSheetOpen = $state(false);
 
 	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
 	const query = $derived($page.url.searchParams.get('q') || '');
@@ -67,13 +66,6 @@
 		setQuery(draftQuery);
 	}
 
-	function buildSelectionHref(entityIds: string[], annotationIds: string[]) {
-		const params = new URLSearchParams();
-		if (entityIds.length > 0) params.set('entities', entityIds.join(','));
-		if (annotationIds.length > 0) params.set('annotations', annotationIds.join(','));
-		return `/selection${params.toString() ? `?${params.toString()}` : ''}`;
-	}
-
 	$effect(() => {
 		if (!browser) return;
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -91,15 +83,13 @@
 
 			if ((event.key === 's' || event.key === 'S') && !isTypingTarget && selection.totalSelectionCount > 0) {
 				event.preventDefault();
-				goto(buildSelectionHref(selection.entityIds, selection.annotationIds));
+				selectionSheetOpen = true;
 			}
 		};
 
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
-
-	const selectionHref = $derived(buildSelectionHref(selection.entityIds, selection.annotationIds));
 
 	const searchPlaceholder = $derived(
 		tab === 'ontology' ? 'Search ontology terms…' : tab === 'relations' ? 'Search relations…' : 'Search entities…'
@@ -139,19 +129,10 @@
 
 	{#snippet footerCta()}
 		{#if selection.totalSelectionCount > 0}
-			<Button
-				href={selectionHref}
-				size="lg"
-				class="fixed bottom-6 right-6 z-40 h-12 rounded-full px-4 shadow-lg"
-			>
-				<span class="flex items-center gap-2">
-					<span>Open Selection</span>
-					<Badge variant="secondary" class="rounded-full px-2 py-0.5 text-xs">
-						{selection.totalSelectionCount}
-					</Badge>
-					<ArrowRight class="size-4" />
-				</span>
-			</Button>
+			<SelectionSheet
+				bind:open={selectionSheetOpen}
+				triggerClass="fixed bottom-6 right-6 z-40 h-12 rounded-full px-4 shadow-lg"
+			/>
 		{/if}
 	{/snippet}
 </ExploreBrowserShell>
