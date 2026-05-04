@@ -14,8 +14,6 @@ dev:
 	DATA_DIR="$(DATA_DIR)" COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml up -d
 	@echo ""
 	@echo "Backend services starting..."
-	@echo "  - Meilisearch:      http://localhost:7700"
-	@echo "  - Entity Service:   http://localhost:8080"
 	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"
 	@echo ""
@@ -32,7 +30,5 @@ restart:
 	DATA_DIR="$(DATA_DIR)" COMPOSE_BAKE=true docker compose -f docker-compose.dev.yaml up -d --build
 	@echo ""
 	@echo "Backend services rebuilt and restarted"
-	@echo "  - Meilisearch:      http://localhost:7700"
-	@echo "  - Entity Service:   http://localhost:8080"
 	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"
