@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { mode, setMode } from 'mode-watcher';
-	import { Database, ExternalLink, ListChecks, MessageSquare, Moon, Search, Sun } from '@lucide/svelte';
+	import { BookOpenText, Database, ExternalLink, ListChecks, MessageSquare, Moon, Search, Sun } from '@lucide/svelte';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import {
 		Sidebar,
@@ -23,6 +23,7 @@
 		{ title: 'Explore', url: '/explore', icon: Search },
 		{ title: 'Selection', url: '/selection', icon: ListChecks },
 		{ title: 'Resources', url: '/resources', icon: Database },
+		{ title: 'Skills', url: '/skills', icon: BookOpenText },
 		{ title: 'API Docs', url: '/api/docs', icon: ExternalLink, external: true }
 	];
 
@@ -90,7 +91,7 @@
 			</SidebarGroupContent>
 		</SidebarGroup>
 
-		{#if (page.url.pathname === '/selection' || page.url.pathname.startsWith('/explore') || page.url.pathname === '/resources') && sidebarContent.content}
+		{#if (page.url.pathname === '/selection' || page.url.pathname.startsWith('/explore') || page.url.pathname === '/resources' || page.url.pathname === '/skills') && sidebarContent.content}
 			<div class="px-3">
 				<SidebarSeparator />
 			</div>

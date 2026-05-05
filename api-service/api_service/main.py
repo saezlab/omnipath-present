@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
@@ -542,6 +542,55 @@ async def get_tree(request: TermsRequest):
             parent = node
 
     return TreeResponse(root=root)
+
+
+# --- Graph data discovery ---
+
+
+@app.post("/entities/scoped-facets")
+def get_entities_scoped_facets(payload: dict = Body(default_factory=dict)):
+    """Return entity facet counts after applying the current entity scope/filters."""
+    from .facets import scoped_entity_facet_counts
+
+    return scoped_entity_facet_counts(payload)
+
+
+@app.post("/relations/scoped-facets")
+def get_relations_scoped_facets(payload: dict = Body(default_factory=dict)):
+    """Return relation facet counts after applying the current relation scope/filters."""
+    from .facets import scoped_relation_facet_counts
+
+    return scoped_relation_facet_counts(payload)
+
+
+@app.post("/ontology/scoped-search")
+def post_ontology_scoped_search(payload: dict = Body(default_factory=dict)):
+    """Search ontology terms, optionally scoped by entities or selected term IDs."""
+    from .facets import search_ontology_terms
+
+    return search_ontology_terms(payload)
+
+
+@app.get("/ontology/scoped-search")
+def get_ontology_scoped_search(
+    q: str = "",
+    entityPks: str | None = None,
+    termIds: str | None = None,
+    ontologyIds: str | None = None,
+    limit: int = 24,
+    offset: int = 0,
+):
+    """Search ontology terms using query parameters."""
+    from .facets import search_ontology_terms
+
+    return search_ontology_terms({
+        "query": q,
+        "entityPks": [value for value in (entityPks or "").split(",") if value],
+        "termIds": [value for value in (termIds or "").split(",") if value],
+        "ontologyIds": [value for value in (ontologyIds or "").split(",") if value],
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 # --- Data export ---

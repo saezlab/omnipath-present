@@ -181,6 +181,26 @@ def test_ontology_not_found(client, mock_registry):
     assert response.status_code == 404
 
 
+def test_relation_scoped_facets_endpoint(client):
+    with patch("api_service.facets.scoped_relation_facet_counts") as mock_facets:
+        mock_facets.return_value = [
+            {"facetName": "predicate", "facetValue": "interacts_with", "facetCategory": "interaction", "scopedCount": 2}
+        ]
+        response = client.post("/relations/scoped-facets", json={"entityPks": [1]})
+
+    assert response.status_code == 200
+    assert response.json()[0]["facetValue"] == "interacts_with"
+
+
+def test_ontology_scoped_search_endpoint(client):
+    with patch("api_service.facets.search_ontology_terms") as mock_search:
+        mock_search.return_value = [{"termId": "GO:0006915", "label": "apoptotic process"}]
+        response = client.post("/ontology/scoped-search", json={"query": "apoptosis"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["termId"] == "GO:0006915"
+
+
 def test_download_single_resource(client):
     """Single-resource downloads serve the prebuilt archive."""
     from api_service.resource_downloads import DownloadArtifact

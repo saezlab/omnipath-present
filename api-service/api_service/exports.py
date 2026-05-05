@@ -172,7 +172,33 @@ def _relation_annotation_filter_scan(terms: list[str], scopes: list[str]) -> pl.
     if not terms:
         return None
     _require_file(RELATION_ANNOTATION_TERM_PARQUET)
-    annotation_scan = pl.scan_parquet(str(RELATION_ANNOTATION_TERM_PARQUET)).filter(pl.col("term_id").is_in(terms))
+    annotation_scan = pl.scan_parquet(str(RELATION_ANNOTATION_TERM_PARQUET))
+    annotation_columns = set(annotation_scan.collect_schema().names())
+
+    if "term_id" in annotation_columns:
+        annotation_scan = annotation_scan.filter(pl.col("term_id").is_in(terms))
+    elif "term_entity_pk" in annotation_columns:
+        _require_file(ENTITY_PARQUET)
+        term_entity_pks = _normalize_ints(terms)
+        term_ids = _normalize_strings(terms)
+        term_exprs: list[pl.Expr] = []
+        if term_entity_pks:
+            term_exprs.append(pl.col("entity_pk").is_in(term_entity_pks))
+        if term_ids:
+            term_exprs.append(pl.col("canonical_identifier").is_in(term_ids))
+        term_expr = _combine_or(term_exprs)
+        if term_expr is None:
+            return None
+        term_entities = (
+            pl.scan_parquet(str(ENTITY_PARQUET))
+            .filter(term_expr)
+            .select(pl.col("entity_pk").alias("term_entity_pk"))
+            .unique()
+        )
+        annotation_scan = annotation_scan.join(term_entities, on="term_entity_pk", how="semi")
+    else:
+        raise ValueError("relation annotation parquet must contain either term_id or term_entity_pk")
+
     if scopes:
         annotation_scan = annotation_scan.filter(pl.col("scope").is_in(scopes))
     return annotation_scan.select("relation_pk").unique()
@@ -193,9 +219,64 @@ def _relation_query_expression(query: str) -> pl.Expr | None:
     ])
 
 
+def _annotation_terms_scan() -> pl.LazyFrame:
+    if ONTOLOGY_TERM_PARQUET.exists():
+        return pl.scan_parquet(str(ONTOLOGY_TERM_PARQUET))
+
+    _require_file(ENTITY_PARQUET)
+    return (
+        pl.scan_parquet(str(ENTITY_PARQUET))
+        .filter(pl.col("entity_type") == "OM:0012:Cv Term")
+        .select(
+            pl.col("entity_pk").alias("term_entity_pk"),
+            pl.col("canonical_identifier").alias("term_id"),
+            pl.col("canonical_identifier").str.split(":").list.first().alias("ontology_prefix"),
+            pl.col("entity_attributes")
+            .list.eval(
+                pl.when(pl.element().struct.field("term") == "OM:0803:Ontology Id")
+                .then(pl.element().struct.field("value"))
+                .otherwise(None),
+                parallel=True,
+            )
+            .list.drop_nulls()
+            .list.first()
+            .alias("ontology_id"),
+            pl.col("identifiers")
+            .list.eval(
+                pl.when(pl.element().struct.field("identifier_type") == "OM:0202:Name")
+                .then(pl.element().struct.field("identifier"))
+                .otherwise(None),
+                parallel=True,
+            )
+            .list.drop_nulls()
+            .list.first()
+            .alias("label"),
+            pl.col("entity_attributes")
+            .list.eval(
+                pl.when(pl.element().struct.field("term") == "OM:0801:Definition")
+                .then(pl.element().struct.field("value"))
+                .otherwise(None),
+                parallel=True,
+            )
+            .list.drop_nulls()
+            .list.first()
+            .alias("definition"),
+            pl.col("identifiers")
+            .list.eval(
+                pl.when(pl.element().struct.field("identifier_type") == "OM:0203:Synonym")
+                .then(pl.element().struct.field("identifier"))
+                .otherwise(None),
+                parallel=True,
+            )
+            .list.drop_nulls()
+            .alias("synonyms"),
+            pl.col("sources"),
+        )
+    )
+
+
 def filtered_annotations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFrame:
-    _require_file(ONTOLOGY_TERM_PARQUET)
-    scan = pl.scan_parquet(str(ONTOLOGY_TERM_PARQUET))
+    scan = _annotation_terms_scan()
     expressions: list[pl.Expr] = []
 
     query_text = (query or "").strip().lower()
@@ -211,7 +292,7 @@ def filtered_annotations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFra
 
     prefixes = _normalize_strings(_get_any(filters, "prefixes", "ontology_prefixes", "ontologyPrefixes", default=[]))
     if prefixes:
-        expressions.append(_scalar_in("ontology_prefix", prefixes))
+        expressions.append(pl.col("ontology_prefix").str.to_lowercase().is_in([prefix.lower() for prefix in prefixes]))
 
     expr = _combine_and(expressions)
     if expr is not None:
@@ -226,17 +307,21 @@ def filtered_annotations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFra
                 (pl.col("relation_category") == "annotation")
                 & pl.col("subject_entity_pk").is_in(entity_pks)
             )
-            .select(pl.col("object_entity_pk").alias("entity_pk"))
+            .select(pl.col("object_entity_pk").alias("term_entity_pk"))
             .unique()
         )
-        _require_file(ENTITY_PARQUET)
-        scoped_term_ids = (
-            pl.scan_parquet(str(ENTITY_PARQUET))
-            .join(scoped_terms, on="entity_pk", how="semi")
-            .select(pl.col("canonical_identifier").alias("term_id"))
-            .unique()
-        )
-        scan = scan.join(scoped_term_ids, on="term_id", how="semi")
+        scan_columns = set(scan.collect_schema().names())
+        if "term_entity_pk" in scan_columns:
+            scan = scan.join(scoped_terms, on="term_entity_pk", how="semi")
+        else:
+            _require_file(ENTITY_PARQUET)
+            scoped_term_ids = (
+                pl.scan_parquet(str(ENTITY_PARQUET))
+                .join(scoped_terms.rename({"term_entity_pk": "entity_pk"}), on="entity_pk", how="semi")
+                .select(pl.col("canonical_identifier").alias("term_id"))
+                .unique()
+            )
+            scan = scan.join(scoped_term_ids, on="term_id", how="semi")
 
     return scan
 
