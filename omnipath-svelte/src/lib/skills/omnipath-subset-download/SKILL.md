@@ -14,7 +14,7 @@ Do not guess IDs or filter values. Resolve terms/entities and discover valid fil
 ## Setup
 
 ```bash
-API_BASE=${API_BASE:-http://localhost:8081}
+API_BASE=${API_BASE:-https://dev.omnipathdb.org/api}
 curl -fsS "$API_BASE/health"
 ```
 

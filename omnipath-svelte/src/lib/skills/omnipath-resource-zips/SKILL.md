@@ -16,7 +16,7 @@ Prefer resource zips for full-resource, offline, repeatable analysis. Prefer sub
 Use the API service only.
 
 ```bash
-API_BASE=${API_BASE:-http://localhost:8081}
+API_BASE=${API_BASE:-https://dev.omnipathdb.org/api}
 DATA_DIR=${DATA_DIR:-omnipath-data}
 mkdir -p "$DATA_DIR"
 curl -fsS "$API_BASE/health"
