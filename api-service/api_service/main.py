@@ -271,9 +271,10 @@ def _normalize_identifiers(identifiers: list[str]) -> list[str]:
     seen: set[str] = set()
     for identifier in identifiers:
         value = str(identifier).strip()
-        if not value or value in seen:
+        key = value.lower()
+        if not value or key in seen:
             continue
-        seen.add(value)
+        seen.add(key)
         normalized.append(value)
     return normalized
 
@@ -310,15 +311,14 @@ def resolve_entities(request: EntityResolveRequest):
         ORDER BY e.entity_pk
     """
 
+    lookup_identifiers = sorted({identifier.lower() for identifier in identifiers})
+
     with psycopg.connect(_database_url(), row_factory=dict_row) as conn:
-        exact_rows = list(conn.execute(query.format(where_clause="ei.identifier = ANY(%s)"), (identifiers,)))
-        exact_keys = {str(row["identifier"]).lower() for row in exact_rows}
-        lowered_misses = sorted({identifier.lower() for identifier in identifiers if identifier.lower() not in exact_keys})
-        fallback_rows = list(conn.execute(query.format(where_clause="LOWER(ei.identifier) = ANY(%s)"), (lowered_misses,))) if lowered_misses else []
+        rows = list(conn.execute(query.format(where_clause="LOWER(ei.identifier) = ANY(%s)"), (lookup_identifiers,)))
 
     match_map: dict[str, list[int]] = {}
     entities_by_pk: dict[int, dict] = {}
-    for row in [*exact_rows, *fallback_rows]:
+    for row in rows:
         entity_pk = int(row["entity_pk"])
         key = str(row["identifier"]).lower()
         match_map.setdefault(key, [])

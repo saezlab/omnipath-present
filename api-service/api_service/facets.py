@@ -83,13 +83,14 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         )""")
 
     if query:
+        query_lower = query.lower()
         ctes.append(f"""query_bitmap AS MATERIALIZED (
             SELECT rb_build_agg(entity_pk::integer) AS bitmap
             FROM {SEARCH_SCHEMA}.entity
-            WHERE canonical_identifier = {push(query)}
-               OR entity_pk IN (SELECT entity_pk FROM {SEARCH_SCHEMA}.entity_identifier WHERE identifier = %s)
+            WHERE LOWER(canonical_identifier) = {push(query_lower)}
+               OR entity_pk IN (SELECT entity_pk FROM {SEARCH_SCHEMA}.entity_identifier WHERE LOWER(identifier) = %s)
         )""")
-        params.append(query)
+        params.append(query_lower)
 
     if entity_types:
         ctes.append(f"""type_filter_bitmap AS MATERIALIZED (

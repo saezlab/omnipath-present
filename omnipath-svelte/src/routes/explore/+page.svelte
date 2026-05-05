@@ -31,6 +31,10 @@
 	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
 	const query = $derived($page.url.searchParams.get('q') || '');
 	const species = $derived($page.url.searchParams.get('species') || '9606');
+	const entityMatchFilters = $derived({
+		...entityFilters,
+		...(species ? { ncbi_tax_id: entityFilters.ncbi_tax_id ?? [species] } : {})
+	});
 
 	$effect(() => {
 		draftQuery = query;
@@ -121,7 +125,7 @@
 		{#if tab === 'entity'}
 			<EntitiesExploreTab {query} {species} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
 		{:else if tab === 'relations'}
-			<RelationsExploreTab {query} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
+			<RelationsExploreTab {query} entitySearchFilters={entityMatchFilters} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
 		{:else}
 			<AnnotationBrowserTab {query} {species} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
 		{/if}

@@ -26,11 +26,12 @@
     filters: SearchFilters;
     onFilterChange: (filters: SearchFilters) => void;
     query?: string;
+    entitySearchFilters?: SearchFilters;
     scopedEntityIds?: string[];
     scopedAnnotationIds?: string[];
   }
 
-  let { filters, onFilterChange, query = '', scopedEntityIds, scopedAnnotationIds }: Props = $props();
+  let { filters, onFilterChange, query = '', entitySearchFilters = {}, scopedEntityIds, scopedAnnotationIds }: Props = $props();
 
   const isMobile = new IsMobile();
   const RESULTS_PER_PAGE = 20;
@@ -59,7 +60,7 @@
 
   const effectiveFilters = $derived({
     ...filters,
-    ...(queryEntityIds.length > 0 ? { entity_ids: queryEntityIds } : {}),
+    ...(query.trim() && queryEntityIds.length > 0 ? { entity_ids: queryEntityIds } : {}),
     ...(scopedEntityIds && scopedEntityIds.length > 0 ? { scope_entity_ids: scopedEntityIds } : {}),
     ...(scopedAnnotationIds && scopedAnnotationIds.length > 0 ? { scope_annotation_ids: scopedAnnotationIds } : {}),
   });
@@ -73,8 +74,9 @@
     }
 
     let cancelled = false;
+    queryEntityIds = [];
     queryEntityIdsLoading = true;
-    fetchEntitiesSearch({ query: q, limit: 200, cursor: null })
+    fetchEntitiesSearch({ query: q, limit: 200, cursor: null, filters: entitySearchFilters })
       .then((data) => {
         if (cancelled) return;
         queryEntityIds = data.entities.map((e) => `${e.canonicalIdentifierType}|${e.canonicalIdentifier}`);
@@ -92,12 +94,25 @@
   // Capture them into local consts, reset internal state, then fetch.
   $effect(() => {
     const f = effectiveFilters;
+    const q = query.trim();
+    const resolvingQueryEntities = queryEntityIdsLoading;
+    const queryHasNoEntityMatches = !!q && !resolvingQueryEntities && queryEntityIds.length === 0;
 
     results = [];
     offset = 0;
     hasMore = true;
     loading = true;
     error = null;
+
+    if (resolvingQueryEntities) {
+      return;
+    }
+
+    if (queryHasNoEntityMatches) {
+      loading = false;
+      hasMore = false;
+      return;
+    }
 
     (async () => {
       try {

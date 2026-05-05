@@ -116,12 +116,12 @@ export async function searchEntities({
     };
 
     if (trimmedQuery) {
-      const queryParam = pushParam(trimmedQuery);
+      const queryParam = pushParam(trimmedQuery.toLowerCase());
       whereParts.push(`EXISTS (
         SELECT 1
         FROM ${SEARCH_SCHEMA}.entity_identifier ei
         WHERE ei.entity_pk = e.entity_pk
-          AND ei.identifier = ${queryParam}
+          AND LOWER(ei.identifier) = ${queryParam}
       )`);
     }
 
@@ -408,13 +408,13 @@ export async function getScopedEntityFacetCounts({
 
     // 2. Query bitmap: entities matching the text query
     if (trimmedQuery) {
-      const queryParam = pushParam(trimmedQuery);
+      const queryParam = pushParam(trimmedQuery.toLowerCase());
       ctes.push(`query_bitmap AS MATERIALIZED (
         SELECT rb_build_agg(entity_pk::integer) AS bitmap
         FROM ${S}.entity
-        WHERE canonical_identifier = ${queryParam}
+        WHERE LOWER(canonical_identifier) = ${queryParam}
            OR entity_pk IN (
-             SELECT entity_pk FROM ${S}.entity_identifier WHERE identifier = ${queryParam}
+             SELECT entity_pk FROM ${S}.entity_identifier WHERE LOWER(identifier) = ${queryParam}
            )
       )`);
     }
