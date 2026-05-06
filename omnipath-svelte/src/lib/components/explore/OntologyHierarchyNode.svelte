@@ -45,7 +45,7 @@
   }
 </script>
 
-<div class="w-max min-w-full select-none" style={`padding-left: ${depth * 1.1}rem`}>
+<div class="w-max min-w-full select-none" style={`padding-left: ${depth * 0.35}rem`}>
   <div
     class="group flex w-max cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60 {isSelectedNode ? 'bg-primary/10 ring-1 ring-primary/30' : isSeedTerm ? 'bg-primary/5 ring-1 ring-primary/15' : ''}"
     role="treeitem"
@@ -89,7 +89,7 @@
   </div>
 
   {#if isOpen && hasChildren}
-    <div class="ml-5 w-max min-w-full border-l border-border/60">
+    <div class="ml-3 w-max min-w-full border-l border-border/60">
       {#each node.children || [] as child (child.id)}
         <OntologyHierarchyNode node={child} {seedTermId} {selectedNodeId} depth={depth + 1} {onExpand} {onSelect} />
       {/each}

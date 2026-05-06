@@ -70,6 +70,20 @@ export function getIdentifierTypeLabel(identifierType: string): string {
   return parts[parts.length - 1]?.trim() || text;
 }
 
+export function getIdentifierDisplayTypeForValue(entity: EntityLike, value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const identifier = getEntityIdentifiers(entity).find((item) => item.value.trim() === trimmed);
+  if (identifier) return identifier.key;
+
+  if (entity.canonicalIdentifier?.trim() === trimmed) {
+    return entity.canonicalIdentifierType;
+  }
+
+  return undefined;
+}
+
 function identifierLabel(identifierType: string): string {
   return getIdentifierTypeLabel(identifierType).toLowerCase();
 }
@@ -230,8 +244,14 @@ export function getEntityDisplayName(entity: EntityLike): string {
     const chebiId = getIdentifierByType(entity, ["chebi"]);
     const pubchemId = getIdentifierByType(entity, ["pubchem compound", "pubchem"]);
     const hmdbId = getIdentifierByType(entity, ["hmdb"]);
-    if (preferredName && !/^\d+$/.test(preferredName)) return preferredName;
-    return chebiId || pubchemId || hmdbId || preferredName || publicId;
+    const chemblId = getIdentifierByType(entity, ["chembl"]);
+    if (preferredName && !/^\d+$/.test(preferredName) && !/^InChI=/i.test(preferredName)) return preferredName;
+    const identifierFallbacks = [chebiId, chemblId, hmdbId, pubchemId];
+    return identifierFallbacks.find((identifier) => identifier && !/^\d+$/.test(identifier))
+      || identifierFallbacks.find(Boolean)
+      || preferredName
+      || entity.canonicalIdentifier
+      || publicId;
   }
 
   if (entityTypeLabel === "protein") {

@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
 	import MoleculeStructure from '$lib/components/entity/MoleculeStructure.svelte';
 	import {
 		getAllowedEntityDescriptions,
 		getEntityDisplayName,
 		getEntityIdentifiers,
-		getEntityPublicId,
 		getEntitySmiles,
 		getEntityTypeLabel,
 		isSmallMoleculeEntity,
@@ -113,7 +113,7 @@
 			<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
 				<div class="flex flex-wrap items-center gap-2">
 					<Badge variant="secondary">{getEntityTypeLabel(entity)}</Badge>
-					<span class="font-mono text-xs text-muted-foreground">{getEntityPublicId(entity)}</span>
+					<IdentifierBadge identifierType={entity.canonicalIdentifierType} value={entity.canonicalIdentifier} variant="subtle" />
 				</div>
 				{#if showMoleculeStructure}
 					<div class="rounded-lg border bg-muted/10 p-4">
@@ -144,11 +144,9 @@
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 							Identifiers
 						</h3>
-						<div class="flex flex-wrap gap-1.5">
+						<div class="flex flex-wrap gap-2">
 							{#each detailIdentifiers as identifier}
-								<Badge variant="outline" class="font-mono text-[11px]">
-									{identifier.value}
-								</Badge>
+								<IdentifierBadge identifierType={identifier.key} value={identifier.value} />
 							{/each}
 						</div>
 					</div>

@@ -16,14 +16,18 @@ class OntologyConfig:
 # Data directory for local OBO files
 ONTOLOGY_DIR = os.getenv("ONTOLOGY_DATA_DIR", "./data")
 
+# Cache directory for downloaded ontologies
+CACHE_DIR = os.getenv("ONTOLOGY_CACHE_DIR", "./cache")
 
-def _find_obo(ontology_dir: str, filename: str) -> str | None:
+
+def _find_obo(ontology_dir: str, *filenames: str) -> str | None:
     """Find an OBO file by name, searching recursively in the data directory."""
     root = Path(ontology_dir)
     if not root.exists():
         return None
-    for path in root.rglob(filename):
-        return str(path)
+    for filename in filenames:
+        for path in root.rglob(filename):
+            return str(path)
     return None
 
 
@@ -56,12 +60,25 @@ def _discover_local_ontologies(ontology_dir: str) -> dict[str, OntologyConfig]:
 
 
 # Core ontologies - preloaded at startup
-omnipath_source = _find_obo(ONTOLOGY_DIR, "omnipath_mi.obo") or f"{ONTOLOGY_DIR}/omnipath_mi.obo"
+psi_mi_source = (
+    _find_obo(ONTOLOGY_DIR, "psi_mi.obo", "psi-mi.obo")
+    or _find_obo(CACHE_DIR, "psi_mi.obo", "psi-mi.obo")
+    or "psi-mi"  # OBO Foundry ID
+)
+omnipath_source = (
+    _find_obo(ONTOLOGY_DIR, "omnipath.obo", "omnipath_mi.obo")
+    or f"{ONTOLOGY_DIR}/omnipath_mi.obo"
+)
 
 CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
+    "psi_mi": OntologyConfig(
+        source=psi_mi_source,
+        description="PSI-MI controlled vocabulary",
+        preload=True,
+    ),
     "omnipath": OntologyConfig(
         source=omnipath_source,
-        description="OmniPath extended PSI-MI CV (combined ontology)",
+        description="OmniPath ontology (loaded with PSI-MI dependency when split)",
         preload=True,
     ),
     "gene_ontology": OntologyConfig(
@@ -76,18 +93,17 @@ CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     ),
 }
 
-# Merge in all local OBO files produced by the build/output pipeline.
-CORE_ONTOLOGIES.update(_discover_local_ontologies(ONTOLOGY_DIR))
-
-# Cache directory for downloaded ontologies
-CACHE_DIR = os.getenv("ONTOLOGY_CACHE_DIR", "./cache")
+# Merge in all local OBO files produced by the build/output pipeline without
+# clobbering the curated core IDs/aliases above.
+for _ontology_id, _config in _discover_local_ontologies(ONTOLOGY_DIR).items():
+    CORE_ONTOLOGIES.setdefault(_ontology_id, _config)
 
 
 # Map well-known term prefixes to ontology IDs for auto-detection.
 # Additional local OBO ontologies are discovered dynamically in get_ontology_for_term.
 PREFIX_TO_ONTOLOGY: dict[str, str] = {
     "GO": "gene_ontology",
-    "MI": "omnipath",
+    "MI": "psi_mi",
     "OM": "omnipath",
     "HP": "hpo",
     "KW": "uniprot_keywords",

@@ -7,12 +7,14 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
 	import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
+	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
 	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts } from '$lib/api/client';
 	import {
 		getEntityDisplayName,
 		getEntityPublicId,
 		getEntitySecondaryName,
-		getEntityTypeLabel
+		getEntityTypeLabel,
+		getIdentifierDisplayTypeForValue
 	} from '$lib/entities/display';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
@@ -231,6 +233,11 @@
 		detailsEntity = entity;
 		detailsOpen = true;
 	}
+
+	function shouldRenderAsIdentifierBadge(entity: EntityResult, value: string | undefined): boolean {
+		const text = value?.trim() || '';
+		return /^\d+$/.test(text) || (!!text && text === entity.canonicalIdentifier);
+	}
 </script>
 
 {#if isMobile.current}
@@ -407,6 +414,7 @@
 	{@const publicId = getEntityPublicId(result)}
 	{@const displayName = getEntityDisplayName(result)}
 	{@const secondaryName = getEntitySecondaryName(result)}
+	{@const displayIdentifierType = shouldRenderAsIdentifierBadge(result, displayName) ? getIdentifierDisplayTypeForValue(result, displayName) : undefined}
 	{@const entityTypeLabel = getEntityTypeLabel(result)}
 	{@const selected = selection.isSelected(publicId)}
 	{@const entityTypeIcon = getEntityTypeEmoji(entityTypeLabel)}
@@ -420,9 +428,13 @@
 				<Box class="size-5 shrink-0 text-muted-foreground" />
 			{/if}
 			<div class="flex min-w-0 flex-1 items-baseline gap-2">
-				<h3 class="truncate text-base font-medium text-foreground">
-					{displayName}
-				</h3>
+				{#if displayIdentifierType}
+					<IdentifierBadge identifierType={displayIdentifierType} value={displayName} variant="subtle" class="max-w-[60%]" />
+				{:else}
+					<h3 class="truncate text-base font-medium text-foreground">
+						{displayName}
+					</h3>
+				{/if}
 				{#if secondaryName && secondaryName !== displayName}
 					<p class="truncate font-mono text-sm text-muted-foreground">
 						{secondaryName}
