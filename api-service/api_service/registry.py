@@ -14,6 +14,7 @@ from .config import CORE_ONTOLOGIES, CACHE_DIR, OntologyConfig
 ONTOLOGY_ALIASES = {
     # Accept the OBO Foundry-style PSI-MI ID as an API alias.
     "psi-mi": "psi_mi",
+    "uniprot-keywords": "uniprot_keywords",
 }
 
 logger = logging.getLogger(__name__)

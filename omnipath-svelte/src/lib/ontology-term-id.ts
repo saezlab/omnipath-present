@@ -1,4 +1,4 @@
-const ONTOLOGY_TERM_ID_PATTERN = /(?:MI|OM|GO|HP|KW|DO|MP|CHEBI|CL|UBERON|MONDO):\d{4,}|WP\d+|R-[A-Z]+-\d+/i;
+const ONTOLOGY_TERM_ID_PATTERN = /(?:MI|OM|GO|HP|DO|MP|CHEBI|CL|UBERON|MONDO):\d{4,}|KW[-:]\d{4,}|WP\d+|R-[A-Z]+-\d+/i;
 
 export function extractOntologyTermId(value: string | null | undefined): string | null {
   if (!value) return null;

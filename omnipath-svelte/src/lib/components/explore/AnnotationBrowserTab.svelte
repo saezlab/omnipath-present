@@ -354,7 +354,7 @@
               {#if isScoped}
                 Try a different ontology term, synonym, or ID within the current entity scope.
               {:else}
-                Try a different ontology term, synonym, or ID such as GO:0005634 or MI:0217.
+                Try a different ontology term, synonym, or ID such as GO:0005634, KW-0001, or MI:0217.
               {/if}
             {:else}
               {#if isScoped}

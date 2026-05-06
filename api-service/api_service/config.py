@@ -69,6 +69,11 @@ omnipath_source = (
     _find_obo(ONTOLOGY_DIR, "omnipath.obo", "omnipath_mi.obo")
     or f"{ONTOLOGY_DIR}/omnipath_mi.obo"
 )
+uniprot_keywords_source = (
+    _find_obo(ONTOLOGY_DIR, "uniprot_keywords.obo", "uniprot-keywords.obo")
+    or _find_obo(CACHE_DIR, "uniprot_keywords.obo", "uniprot-keywords.obo")
+    or "https://rest.uniprot.org/keywords/stream?format=obo&query=%28*%29"
+)
 
 CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "psi_mi": OntologyConfig(
@@ -89,6 +94,11 @@ CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "hpo": OntologyConfig(
         source="hp",  # OBO Foundry ID for Human Phenotype Ontology
         description="Human Phenotype Ontology",
+        preload=True,
+    ),
+    "uniprot_keywords": OntologyConfig(
+        source=uniprot_keywords_source,
+        description="UniProt Keywords ontology",
         preload=True,
     ),
 }
@@ -117,6 +127,9 @@ def get_ontology_for_term(term_id: str) -> str | None:
 
     if normalized.upper().startswith("WP") and normalized[2:].isdigit():
         return "wikipathways"
+
+    if normalized.upper().startswith("KW-"):
+        return "uniprot_keywords"
 
     if normalized.upper().startswith("R-"):
         return "reactome_pathways"

@@ -55,14 +55,14 @@ curl -fsS "$API_BASE/health"
    - `predicates`: relation verbs, e.g. `positively_regulates`; discover via `/relations/scoped-facets`.
    - `participant_types`: subject/object entity classes involved in relations.
    - `sources`: resources contributing relation records.
-   - `annotation_terms`: ontology term IDs annotating relations, e.g. GO/HP/MI terms.
+   - `annotation_terms`: ontology term IDs annotating relations, e.g. GO/HP/MI/KW terms.
 
    ```json
    {"entity_pks":[123],"relation_categories":["interaction"],"predicates":["positively_regulates"],"participant_types":["MI:0326:Protein"],"sources":["signor"],"annotation_terms":["GO:0006915"]}
    ```
 
    Annotation filters:
-   - `prefixes`: ontology prefixes, e.g. `GO`, `HP`, `MI`.
+   - `prefixes`: ontology prefixes, e.g. `GO`, `HP`, `MI`, `KW`.
    - `entity_pks`: annotation terms attached to these entities.
 
    ```json

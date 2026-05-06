@@ -47,6 +47,7 @@
     const normalized = termId.trim();
     const upper = normalized.toUpperCase();
     if (upper.startsWith('WP') && /^WP\d+/.test(upper)) return 'wikipathways';
+    if (upper.startsWith('KW-')) return 'uniprot_keywords';
     if (upper.startsWith('R-')) return 'reactome_pathways';
 
     const prefix = normalized.split(':', 1)[0]?.toUpperCase();
