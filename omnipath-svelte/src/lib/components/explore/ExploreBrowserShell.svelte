@@ -1,16 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, Search } from '@lucide/svelte';
-	import {
-		DropdownMenu,
-		DropdownMenuContent,
-		DropdownMenuItem,
-		DropdownMenuTrigger
-	} from '$lib/components/ui/dropdown-menu/index.js';
-
-	interface SpeciesOption {
-		value: string;
-		label: string;
-	}
+	import { Search } from '@lucide/svelte';
 
 	interface Props {
 		query: string;
@@ -23,10 +12,6 @@
 		content: import('svelte').Snippet;
 		searchPlaceholder: string;
 		searchInputRef?: HTMLInputElement | null;
-		species?: string;
-		onSpeciesChange?: (value: string | null) => void;
-		showSpeciesPicker?: boolean;
-		speciesOptions?: readonly SpeciesOption[];
 		footerCta?: import('svelte').Snippet;
 		summarySlot?: import('svelte').Snippet;
 	}
@@ -41,19 +26,9 @@
 		content,
 		searchPlaceholder,
 		searchInputRef = $bindable(null),
-		species,
-		onSpeciesChange,
-		showSpeciesPicker = false,
-		speciesOptions = [],
 		footerCta,
 		summarySlot
 	}: Props = $props();
-
-	const selectedFilterLabel = $derived(
-		showSpeciesPicker
-			? (speciesOptions.find((option) => option.value === species)?.label ?? 'Human')
-			: 'All'
-	);
 
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === 'Enter') {
@@ -81,26 +56,6 @@
 						/>
 					</div>
 
-					<DropdownMenu>
-						<DropdownMenuTrigger class="flex h-11 items-center gap-2 px-4 text-sm text-foreground transition-colors hover:bg-muted/50 focus:outline-none">
-							<span>{selectedFilterLabel}</span>
-							<ChevronDown class="h-4 w-4 text-muted-foreground" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" class="min-w-[120px]">
-							{#if showSpeciesPicker && onSpeciesChange}
-								{#each speciesOptions as option}
-									<DropdownMenuItem
-										onclick={() => onSpeciesChange(option.value)}
-										class={option.value === species ? 'bg-accent' : ''}
-									>
-										{option.label}
-									</DropdownMenuItem>
-								{/each}
-							{:else}
-								<DropdownMenuItem class="bg-accent">All</DropdownMenuItem>
-							{/if}
-						</DropdownMenuContent>
-					</DropdownMenu>
 
 					<button
 						type="button"

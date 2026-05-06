@@ -52,6 +52,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
     entity_types = _strings(payload.get("entityTypes") or payload.get("entity_types"))
     sources = _strings(payload.get("sources"))
+    taxonomy_ids = _strings(payload.get("ncbi_tax_id"))
     query = str(payload.get("query") or "").strip()
 
     params: list[Any] = []
@@ -104,14 +105,18 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
             FROM {SEARCH_SCHEMA}.facet_entity_bitmap
             WHERE facet_name = 'source' AND facet_value = ANY({push(sources)}::text[])
         )""")
+    if taxonomy_ids:
+        ctes.append(f"""taxonomy_filter_bitmap AS MATERIALIZED (
+            SELECT COALESCE(rb_and_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+            FROM {SEARCH_SCHEMA}.facet_entity_bitmap
+            WHERE facet_name = 'taxonomy_id' AND facet_value = ANY({push(taxonomy_ids)}::text[])
+        )""")
 
-    def scope_and(extra: str | None) -> str:
-        parts = ["scope_base.bitmap"]
-        if query:
-            parts.append("query_bitmap.bitmap")
-        if extra:
-            parts.append(extra)
-        return parts[0] if len(parts) == 1 else f"rb_and({', '.join(parts)})"
+    def chain(parts: list[str]) -> str:
+        expr = parts[0]
+        for part in parts[1:]:
+            expr = f"rb_and({expr}, {part})"
+        return expr
 
     joins = ["CROSS JOIN scope_base"]
     if query:
@@ -120,10 +125,13 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         joins.append("CROSS JOIN type_filter_bitmap")
     if sources:
         joins.append("CROSS JOIN source_filter_bitmap")
+    if taxonomy_ids:
+        joins.append("CROSS JOIN taxonomy_filter_bitmap")
     joins_sql = "\n".join(joins)
 
-    type_scope = scope_and("source_filter_bitmap.bitmap" if sources else None)
-    source_scope = scope_and("type_filter_bitmap.bitmap" if entity_types else None)
+    type_scope = chain(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    source_scope = chain(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    taxonomy_scope = chain(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
     sql = f"""
         WITH {', '.join(ctes)}
         SELECT 'entity_type' AS facet_name, f.facet_value, NULL::text AS facet_category,
@@ -139,6 +147,13 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         {joins_sql}
         WHERE f.facet_name = 'source'
           AND rb_cardinality(rb_and(f.entity_bitmap, {source_scope})) > 0
+        UNION ALL
+        SELECT 'taxonomy_id' AS facet_name, f.facet_value, NULL::text AS facet_category,
+               rb_cardinality(rb_and(f.entity_bitmap, {taxonomy_scope})) AS scoped_count
+        FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+        {joins_sql}
+        WHERE f.facet_name = 'taxonomy_id'
+          AND rb_cardinality(rb_and(f.entity_bitmap, {taxonomy_scope})) > 0
         ORDER BY facet_name, scoped_count DESC
     """
     with _connect() as conn:

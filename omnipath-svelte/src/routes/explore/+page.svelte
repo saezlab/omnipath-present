@@ -10,31 +10,18 @@
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import type { SearchFilters } from '$lib/types/search';
 
-	const SPECIES_OPTIONS = [
-		{ value: '9606', label: 'Human' },
-		{ value: '10090', label: 'Mouse' },
-		{ value: '10116', label: 'Rat' },
-		{ value: '7227', label: 'Fruit fly' },
-		{ value: '6239', label: 'C. elegans' },
-		{ value: '7955', label: 'Zebrafish' }
-	] as const;
-
 	const selection = getSelectionStore();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let draftQuery = $state('');
-	let entityFilters = $state<SearchFilters>({ ncbi_tax_id: ['9606'] });
+	let entityFilters = $state<SearchFilters>({});
 	let interactionFilters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 	let annotationFilters = $state<SearchFilters>({});
 	let selectionSheetOpen = $state(false);
 
 	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
 	const query = $derived($page.url.searchParams.get('q') || '');
-	const species = $derived($page.url.searchParams.get('species') || '9606');
-	const entityMatchFilters = $derived({
-		...entityFilters,
-		...(species ? { ncbi_tax_id: entityFilters.ncbi_tax_id ?? [species] } : {})
-	});
+	const entityMatchFilters = $derived(entityFilters);
 
 	$effect(() => {
 		draftQuery = query;
@@ -52,16 +39,6 @@
 			url.searchParams.set('q', next.trim());
 		} else {
 			url.searchParams.delete('q');
-		}
-		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
-	}
-
-	function setSpecies(value: string | null) {
-		const url = new URL($page.url);
-		if (value) {
-			url.searchParams.set('species', value);
-		} else {
-			url.searchParams.delete('species');
 		}
 		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
 	}
@@ -116,18 +93,14 @@
 	]}
 	searchPlaceholder={searchPlaceholder}
 	bind:searchInputRef={inputRef}
-	{species}
-	onSpeciesChange={setSpecies}
-	showSpeciesPicker={tab === 'entity'}
-	speciesOptions={SPECIES_OPTIONS}
 >
 	{#snippet content()}
 		{#if tab === 'entity'}
-			<EntitiesExploreTab {query} {species} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
+			<EntitiesExploreTab {query} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
 		{:else if tab === 'relations'}
 			<RelationsExploreTab {query} entitySearchFilters={entityMatchFilters} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
 		{:else}
-			<AnnotationBrowserTab {query} {species} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
+			<AnnotationBrowserTab {query} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
 		{/if}
 	{/snippet}
 

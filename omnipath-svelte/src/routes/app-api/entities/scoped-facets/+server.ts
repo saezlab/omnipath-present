@@ -43,7 +43,9 @@ export const POST: RequestHandler = async ({ request }) => {
     annotationTermIds?: string[];
     entityTypes?: string[];
     sources?: string[];
+    ncbi_tax_id?: string[];
     query?: string;
+    facetLimit?: number;
   };
 
   const entityPks = await resolveEntityIds(body.entityIds);
@@ -53,7 +55,9 @@ export const POST: RequestHandler = async ({ request }) => {
     annotationTermIds: body.annotationTermIds || [],
     entityTypes: body.entityTypes || [],
     sources: body.sources || [],
+    ncbi_tax_id: body.ncbi_tax_id || [],
     query: body.query || "",
+    facetLimit: body.facetLimit ?? 10,
   });
 
   return json(counts);

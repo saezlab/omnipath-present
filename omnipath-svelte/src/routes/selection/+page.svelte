@@ -123,7 +123,6 @@
 				? 'Search scoped relations…'
 				: 'Search scoped entities…'}
 		bind:searchInputRef={inputRef}
-		showSpeciesPicker={false}
 	>
 		{#snippet content()}
 			{#if tab === 'entities'}

@@ -15,7 +15,6 @@
 
   interface Props {
     query: string;
-    species?: string;
     filters: SearchFilters;
     onFiltersChange: (filters: SearchFilters) => void;
     selectedEntityIds?: string[];
@@ -23,7 +22,7 @@
     selectedAnnotationIds?: string[];
   }
 
-  let { query, species, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
+  let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
 
   const isMobile = new IsMobile();
   const selection = getSelectionStore();

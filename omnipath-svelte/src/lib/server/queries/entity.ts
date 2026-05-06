@@ -1,11 +1,17 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, getPool } from "$lib/server/db/client";
 import { entity, entityIdentifier, type Entity, type EntityIdentifier } from "$lib/drizzle";
-import { entityTypeLabelSqlExpression, taxonomyScopedEntityTypeLabels } from "$lib/entity-filter";
 import { normalizeStringValues } from "$lib/entity-public-id";
 import { publicEntityIdWhere } from "$lib/server/entity-public-id";
 
-export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[] };
+export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; relationCount?: number };
+
+const CV_TERM_ENTITY_TYPE = "OM:0012:Cv Term";
+
+export type EntitySearchCursor = {
+  relationCount: number;
+  entityPk: number;
+};
 
 function toEntityRow(row: {
   entity_pk: string | number;
@@ -15,7 +21,8 @@ function toEntityRow(row: {
   taxonomy_id: string | null;
   entity_attributes: Entity["entityAttributes"];
   sources: string[];
-}): Entity {
+  relation_count?: string | number | null;
+}): Entity & { relationCount?: number } {
   return {
     entityPk: Number(row.entity_pk),
     canonicalIdentifier: row.canonical_identifier,
@@ -24,6 +31,7 @@ function toEntityRow(row: {
     taxonomyId: row.taxonomy_id,
     entityAttributes: row.entity_attributes,
     sources: row.sources,
+    relationCount: Number(row.relation_count || 0),
   };
 }
 
@@ -99,14 +107,14 @@ export async function searchEntities({
     ontology_terms?: string[];
   };
   limit?: number;
-  cursor?: number;
-} = {}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: number | null }> {
+  cursor?: EntitySearchCursor | null;
+} = {}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const client = await getPool().connect();
   const db = getDb();
 
   try {
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const whereParts: string[] = [];
+    const whereParts: string[] = [`e.entity_type IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
     const params: unknown[] = [];
     const trimmedQuery = query.trim();
 
@@ -115,14 +123,9 @@ export async function searchEntities({
       return `$${params.length}`;
     };
 
+    let queryParam: string | null = null;
     if (trimmedQuery) {
-      const queryParam = pushParam(trimmedQuery.toLowerCase());
-      whereParts.push(`EXISTS (
-        SELECT 1
-        FROM ${SEARCH_SCHEMA}.entity_identifier ei
-        WHERE ei.entity_pk = e.entity_pk
-          AND LOWER(ei.identifier) = ${queryParam}
-      )`);
+      queryParam = pushParam(trimmedQuery.toLowerCase());
     }
 
     const hasEntityPks = filters.entity_pks?.length && filters.entity_pks.filter(Number.isFinite).length > 0;
@@ -183,15 +186,7 @@ export async function searchEntities({
       const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id);
       if (taxonomyIds.length) {
         const taxonomyParam = pushParam(taxonomyIds);
-        if (filters.entity_types?.length) {
-          const scopedTypeLabelsParam = pushParam([...taxonomyScopedEntityTypeLabels]);
-          whereParts.push(`(
-            e.taxonomy_id = ANY(${taxonomyParam}::text[])
-            OR ${entityTypeLabelSqlExpression("e.entity_type")} <> ALL(${scopedTypeLabelsParam}::text[])
-          )`);
-        } else {
-          whereParts.push(`e.taxonomy_id = ANY(${taxonomyParam}::text[])`);
-        }
+        whereParts.push(`e.taxonomy_id = ANY(${taxonomyParam}::text[])`);
       }
     }
 
@@ -212,17 +207,34 @@ export async function searchEntities({
     }
 
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
-    const baseFrom = `FROM ${SEARCH_SCHEMA}.entity e`;
+    const queryFilteredMatchedEntitiesCte = queryParam
+      ? `matching_entity_pks AS MATERIALIZED (
+           SELECT ARRAY_AGG(DISTINCT ei.entity_pk) AS pks
+           FROM ${SEARCH_SCHEMA}.entity_identifier ei
+           WHERE LOWER(ei.identifier) = ${queryParam}
+         ),
+         matched_entities AS (
+           SELECT e.*
+           FROM ${SEARCH_SCHEMA}.entity e, matching_entity_pks q
+           WHERE e.entity_pk = ANY(q.pks)
+           ${whereParts.length ? `AND ${whereParts.join(" AND ")}` : ""}
+         )`
+      : `matched_entities AS (
+           SELECT e.*
+           FROM ${SEARCH_SCHEMA}.entity e
+           ${whereClause}
+         )`;
 
+    const normalizedCursor = normalizeEntitySearchCursor(cursor);
     const pageParams = [...params];
-    if (typeof cursor === "number" && Number.isFinite(cursor)) {
-      pageParams.push(cursor);
+    let pageCursorWhere = "";
+    if (normalizedCursor) {
+      const countParam = pushPageParam(pageParams, normalizedCursor.relationCount);
+      const pkParam = pushPageParam(pageParams, normalizedCursor.entityPk);
+      pageCursorWhere = `WHERE (m.relation_count < ${countParam} OR (m.relation_count = ${countParam} AND m.entity_pk > ${pkParam}))`;
     }
     pageParams.push(limit);
     const limitParam = `$${pageParams.length}`;
-    const pageCursorWhere = typeof cursor === "number" && Number.isFinite(cursor)
-      ? ` AND e.entity_pk > $${pageParams.length - 1}`
-      : "";
 
     const rowsResult = await client.query<{
       entity_pk: string | number;
@@ -232,17 +244,25 @@ export async function searchEntities({
       taxonomy_id: string | null;
       entity_attributes: Entity["entityAttributes"];
       sources: string[];
+      relation_count: string | number | null;
     }>(
-      `SELECT e.*
-       FROM ${SEARCH_SCHEMA}.entity e
-       ${whereClause}${pageCursorWhere}
-       ORDER BY e.entity_pk
+      `WITH ${queryFilteredMatchedEntitiesCte}, matched AS (
+         SELECT me.*, COALESCE(rc.relation_count, 0)::bigint AS relation_count
+         FROM matched_entities me
+         LEFT JOIN ${SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_pk = me.entity_pk
+       )
+       SELECT m.*
+       FROM matched m
+       ${pageCursorWhere}
+       ORDER BY m.relation_count DESC, m.entity_pk ASC
        LIMIT ${limitParam}`,
       pageParams,
     );
 
     const rows = rowsResult.rows.map(toEntityRow);
-    const nextCursor = rows.length === limit ? rows[rows.length - 1].entityPk : null;
+    const nextCursor = rows.length === limit
+      ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
+      : null;
 
     if (rows.length === 0) {
       return { entities: [], nextCursor };
@@ -276,6 +296,21 @@ export async function searchEntities({
   }
 }
 
+function pushPageParam(params: unknown[], value: unknown): string {
+  params.push(value);
+  return `$${params.length}`;
+}
+
+function normalizeEntitySearchCursor(cursor: EntitySearchCursor | null | undefined): EntitySearchCursor | null {
+  if (!cursor) return null;
+  const relationCount = Number(cursor.relationCount);
+  const entityPk = Number(cursor.entityPk);
+  if (!Number.isFinite(relationCount) || !Number.isFinite(entityPk)) {
+    throw new Error("Invalid entity search cursor");
+  }
+  return { relationCount, entityPk };
+}
+
 let entityFilterOptionsCache:
   | { value: { entity_types: string[]; sources: string[] }; expiresAt: number }
   | null = null;
@@ -301,7 +336,8 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
              SELECT DISTINCT entity_type AS value
              FROM ${SEARCH_SCHEMA}.entity
              WHERE entity_type IS NOT NULL
-           ) t`,
+               AND entity_type <> '${CV_TERM_ENTITY_TYPE}'
+           ) t`
         ),
         client.query<{ values: string[] | null }>(
           `SELECT array_agg(value ORDER BY value) AS values
@@ -345,19 +381,25 @@ export async function getScopedEntityFacetCounts({
   annotationTermIds = [],
   entityTypes = [],
   sources = [],
+  ncbi_tax_id = [],
   query = "",
+  facetLimit = 10,
 }: {
   entityPks?: number[];
   annotationTermIds?: string[];
   entityTypes?: string[];
   sources?: string[];
+  ncbi_tax_id?: string[];
   query?: string;
+  facetLimit?: number;
 }): Promise<EntityFacetCount[]> {
   const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const normalizedEntityTypes = Array.from(new Set(entityTypes.map((v) => v.trim()).filter(Boolean)));
   const normalizedSources = Array.from(new Set(sources.map((v) => v.trim()).filter(Boolean)));
+  const normalizedTaxonomyIds = Array.from(new Set(ncbi_tax_id.map((v) => v.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
+  const normalizedFacetLimit = Math.max(1, Math.min(Math.floor(facetLimit), 100));
 
   const client = await getPool().connect();
   try {
@@ -370,6 +412,13 @@ export async function getScopedEntityFacetCounts({
     };
 
     const ctes: string[] = [];
+
+    ctes.push(`non_cv_entity_bitmap AS MATERIALIZED (
+      SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${S}.facet_entity_bitmap
+      WHERE facet_name = 'entity_type'
+        AND facet_value <> '${CV_TERM_ENTITY_TYPE}'
+    )`);
 
     // 1. Base scope from selection (entity PKs + annotation terms).
     //    When there is no selection we use the union of all entity_type bitmaps
@@ -400,9 +449,7 @@ export async function getScopedEntityFacetCounts({
       )`);
     } else {
       ctes.push(`scope_base AS MATERIALIZED (
-        SELECT rb_or_agg(entity_bitmap) AS bitmap
-        FROM ${S}.facet_entity_bitmap
-        WHERE facet_name = 'entity_type'
+        SELECT bitmap FROM non_cv_entity_bitmap
       )`);
     }
 
@@ -438,53 +485,103 @@ export async function getScopedEntityFacetCounts({
       )`);
     }
 
-    // 4. For each facet, compute counts with all OTHER filters applied.
-    const scopeAnd = (extraFilter: string | null): string => {
-      const parts = ['scope_base.bitmap'];
-      if (trimmedQuery) parts.push('query_bitmap.bitmap');
-      if (extraFilter) parts.push(extraFilter);
-      if (parts.length === 1) return parts[0];
-      return `rb_and(${parts.join(', ')})`;
-    };
+    if (normalizedTaxonomyIds.length > 0) {
+      const taxonomyParam = pushParam(normalizedTaxonomyIds);
+      ctes.push(`taxonomy_filter_bitmap AS MATERIALIZED (
+        SELECT COALESCE(rb_and_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${S}.facet_entity_bitmap
+        WHERE facet_name = 'taxonomy_id' AND facet_value = ANY(${taxonomyParam}::text[])
+      )`);
+    }
 
+    // 4. For each facet, compute counts with all OTHER filters applied.
     const subqueries: string[] = [];
 
-    const joins: string[] = ['CROSS JOIN scope_base'];
+    const joins: string[] = ['CROSS JOIN scope_base', 'CROSS JOIN non_cv_entity_bitmap'];
     if (trimmedQuery) joins.push('CROSS JOIN query_bitmap');
     if (normalizedEntityTypes.length > 0) joins.push('CROSS JOIN type_filter_bitmap');
     if (normalizedSources.length > 0) joins.push('CROSS JOIN source_filter_bitmap');
+    if (normalizedTaxonomyIds.length > 0) joins.push('CROSS JOIN taxonomy_filter_bitmap');
 
-    // entity_type counts: scope_base AND query_bitmap AND source_filter (excluding type_filter)
+    const chain = (parts: string[]): string => {
+      let expr = parts[0];
+      for (const part of parts.slice(1)) expr = `rb_and(${expr}, ${part})`;
+      return expr;
+    };
+
+    const typeScope = chain([
+      'scope_base.bitmap',
+      'non_cv_entity_bitmap.bitmap',
+      ...(trimmedQuery ? ['query_bitmap.bitmap'] : []),
+      ...(normalizedSources.length > 0 ? ['source_filter_bitmap.bitmap'] : []),
+      ...(normalizedTaxonomyIds.length > 0 ? ['taxonomy_filter_bitmap.bitmap'] : []),
+    ]);
+    const sourceScope = chain([
+      'scope_base.bitmap',
+      'non_cv_entity_bitmap.bitmap',
+      ...(trimmedQuery ? ['query_bitmap.bitmap'] : []),
+      ...(normalizedEntityTypes.length > 0 ? ['type_filter_bitmap.bitmap'] : []),
+      ...(normalizedTaxonomyIds.length > 0 ? ['taxonomy_filter_bitmap.bitmap'] : []),
+    ]);
+    const taxonomyScope = chain([
+      'scope_base.bitmap',
+      'non_cv_entity_bitmap.bitmap',
+      ...(trimmedQuery ? ['query_bitmap.bitmap'] : []),
+      ...(normalizedEntityTypes.length > 0 ? ['type_filter_bitmap.bitmap'] : []),
+      ...(normalizedSources.length > 0 ? ['source_filter_bitmap.bitmap'] : []),
+    ]);
+
     subqueries.push(`
       SELECT
         'entity_type' AS facet_name,
         f.facet_value,
-        rb_cardinality(rb_and(f.entity_bitmap, ${scopeAnd(normalizedSources.length > 0 ? 'source_filter_bitmap.bitmap' : null)})) AS scoped_count
+        rb_cardinality(rb_and(f.entity_bitmap, ${typeScope})) AS scoped_count
       FROM ${S}.facet_entity_bitmap f
       ${joins.join('\n      ')}
       WHERE f.facet_name = 'entity_type'
-        AND rb_cardinality(rb_and(f.entity_bitmap, ${scopeAnd(normalizedSources.length > 0 ? 'source_filter_bitmap.bitmap' : null)})) > 0
+        AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'
+        AND rb_cardinality(rb_and(f.entity_bitmap, ${typeScope})) > 0
     `);
 
-    // source counts: scope_base AND query_bitmap AND type_filter (excluding source_filter)
     subqueries.push(`
       SELECT
         'source' AS facet_name,
         f.facet_value,
-        rb_cardinality(rb_and(f.entity_bitmap, ${scopeAnd(normalizedEntityTypes.length > 0 ? 'type_filter_bitmap.bitmap' : null)})) AS scoped_count
+        rb_cardinality(rb_and(f.entity_bitmap, ${sourceScope})) AS scoped_count
       FROM ${S}.facet_entity_bitmap f
       ${joins.join('\n      ')}
       WHERE f.facet_name = 'source'
-        AND rb_cardinality(rb_and(f.entity_bitmap, ${scopeAnd(normalizedEntityTypes.length > 0 ? 'type_filter_bitmap.bitmap' : null)})) > 0
+        AND rb_cardinality(rb_and(f.entity_bitmap, ${sourceScope})) > 0
     `);
 
+    subqueries.push(`
+      SELECT
+        'taxonomy_id' AS facet_name,
+        f.facet_value,
+        rb_cardinality(rb_and(f.entity_bitmap, ${taxonomyScope})) AS scoped_count
+      FROM ${S}.facet_entity_bitmap f
+      ${joins.join('\n      ')}
+      WHERE f.facet_name = 'taxonomy_id'
+        AND rb_cardinality(rb_and(f.entity_bitmap, ${taxonomyScope})) > 0
+    `);
+
+    const facetLimitParam = pushParam(normalizedFacetLimit);
     const result = await client.query<{
       facet_name: string;
       facet_value: string;
       scoped_count: string | number;
     }>(
-      `WITH ${ctes.join(",\n")}
-       ${subqueries.join("\nUNION ALL\n")}
+      `WITH ${ctes.join(",\n")},
+       facet_counts AS MATERIALIZED (
+         ${subqueries.join("\nUNION ALL\n")}
+       ),
+       ranked_facet_counts AS (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY facet_name ORDER BY scoped_count DESC, facet_value ASC) AS facet_rank
+         FROM facet_counts
+       )
+       SELECT facet_name, facet_value, scoped_count
+       FROM ranked_facet_counts
+       WHERE facet_rank <= ${facetLimitParam}
        ORDER BY facet_name, scoped_count DESC`,
       params,
     );

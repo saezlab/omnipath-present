@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Box, Check, Eye, Filter, Plus, X } from '@lucide/svelte';
+	import { Box, Check, Eye, Filter, Link, Plus, X } from '@lucide/svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Card, CardContent } from '$lib/components/ui/card/index.js';
@@ -8,7 +8,7 @@
 	import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
 	import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
-	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts } from '$lib/api/client';
+	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts, type EntitySearchCursor } from '$lib/api/client';
 	import {
 		getEntityDisplayName,
 		getEntityPublicId,
@@ -25,7 +25,6 @@
 
 	interface Props {
 		query: string;
-		species?: string;
 		filters: SearchFilters;
 		onFiltersChange: (filters: SearchFilters) => void;
 		selectedEntityIds?: string[];
@@ -33,11 +32,21 @@
 		selectedAnnotationIds?: string[];
 	}
 
-	let { query, species, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
+	let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
 
 	const isMobile = new IsMobile();
 	const selection = getSelectionStore();
 	const RESULTS_PER_PAGE = 20;
+	const FACET_PAGE_SIZE = 10;
+
+	const TAXONOMY_LABELS: Record<string, string> = {
+		'9606': 'Human',
+		'10090': 'Mouse',
+		'10116': 'Rat',
+		'7227': 'Fruit fly',
+		'6239': 'C. elegans',
+		'7955': 'Zebrafish'
+	};
 
 	interface FilterOption {
 		value: string;
@@ -52,20 +61,27 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let hasMore = $state(true);
-	let cursor = $state<number | null>(null);
+	let cursor = $state<EntitySearchCursor | null>(null);
 	let facetCountsLoading = $state(true);
 	let entityTypeOptions = $state<FilterOption[]>([]);
 	let sourceOptions = $state<FilterOption[]>([]);
+	let taxonomyOptions = $state<FilterOption[]>([]);
+	let entityTypeFacetLimit = $state(FACET_PAGE_SIZE);
+	let sourceFacetLimit = $state(FACET_PAGE_SIZE);
+	let taxonomyFacetLimit = $state(FACET_PAGE_SIZE);
 	let scopedFacetCounts = $state<Map<string, number>>(new Map());
 	let detailsEntity = $state<EntityResult | null>(null);
 	let detailsOpen = $state(false);
 
 	const effectiveFilters = $derived({
 		...filters,
-		...(species ? { ncbi_tax_id: filters.ncbi_tax_id ?? [species] } : {}),
 		...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
 		...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 	});
+
+	const facetQueryLimit = $derived(
+		Math.min(Math.max(entityTypeFacetLimit, sourceFacetLimit, taxonomyFacetLimit) + 1, 100)
+	);
 
 	const activeFilterCount = $derived(
 		Object.entries(filters).reduce((count, [, value]) => {
@@ -83,7 +99,9 @@
 			annotationTermIds: selectedAnnotationIds?.length ? selectedAnnotationIds : undefined,
 			entityTypes: filters.entity_types,
 			sources: filters.sources,
+			ncbi_tax_id: filters.ncbi_tax_id,
 			query: query || undefined,
+			facetLimit: facetQueryLimit,
 		};
 
 		let cancelled = false;
@@ -94,23 +112,28 @@
 				const map = new Map<string, number>();
 				const types: FilterOption[] = [];
 				const sources: FilterOption[] = [];
+				const taxonomies: FilterOption[] = [];
 				for (const c of counts) {
 					map.set(`${c.facetName}:${c.facetValue}`, c.scopedCount);
 					if (c.facetName === 'entity_type') {
 						types.push(mapEntityTypeOption(c.facetValue));
 					} else if (c.facetName === 'source') {
 						sources.push({ value: c.facetValue, displayName: c.facetValue, icon: '📚' });
+					} else if (c.facetName === 'taxonomy_id') {
+						taxonomies.push(mapTaxonomyOption(c.facetValue));
 					}
 				}
 				scopedFacetCounts = map;
 				entityTypeOptions = types;
 				sourceOptions = sources;
+				taxonomyOptions = taxonomies;
 			})
 			.catch(() => {
 				if (!cancelled) {
 					scopedFacetCounts = new Map();
 					entityTypeOptions = [];
 					sourceOptions = [];
+					taxonomyOptions = [];
 				}
 			})
 			.finally(() => {
@@ -169,13 +192,12 @@
 
 	function handleClearFilters() {
 		onFiltersChange({
-			...(species && !(selectedEntityPks?.length || selectedAnnotationIds?.length) ? { ncbi_tax_id: [species] } : {}),
 			...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
 			...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 		});
 	}
 
-	function handleFilterChange(next: { entity_types?: string[]; sources?: string[] }) {
+	function handleFilterChange(next: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) {
 		onFiltersChange({
 			...filters,
 			...next,
@@ -184,7 +206,7 @@
 		});
 	}
 
-	function handleFilterToggle(filterKey: 'entity_types' | 'sources', value: string) {
+	function handleFilterToggle(filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id', value: string) {
 		const currentValues = filters[filterKey] || [];
 		const nextValues = currentValues.includes(value)
 			? currentValues.filter((entry) => entry !== value)
@@ -193,6 +215,21 @@
 		handleFilterChange({
 			[filterKey]: nextValues.length > 0 ? nextValues : undefined
 		});
+	}
+
+	function mapTaxonomyOption(value: string): FilterOption {
+		return {
+			value,
+			displayName: TAXONOMY_LABELS[value] ? `${TAXONOMY_LABELS[value]} (${value})` : value,
+			icon: '🌿',
+			id: value,
+		};
+	}
+
+	function facetNameForFilter(filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id'): string {
+		if (filterKey === 'entity_types') return 'entity_type';
+		if (filterKey === 'ncbi_tax_id') return 'taxonomy_id';
+		return 'source';
 	}
 
 	function mapEntityTypeOption(value: string): FilterOption {
@@ -320,22 +357,23 @@
 			</div>
 		{/if}
 		<div class={mobile ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4'} class:opacity-70={facetCountsLoading}>
-			{@render filterSection('Entity Types', 'entity_types', entityTypeOptions, filters.entity_types || [])}
-			{@render filterSection('Data Sources', 'sources', sourceOptions, filters.sources || [])}
+			{@render filterSection('Entity Types', 'entity_types', entityTypeOptions, filters.entity_types || [], entityTypeFacetLimit, () => entityTypeFacetLimit += FACET_PAGE_SIZE)}
+			{@render filterSection('Data Sources', 'sources', sourceOptions, filters.sources || [], sourceFacetLimit, () => sourceFacetLimit += FACET_PAGE_SIZE)}
+			{@render filterSection('Taxonomy', 'ncbi_tax_id', taxonomyOptions, filters.ncbi_tax_id || [], taxonomyFacetLimit, () => taxonomyFacetLimit += FACET_PAGE_SIZE)}
 		</div>
 	</div>
 {/snippet}
 
-{#snippet filterSection(title: string, filterKey: 'entity_types' | 'sources', options: FilterOption[], selectedValues: string[])}
+{#snippet filterSection(title: string, filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id', options: FilterOption[], selectedValues: string[], visibleLimit: number, onLoadMore: () => void)}
 	{#if options.length > 0}
 		<div>
 			<h4 class="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
 				{title}
 			</h4>
 			<div class="max-h-64 space-y-1 overflow-y-auto pr-2">
-				{#each options as option}
+				{#each options.slice(0, visibleLimit) as option}
 					{@const selected = selectedValues.includes(option.value)}
-					{@const count = scopedFacetCounts.get(`${filterKey === 'entity_types' ? 'entity_type' : 'source'}:${option.value}`)}
+					{@const count = scopedFacetCounts.get(`${facetNameForFilter(filterKey)}:${option.value}`)}
 					<div class="flex items-center justify-between gap-2 py-0.5">
 						<Label
 							for={`${filterKey}-${option.value}`}
@@ -359,6 +397,11 @@
 						{/if}
 					</div>
 				{/each}
+				{#if options.length > visibleLimit}
+					<Button variant="ghost" size="sm" class="mt-2 w-full text-xs" onclick={onLoadMore}>
+						Load more
+					</Button>
+				{/if}
 			</div>
 		</div>
 	{:else if facetCountsLoading}
@@ -441,6 +484,12 @@
 					</p>
 				{/if}
 			</div>
+			{#if (result.relationCount || 0) > 0}
+				<span class="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground" title="Relations involving this entity">
+					<Link class="size-3.5" />
+					{(result.relationCount || 0).toLocaleString()}
+				</span>
+			{/if}
 		</div>
 		<div class="flex border-t border-border">
 			<button

@@ -1,6 +1,17 @@
 import type { RequestHandler } from "./$types";
-import { searchEntities, getEntityFilterOptions } from "$lib/server/queries/entity";
+import { searchEntities } from "$lib/server/queries/entity";
 import { jsonBigIntSafe } from "$lib/server/api-utils";
+
+function normalizeEntityCursor(value: string | null): { relationCount: number; entityPk: number } | undefined {
+  if (!value) return undefined;
+  const parsed = JSON.parse(value) as { relationCount?: unknown; entityPk?: unknown };
+  const relationCount = Number(parsed.relationCount);
+  const entityPk = Number(parsed.entityPk);
+  if (!Number.isFinite(relationCount) || !Number.isFinite(entityPk)) {
+    throw new Error("Invalid entity search cursor");
+  }
+  return { relationCount, entityPk };
+}
 
 function normalizeEntityFilters(filters: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...filters };
@@ -22,7 +33,7 @@ export const GET: RequestHandler = async ({ url }) => {
   const result = await searchEntities({
     query,
     limit: Number.isFinite(limit) ? limit : 20,
-    cursor: cursor ? Number(cursor) : undefined,
+    cursor: normalizeEntityCursor(cursor),
     filters,
   });
 
@@ -33,7 +44,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
     query?: string;
     limit?: number;
-    cursor?: number;
+    cursor?: { relationCount: number; entityPk: number } | null;
     filters?: Record<string, unknown>;
   };
 

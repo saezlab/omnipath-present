@@ -1,10 +1,12 @@
 import type { SearchFilters } from "$lib/types/search";
 import type { InteractionDetailsData, InteractionListRow } from "$lib/types/interactions";
 
+export type EntitySearchCursor = { relationCount: number; entityPk: number };
+
 export async function fetchEntitiesSearch(params: {
   query?: string;
   limit?: number;
-  cursor?: number | null;
+  cursor?: EntitySearchCursor | null;
   filters?: SearchFilters;
 }) {
   const hasLargeFilters = params.filters && (
@@ -33,6 +35,7 @@ export async function fetchEntitiesSearch(params: {
         taxonomyId: string | null;
         entityAttributes: unknown;
         sources: string[];
+        relationCount?: number;
         identifiers: Array<{
           id: number;
           entityPk: number;
@@ -40,14 +43,14 @@ export async function fetchEntitiesSearch(params: {
           identifierType: string;
         }>;
       }>;
-      nextCursor: number | null;
+      nextCursor: EntitySearchCursor | null;
     }>;
   }
 
   const url = new URL("/app-api/entities/search", window.location.origin);
   if (params.query) url.searchParams.set("q", params.query);
   if (params.limit) url.searchParams.set("limit", String(params.limit));
-  if (params.cursor != null) url.searchParams.set("cursor", String(params.cursor));
+  if (params.cursor != null) url.searchParams.set("cursor", JSON.stringify(params.cursor));
   if (params.filters && Object.keys(params.filters).length > 0) {
     url.searchParams.set("filters", JSON.stringify(params.filters));
   }
@@ -63,6 +66,7 @@ export async function fetchEntitiesSearch(params: {
       taxonomyId: string | null;
       entityAttributes: unknown;
       sources: string[];
+      relationCount?: number;
       identifiers: Array<{
         id: number;
         entityPk: number;
@@ -70,7 +74,7 @@ export async function fetchEntitiesSearch(params: {
         identifierType: string;
       }>;
     }>;
-    nextCursor: number | null;
+    nextCursor: EntitySearchCursor | null;
   }>;
 }
 
@@ -286,7 +290,9 @@ export async function fetchScopedEntityFacetCounts(params: {
   annotationTermIds?: string[];
   entityTypes?: string[];
   sources?: string[];
+  ncbi_tax_id?: string[];
   query?: string;
+  facetLimit?: number;
 }) {
   const res = await fetch("/app-api/entities/scoped-facets", {
     method: "POST",

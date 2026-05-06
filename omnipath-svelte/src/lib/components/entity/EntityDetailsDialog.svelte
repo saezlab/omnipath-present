@@ -20,6 +20,20 @@
 
 	let { open = $bindable(false), entity }: Props = $props();
 
+	const TAXONOMY_LABELS: Record<string, string> = {
+		'9606': 'Human',
+		'10090': 'Mouse',
+		'10116': 'Rat',
+		'7227': 'Fruit fly',
+		'6239': 'C. elegans',
+		'7955': 'Zebrafish'
+	};
+
+	function formatTaxonomyId(value: string | null | undefined) {
+		if (!value) return null;
+		return TAXONOMY_LABELS[value] ? `${TAXONOMY_LABELS[value]} (${value})` : value;
+	}
+
 	function stripHtml(value: string) {
 		return value.replace(/<[^>]*>/g, '');
 	}
@@ -106,6 +120,7 @@
 			{@const detailSections = getDescriptionSections(entity)}
 			{@const detailIdentifiers = getEntityIdentifiers(entity)}
 			{@const detailSmiles = getEntitySmiles(entity)}
+			{@const detailTaxonomy = formatTaxonomyId(entity.taxonomyId)}
 			{@const showMoleculeStructure = isSmallMoleculeEntity(entity) && detailSmiles}
 			<DialogHeader>
 				<DialogTitle>{getEntityDisplayName(entity)}</DialogTitle>
@@ -113,6 +128,9 @@
 			<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
 				<div class="flex flex-wrap items-center gap-2">
 					<Badge variant="secondary">{getEntityTypeLabel(entity)}</Badge>
+					{#if detailTaxonomy}
+						<Badge variant="outline">Taxon: {detailTaxonomy}</Badge>
+					{/if}
 					<IdentifierBadge identifierType={entity.canonicalIdentifierType} value={entity.canonicalIdentifier} variant="subtle" />
 				</div>
 				{#if showMoleculeStructure}
