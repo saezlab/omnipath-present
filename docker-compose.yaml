@@ -25,6 +25,38 @@ services:
             POSTGRES_PASSWORD: omnipath
         ports:
             - "55432:5432"
+        # Bulk-load tuning. Defaults are conservative enough for smaller hosts
+        # and can be overridden via .env on larger staging/prod machines.
+        command:
+            - postgres
+            - -c
+            - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-8GB}
+            - -c
+            - min_wal_size=${POSTGRES_MIN_WAL_SIZE:-1GB}
+            - -c
+            - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-30min}
+            - -c
+            - checkpoint_completion_target=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
+            - -c
+            - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+            - -c
+            - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
+            - -c
+            - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
+            - -c
+            - work_mem=${POSTGRES_WORK_MEM:-512MB}
+            - -c
+            - wal_compression=${POSTGRES_WAL_COMPRESSION:-on}
+            - -c
+            - synchronous_commit=${POSTGRES_SYNCHRONOUS_COMMIT:-off}
+            - -c
+            - max_worker_processes=${POSTGRES_MAX_WORKER_PROCESSES:-16}
+            - -c
+            - max_parallel_workers=${POSTGRES_MAX_PARALLEL_WORKERS:-16}
+            - -c
+            - max_parallel_workers_per_gather=${POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER:-8}
+            - -c
+            - max_parallel_maintenance_workers=${POSTGRES_MAX_PARALLEL_MAINTENANCE_WORKERS:-8}
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U omnipath -d omnipath"]
             interval: 5s

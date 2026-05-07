@@ -19,6 +19,40 @@ services:
             POSTGRES_PASSWORD: omnipath
         ports:
             - "55432:5432"
+        shm_size: ${POSTGRES_SHM_SIZE:-1gb}
+        # Bulk-load tuning. Defaults are safe for local development and can be
+        # overridden via .env / shell on larger hosts, e.g.
+        # POSTGRES_MAX_WAL_SIZE=128GB POSTGRES_SHARED_BUFFERS=32GB docker compose ...
+        command:
+            - postgres
+            - -c
+            - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-8GB}
+            - -c
+            - min_wal_size=${POSTGRES_MIN_WAL_SIZE:-1GB}
+            - -c
+            - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-30min}
+            - -c
+            - checkpoint_completion_target=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
+            - -c
+            - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+            - -c
+            - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
+            - -c
+            - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
+            - -c
+            - work_mem=${POSTGRES_WORK_MEM:-128MB}
+            - -c
+            - wal_compression=${POSTGRES_WAL_COMPRESSION:-on}
+            - -c
+            - synchronous_commit=${POSTGRES_SYNCHRONOUS_COMMIT:-off}
+            - -c
+            - max_worker_processes=${POSTGRES_MAX_WORKER_PROCESSES:-4}
+            - -c
+            - max_parallel_workers=${POSTGRES_MAX_PARALLEL_WORKERS:-4}
+            - -c
+            - max_parallel_workers_per_gather=${POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER:-2}
+            - -c
+            - max_parallel_maintenance_workers=${POSTGRES_MAX_PARALLEL_MAINTENANCE_WORKERS:-2}
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U omnipath -d omnipath"]
             interval: 5s
