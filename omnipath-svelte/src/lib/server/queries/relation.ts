@@ -95,46 +95,34 @@ function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
   const entityPkPredicate = (placeholder: string) =>
     `(subject_entity_pk = ANY(${placeholder}) OR object_entity_pk = ANY(${placeholder}))`;
 
-  const annotationTermPredicate = (placeholder: string) => `(
-      EXISTS (
-        SELECT 1
+  const annotationTermPredicate = (placeholder: string) => `entity_relation.relation_pk IN (
+      WITH term_entities AS (
+        SELECT term_entity.entity_pk
+        FROM ${schema}.entity term_entity
+        WHERE term_entity.entity_type = 'OM:0012:Cv Term'
+          AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
+          AND term_entity.canonical_identifier = ANY(${placeholder})
+      ),
+      annotated_entity_pks AS (
+        SELECT DISTINCT association.subject_entity_pk AS entity_pk
+        FROM ${schema}.entity_relation association
+        JOIN term_entities term_entity ON term_entity.entity_pk = association.object_entity_pk
+        WHERE association.relation_category = 'association'
+      ),
+      matching_relation_pks AS (
+        SELECT rat.relation_pk
         FROM ${schema}.relation_annotation_term rat
-        WHERE rat.relation_pk = entity_relation.relation_pk
-          AND rat.term_entity_pk IN (
-            SELECT term_entity.entity_pk
-            FROM ${schema}.entity term_entity
-            WHERE term_entity.entity_type = 'OM:0012:Cv Term'
-              AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
-              AND term_entity.canonical_identifier = ANY(${placeholder})
-          )
+        JOIN term_entities term_entity ON term_entity.entity_pk = rat.term_entity_pk
+        UNION
+        SELECT subject_relation.relation_pk
+        FROM ${schema}.entity_relation subject_relation
+        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_pk = subject_relation.subject_entity_pk
+        UNION
+        SELECT object_relation.relation_pk
+        FROM ${schema}.entity_relation object_relation
+        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_pk = object_relation.object_entity_pk
       )
-      OR (
-        entity_relation.relation_category = 'association'
-        AND EXISTS (
-          SELECT 1
-          FROM ${schema}.entity term_entity
-          WHERE term_entity.entity_pk = entity_relation.object_entity_pk
-            AND term_entity.entity_type = 'OM:0012:Cv Term'
-            AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
-            AND term_entity.canonical_identifier = ANY(${placeholder})
-        )
-      )
-      OR (
-        entity_relation.relation_category = 'association'
-        AND EXISTS (
-          SELECT 1
-          FROM ${schema}.entity_relation participant_annotation
-          JOIN ${schema}.entity term_entity ON term_entity.entity_pk = participant_annotation.object_entity_pk
-          WHERE participant_annotation.relation_category = 'association'
-            AND term_entity.entity_type = 'OM:0012:Cv Term'
-            AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
-            AND participant_annotation.subject_entity_pk IN (
-              entity_relation.subject_entity_pk,
-              entity_relation.object_entity_pk
-            )
-            AND term_entity.canonical_identifier = ANY(${placeholder})
-        )
-      )
+      SELECT relation_pk FROM matching_relation_pks
     )`;
 
   if (filters.relationCategories?.length) {
