@@ -15,7 +15,7 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let draftQuery = $state('');
 	let entityFilters = $state<SearchFilters>({});
-	let interactionFilters = $state<SearchFilters>({ relation_categories: ['interaction'] });
+	let interactionFilters = $state<SearchFilters>({});
 	let annotationFilters = $state<SearchFilters>({});
 	let selectionSheetOpen = $state(false);
 

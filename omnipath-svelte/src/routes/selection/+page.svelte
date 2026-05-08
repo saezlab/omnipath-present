@@ -19,7 +19,7 @@
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let draftQuery = $state('');
-	let filters = $state<SearchFilters>({ relation_categories: ['interaction'] });
+	let filters = $state<SearchFilters>({});
 
 	const shouldResolveOntologyEntities = $derived(tab === 'relations');
 	const scope = $derived(
@@ -33,9 +33,6 @@
 	});
 
 	function setTab(next: string) {
-		if (next === 'relations' && !filters.relation_categories?.length) {
-			filters = { ...filters, relation_categories: ['interaction'] };
-		}
 		const url = new URL($page.url);
 		url.searchParams.set('tab', next);
 		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
