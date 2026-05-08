@@ -15,7 +15,7 @@
 #   GOLD_ROOT_DIR=../omnipath_build/data/gold
 
 services:
-    postgres:
+    omnipathv2-postgres:
         build:
             context: ./postgres
             dockerfile: Dockerfile
@@ -46,7 +46,7 @@ services:
             OMNIPATH_PARQUET_DIR: /data/parquet
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
-            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
         volumes:
             - ${DATA_DIR:?DATA_DIR must be set}:/data/parquet:ro
             - ${ONTOLOGY_DIR:?ONTOLOGY_DIR must be set}:/data/obo:ro
@@ -55,7 +55,7 @@ services:
         networks:
             - dokploy-network
         depends_on:
-            postgres:
+            omnipathv2-postgres:
                 condition: service_healthy
         healthcheck:
             test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
@@ -79,7 +79,8 @@ services:
             API_SERVICE_URL: http://api-service:8081
             DOCKERIZED: "true"
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
+            DATABASE_URL_INTERNAL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
             OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
         ports:
@@ -87,7 +88,7 @@ services:
         networks:
             - dokploy-network
         depends_on:
-            postgres:
+            omnipathv2-postgres:
                 condition: service_healthy
             api-service:
                 condition: service_healthy

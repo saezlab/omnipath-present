@@ -9,7 +9,7 @@
 #   ONTOLOGY_DIR=../omnipath_build/data/silver
 
 services:
-    postgres:
+    omnipathv2-postgres:
         build:
             context: ..
             dockerfile: omnipath-present/postgres/Dockerfile
@@ -38,7 +38,7 @@ services:
             OMNIPATH_PARQUET_DIR: /data/parquet
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
-            DATABASE_URL: ${DATABASE_URL_INTERNAL:-postgresql://omnipath:omnipath@postgres:5432/omnipath}
+            DATABASE_URL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
         ports:
             - "8081:8081"
         volumes:
@@ -49,7 +49,7 @@ services:
             # Mount source for hot reload during development
             - ./api-service/api_service:/app/api_service
         depends_on:
-            postgres:
+            omnipathv2-postgres:
                 condition: service_healthy
 
 volumes:
