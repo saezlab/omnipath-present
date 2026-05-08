@@ -73,7 +73,7 @@ export DATABASE_URL=postgresql://user:password@localhost:5432/omnipath
 | GET | `/resources/{resource_id}/download` | Download `gold/<resource>/<resource>.zip` |
 | POST | `/resources/download` | Bundle multiple selected resource zip archives into one zip |
 
-Relation categories are `interaction`, `membership`, and `annotation`. Resource workspace endpoints and old `search_*.parquet` export endpoints are retired.
+Relation categories are `interaction` and `association`. Resource workspace endpoints and old `search_*.parquet` export endpoints are retired.
 
 ## Examples
 

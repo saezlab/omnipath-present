@@ -1,13 +1,13 @@
 import type { SearchFilters } from "$lib/types/search";
 
 export type ResultsView = "entities" | "interactions" | "selection";
-export type SelectionTab = "entities" | "interactions" | "annotations";
+export type SelectionTab = "entities" | "relations" | "ontology";
 export type SearchMode = "full-text" | "identifier" | "batch";
 export type SearchType = "search_entities" | "cv_terms";
 export type EntityWorkflow = "direct_lookup" | "annotations_to_entities" | "entities_to_annotations";
 
 const SEARCH_MODES = new Set<SearchMode>(["full-text", "identifier", "batch"]);
-const SELECTION_TABS = new Set<SelectionTab>(["entities", "interactions", "annotations"]);
+const SELECTION_TABS = new Set<SelectionTab>(["entities", "relations", "ontology"]);
 const SEARCH_TYPES = new Set<SearchType>(["search_entities", "cv_terms"]);
 const ENTITY_WORKFLOWS = new Set<EntityWorkflow>(["direct_lookup", "annotations_to_entities", "entities_to_annotations"]);
 
@@ -55,9 +55,6 @@ export function serializeFiltersParam(value: SearchFilters | undefined | null): 
 export function parseSelectionTab(value: string | null | undefined): SelectionTab {
   if (value === "selection") {
     return "entities";
-  }
-  if (value === "associations") {
-    return "interactions";
   }
   if (value && SELECTION_TABS.has(value as SelectionTab)) {
     return value as SelectionTab;

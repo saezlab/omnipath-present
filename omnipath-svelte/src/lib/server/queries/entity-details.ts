@@ -23,7 +23,7 @@ export async function getEntityDetails(publicId: string) {
       .from(entityRelation)
       .where(
         and(
-          eq(entityRelation.relationCategory, "annotation"),
+          eq(entityRelation.relationCategory, "association"),
           eq(entityRelation.subjectEntityPk, entity.entityPk),
         ),
       ),

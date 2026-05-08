@@ -279,7 +279,7 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
     where = ["TRUE"]
     if entity_pks:
         params.append(entity_pks)
-        where.append(f"ot.term_entity_pk IN (SELECT er.object_entity_pk FROM {SEARCH_SCHEMA}.entity_relation er WHERE er.relation_category = 'annotation' AND er.subject_entity_pk = ANY(%s::bigint[]))")
+        where.append(f"ot.term_entity_pk IN (SELECT er.object_entity_pk FROM {SEARCH_SCHEMA}.entity_relation er WHERE er.relation_category = 'association' AND er.subject_entity_pk = ANY(%s::bigint[]))")
     if term_ids:
         params.append(term_ids)
         where.append("ot.term_id = ANY(%s::text[])")
@@ -301,7 +301,7 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
         LEFT JOIN LATERAL (
             SELECT count(*) AS entity_count
             FROM {SEARCH_SCHEMA}.entity_relation er
-            WHERE er.relation_category = 'annotation' AND er.object_entity_pk = ot.term_entity_pk
+            WHERE er.relation_category = 'association' AND er.object_entity_pk = ot.term_entity_pk
         ) ae ON TRUE
         LEFT JOIN LATERAL (
             SELECT count(DISTINCT relation_pk) AS relation_count

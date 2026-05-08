@@ -52,7 +52,7 @@ export const entityRelation = pgTable("entity_relation", {
 	evidenceCount: bigint("evidence_count", { mode: "number" }).notNull(),
 	sources: text().array().default(["RAY"]).notNull(),
 }, (table) => [
-	index("entity_relation_annotation_subject_idx").using("btree", table.subjectEntityPk.asc().nullsLast().op("int8_ops"), table.objectEntityPk.asc().nullsLast().op("int8_ops")).where(sql`(relation_category = 'annotation'::text)`),
+	index("entity_relation_annotation_subject_idx").using("btree", table.subjectEntityPk.asc().nullsLast().op("int8_ops"), table.objectEntityPk.asc().nullsLast().op("int8_ops")).where(sql`(relation_category = 'association'::text)`),
 	index("entity_relation_category_predicate_idx").using("btree", table.relationCategory.asc().nullsLast().op("text_ops"), table.predicate.asc().nullsLast().op("text_ops")),
 	index("entity_relation_object_category_idx").using("btree", table.objectEntityPk.asc().nullsLast().op("text_ops"), table.relationCategory.asc().nullsLast().op("int8_ops")),
 	index("entity_relation_object_idx").using("btree", table.objectEntityPk.asc().nullsLast().op("int8_ops")),
@@ -102,9 +102,7 @@ export const resources = pgTable("resources", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	interactionCount: bigint("interaction_count", { mode: "number" }).default(0).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	membershipCount: bigint("membership_count", { mode: "number" }).default(0).notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	annotationCount: bigint("annotation_count", { mode: "number" }).default(0).notNull(),
+	associationCount: bigint("association_count", { mode: "number" }).default(0).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	identifierCount: bigint("identifier_count", { mode: "number" }).default(0).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations

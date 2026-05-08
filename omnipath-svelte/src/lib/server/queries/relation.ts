@@ -109,21 +109,25 @@ function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
           )
       )
       OR (
-        entity_relation.relation_category = 'annotation'
+        entity_relation.relation_category = 'association'
         AND EXISTS (
           SELECT 1
           FROM ${schema}.entity term_entity
           WHERE term_entity.entity_pk = entity_relation.object_entity_pk
+            AND term_entity.entity_type = 'OM:0012:Cv Term'
+            AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
             AND term_entity.canonical_identifier = ANY(${placeholder})
         )
       )
       OR (
-        entity_relation.relation_category = 'membership'
+        entity_relation.relation_category = 'association'
         AND EXISTS (
           SELECT 1
           FROM ${schema}.entity_relation participant_annotation
           JOIN ${schema}.entity term_entity ON term_entity.entity_pk = participant_annotation.object_entity_pk
-          WHERE participant_annotation.relation_category = 'annotation'
+          WHERE participant_annotation.relation_category = 'association'
+            AND term_entity.entity_type = 'OM:0012:Cv Term'
+            AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
             AND participant_annotation.subject_entity_pk IN (
               entity_relation.subject_entity_pk,
               entity_relation.object_entity_pk
@@ -301,8 +305,7 @@ export async function getRelationFilterOptions(): Promise<RelationFilterOptions>
           `SELECT array_agg(resource_id ORDER BY resource_id) AS values
            FROM ${SEARCH_SCHEMA}.resources
            WHERE interaction_count > 0
-              OR membership_count > 0
-              OR annotation_count > 0`,
+              OR association_count > 0`,
         ),
         client.query<{ values: string[] | null }>(
           `SELECT array_agg(value ORDER BY value) AS values
@@ -349,7 +352,7 @@ export async function getAssociatedEntityIds(entityPks: number[]): Promise<strin
     .innerJoin(entity, eq(entity.entityPk, entityRelation.subjectEntityPk))
     .where(
       and(
-        eq(entityRelation.relationCategory, "membership"),
+        eq(entityRelation.relationCategory, "association"),
         inArray(entityRelation.objectEntityPk, normalized),
       ),
     );

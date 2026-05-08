@@ -21,10 +21,10 @@
 	let draftQuery = $state('');
 	let filters = $state<SearchFilters>({ relation_categories: ['interaction'] });
 
-	const shouldResolveAnnotationEntities = $derived(tab === 'relations');
+	const shouldResolveOntologyEntities = $derived(tab === 'relations');
 	const scope = $derived(
 		getSelectionScope(selection.entityIds, selection.annotationIds, {
-			resolveAnnotationEntities: shouldResolveAnnotationEntities
+			resolveAnnotationEntities: shouldResolveOntologyEntities
 		})
 	);
 
@@ -91,8 +91,8 @@
 			<CardContent class="space-y-4 py-12 text-center">
 				<h1 class="text-2xl font-semibold">Selection is empty</h1>
 				<p class="text-muted-foreground">
-				Use Explore to add entities or annotations. Selection will scope entities, relations, and
-				annotations to that shared subset.
+				Use Explore to add entities or ontology terms. Selection will scope entities, relations, and
+				ontology to that shared subset.
 				</p>
 				{#if selection.selectedAnnotations.length > 0}
 					<div class="flex flex-wrap justify-center gap-2">
@@ -115,10 +115,10 @@
 		tabs={[
 			{ value: 'entities', label: 'Entities' },
 			{ value: 'relations', label: 'Relations' },
-			{ value: 'annotations', label: 'Annotations' }
+			{ value: 'ontology', label: 'Ontology' }
 		]}
-		searchPlaceholder={tab === 'annotations'
-			? 'Search scoped annotations…'
+		searchPlaceholder={tab === 'ontology'
+			? 'Search scoped ontology…'
 			: tab === 'relations'
 				? 'Search scoped relations…'
 				: 'Search scoped entities…'}

@@ -41,7 +41,7 @@ def _write_graph_parquets(tmp_path: Path):
 
     pl.DataFrame([
         {"relation_pk": 1, "subject_entity_pk": 20, "predicate": "x", "object_entity_pk": 20, "relation_category": "interaction", "participant_types": ["protein"], "evidence_count": 1, "sources": ["test"]},
-        {"relation_pk": 2, "subject_entity_pk": 20, "predicate": "has_annotation", "object_entity_pk": 10, "relation_category": "annotation", "participant_types": ["OM:0012:Cv Term"], "evidence_count": 1, "sources": ["go"]},
+        {"relation_pk": 2, "subject_entity_pk": 20, "predicate": "associated_with", "object_entity_pk": 10, "relation_category": "association", "participant_types": ["OM:0012:Cv Term"], "evidence_count": 1, "sources": ["go"]},
     ]).write_parquet(relation_path)
 
     pl.DataFrame([

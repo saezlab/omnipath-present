@@ -1,4 +1,4 @@
-export type SubsetResource = "entities" | "relations" | "annotations";
+export type SubsetResource = "entities" | "relations" | "ontology";
 
 export interface AnnotationSubsetFilters {
   prefixes?: string[];
@@ -23,7 +23,7 @@ export interface RelationSubsetFilters {
   entity_ids?: Array<string | number>;
   predicates?: string[];
   interaction_types?: string[];
-  relation_categories?: Array<"interaction" | "membership" | "annotation">;
+  relation_categories?: Array<"interaction" | "association">;
   participant_types?: string[];
   sources?: string[];
   annotation_terms?: string[];
@@ -69,7 +69,7 @@ export interface DuckDbInteractionsPage {
 
 export interface InteractionLocalFilters {
   predicates: string[];
-  relation_categories: Array<"interaction" | "membership" | "annotation">;
+  relation_categories: Array<"interaction" | "association">;
   sources: string[];
   annotation_terms: string[];
 }

@@ -348,7 +348,7 @@
     {:else}
       <Card class="border-dashed">
         <CardContent class="flex flex-col items-center justify-center gap-2 py-16 text-center">
-          <div class="text-lg font-semibold">No annotations found</div>
+          <div class="text-lg font-semibold">No ontology terms found</div>
           <p class="max-w-2xl text-sm text-muted-foreground">
             {#if query.trim().length > 0}
               {#if isScoped}

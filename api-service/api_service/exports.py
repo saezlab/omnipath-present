@@ -17,7 +17,7 @@ RELATION_ANNOTATION_TERM_PARQUET = PARQUET_DIR / "relation_annotation_term.parqu
 ONTOLOGY_TERM_PARQUET = PARQUET_DIR / "ontology_term.parquet"
 RESOURCES_PARQUET = PARQUET_DIR / "resources.parquet"
 
-VALID_RELATION_CATEGORIES = {"interaction", "membership", "annotation"}
+VALID_RELATION_CATEGORIES = {"interaction", "association"}
 
 
 def _require_file(path: Path) -> None:
@@ -304,7 +304,7 @@ def filtered_annotations_scan(query: str, filters: dict[str, Any]) -> pl.LazyFra
         scoped_terms = (
             pl.scan_parquet(str(RELATIONS_PARQUET))
             .filter(
-                (pl.col("relation_category") == "annotation")
+                (pl.col("relation_category") == "association")
                 & pl.col("subject_entity_pk").is_in(entity_pks)
             )
             .select(pl.col("object_entity_pk").alias("term_entity_pk"))

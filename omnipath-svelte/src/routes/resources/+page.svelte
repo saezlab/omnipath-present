@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BookOpenText, ChevronDown, ChevronUp, Database, Download, ExternalLink, Layers3, Network, Search, Tags } from '@lucide/svelte';
+	import { BookOpenText, ChevronDown, ChevronUp, Database, Download, ExternalLink, Network, Search, Tags } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import {
@@ -20,9 +20,8 @@
 
 	const categories = [
 		{ value: 'all', label: 'All' },
-		{ value: 'annotation', label: 'Annotation' },
 		{ value: 'interaction', label: 'Interaction' },
-		{ value: 'membership', label: 'Membership' },
+		{ value: 'association', label: 'Association' },
 		{ value: 'ontology', label: 'Ontology' }
 	] as const;
 
@@ -46,8 +45,7 @@
 			const matchesCategory =
 				selectedCategory === 'all' ||
 				resource.resource_kind === selectedCategory ||
-				resource.categories.includes(selectedCategory) ||
-				(selectedCategory === 'membership' && resource.categories.includes('association'));
+				resource.categories.includes(selectedCategory);
 
 			return matchesQuery && matchesCategory;
 		});
@@ -101,8 +99,7 @@
 		if (resource.resource_kind === 'ontology') return BookOpenText;
 		const categories = resource.categories;
 		if (categories.includes('interaction')) return Network;
-		if (categories.includes('annotation')) return Layers3;
-		if (categories.includes('membership') || categories.includes('association')) return Tags;
+		if (categories.includes('association')) return Tags;
 		return Database;
 	}
 

@@ -14,8 +14,7 @@ export interface ResourceRecord {
 	annotation_ontologies: string[];
 	entity_count: number;
 	interaction_count: number;
-	membership_count: number;
-	annotation_count: number;
+	association_count: number;
 	identifier_count: number;
 	ontology_term_count: number;
 	total_size_bytes: number;
@@ -28,8 +27,7 @@ export interface ResourcesSummary {
 	totalResources: number;
 	totalEntities: number;
 	totalInteractions: number;
-	totalMemberships: number;
-	totalAnnotations: number;
+	totalAssociations: number;
 	totalIdentifiers: number;
 	totalOntologyTerms: number;
 	totalBytes: number;
@@ -57,8 +55,7 @@ export async function listResources(): Promise<ResourceRecord[]> {
 		annotation_ontologies: normalizeTextArray(row.annotationOntologies),
 		entity_count: row.entityCount || 0,
 		interaction_count: row.interactionCount || 0,
-		membership_count: row.membershipCount || 0,
-		annotation_count: row.annotationCount || 0,
+		association_count: row.associationCount || 0,
 		identifier_count: row.identifierCount || 0,
 		ontology_term_count: row.ontologyTermCount || 0,
 		total_size_bytes: row.totalSizeBytes || 0,
@@ -74,8 +71,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
 
 	let totalEntities = 0;
 	let totalInteractions = 0;
-	let totalMemberships = 0;
-	let totalAnnotations = 0;
+	let totalAssociations = 0;
 	let totalIdentifiers = 0;
 	let totalOntologyTerms = 0;
 	let totalBytes = 0;
@@ -90,8 +86,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
 
 		totalEntities += resource.entity_count || 0;
 		totalInteractions += resource.interaction_count || 0;
-		totalMemberships += resource.membership_count || 0;
-		totalAnnotations += resource.annotation_count || 0;
+		totalAssociations += resource.association_count || 0;
 		totalIdentifiers += resource.identifier_count || 0;
 		totalOntologyTerms += resource.ontology_term_count || 0;
 		totalBytes += resource.total_size_bytes || 0;
@@ -101,8 +96,7 @@ export function summarizeResources(resources: ResourceRecord[]): ResourcesSummar
 		totalResources: resources.length,
 		totalEntities,
 		totalInteractions,
-		totalMemberships,
-		totalAnnotations,
+		totalAssociations,
 		totalIdentifiers,
 		totalOntologyTerms,
 		totalBytes,

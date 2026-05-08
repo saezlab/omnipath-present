@@ -51,7 +51,7 @@ curl -fsS "$API_BASE/health"
 
    Relation filters:
    - `entity_pks`: keep relations where subject or object is one of these entities.
-   - `relation_categories`: one of `interaction`, `membership`, `annotation`.
+   - `relation_categories`: one of `interaction`, `association`.
    - `predicates`: relation verbs, e.g. `positively_regulates`; discover via `/relations/scoped-facets`.
    - `participant_types`: subject/object entity classes involved in relations.
    - `sources`: resources contributing relation records.

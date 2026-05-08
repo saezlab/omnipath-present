@@ -40,7 +40,7 @@ async function resolveEntityIds(entityIds?: Array<string | number>): Promise<num
 
 function mapRelationCategories(categories: unknown): string[] | undefined {
   if (!Array.isArray(categories)) return undefined;
-  const valid = new Set(["interaction", "membership", "annotation"]);
+  const valid = new Set(["interaction", "association"]);
   const filtered = categories.filter((c): c is string => typeof c === "string" && valid.has(c));
   return filtered.length > 0 ? filtered : undefined;
 }

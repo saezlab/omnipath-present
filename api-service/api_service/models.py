@@ -101,7 +101,7 @@ class OntologiesResponse(BaseModel):
     ontologies: list[OntologyInfo]
 
 
-RelationCategory = Literal["interaction", "membership", "annotation"]
+RelationCategory = Literal["interaction", "association"]
 
 
 class EntityFilters(BaseModel):

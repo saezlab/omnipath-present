@@ -240,7 +240,7 @@ async function searchScopedOntologyTermsRelational({
     cteParts.push(`scope_entity_pks AS MATERIALIZED (
       SELECT DISTINCT er.subject_entity_pk AS entity_pk
       FROM ${schema}.entity_relation er
-      WHERE er.relation_category = 'annotation'
+      WHERE er.relation_category = 'association'
         AND er.object_entity_pk IN (
           SELECT terms.term_entity_pk FROM ${ontologyTermsTable(schema)} WHERE terms.term_id = ANY(${termParam}::text[])
         )
@@ -248,12 +248,12 @@ async function searchScopedOntologyTermsRelational({
   }
 
   let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks)`
-    : `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND er.subject_entity_pk = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
+    ? `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks)`
+    : `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND er.subject_entity_pk = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.entity_relation er WHERE er.relation_category = 'annotation' AND (er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks) OR er.subject_entity_pk = ANY(${ePksParam}::bigint[]))`;
+    scopeTermPksFrom = `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND (er.subject_entity_pk IN (SELECT entity_pk FROM scope_entity_pks) OR er.subject_entity_pk = ANY(${ePksParam}::bigint[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
@@ -900,7 +900,7 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
          es.canonical_identifier_type
        FROM ${SEARCH_SCHEMA}.entity_relation er
        JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_pk = er.subject_entity_pk
-       WHERE er.relation_category = 'annotation'
+       WHERE er.relation_category = 'association'
          AND er.object_entity_pk IN (
            SELECT terms.term_entity_pk FROM ${ontologyTermsTable(SEARCH_SCHEMA)} WHERE terms.term_id = ANY($1::text[])
          )`,

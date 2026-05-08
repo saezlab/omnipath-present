@@ -141,10 +141,10 @@ export async function searchEntities({
         OR EXISTS (
           SELECT 1
           FROM ${SEARCH_SCHEMA}.entity_relation er
-          WHERE er.relation_category = 'annotation'
+          WHERE er.relation_category = 'association'
             AND er.subject_entity_pk = e.entity_pk
             AND er.object_entity_pk IN (
-              SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${termParam}::text[])
+              SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${termParam}::text[])
             )
         )
       )`);
@@ -158,10 +158,10 @@ export async function searchEntities({
       whereParts.push(`EXISTS (
         SELECT 1
         FROM ${SEARCH_SCHEMA}.entity_relation er
-        WHERE er.relation_category = 'annotation'
+        WHERE er.relation_category = 'association'
           AND er.subject_entity_pk = e.entity_pk
           AND er.object_entity_pk IN (
-            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${param}::text[])
+            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
           )
       )`);
     }
@@ -197,10 +197,10 @@ export async function searchEntities({
         whereParts.push(`EXISTS (
         SELECT 1
         FROM ${SEARCH_SCHEMA}.entity_relation er
-        WHERE er.relation_category = 'annotation'
+        WHERE er.relation_category = 'association'
           AND er.subject_entity_pk = e.entity_pk
           AND er.object_entity_pk IN (
-            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.canonical_identifier = ANY(${param}::text[])
+            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
           )
       )`);
       }
