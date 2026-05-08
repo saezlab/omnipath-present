@@ -54,7 +54,8 @@
     if (prefix === 'GO') return 'gene_ontology';
     if (prefix === 'HP') return 'hpo';
     if (prefix === 'KW') return 'uniprot_keywords';
-    if (prefix === 'MI' || prefix === 'OM') return 'omnipath';
+    if (prefix === 'MI') return 'psi_mi';
+    if (prefix === 'OM') return 'omnipath';
     if (prefix === 'CHEBI') return 'chebi';
     return null;
   }

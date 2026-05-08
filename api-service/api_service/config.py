@@ -74,6 +74,16 @@ uniprot_keywords_source = (
     or _find_obo(CACHE_DIR, "uniprot_keywords.obo", "uniprot-keywords.obo")
     or "https://rest.uniprot.org/keywords/stream?format=obo&query=%28*%29"
 )
+reactome_pathways_source = (
+    _find_obo(ONTOLOGY_DIR, "reactome_pathways.obo")
+    or _find_obo(CACHE_DIR, "reactome_pathways.obo")
+    or f"{ONTOLOGY_DIR}/reactome_pathways.obo"
+)
+wikipathways_source = (
+    _find_obo(ONTOLOGY_DIR, "wikipathways.obo")
+    or _find_obo(CACHE_DIR, "wikipathways.obo")
+    or f"{ONTOLOGY_DIR}/wikipathways.obo"
+)
 
 CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "psi_mi": OntologyConfig(
@@ -99,6 +109,16 @@ CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "uniprot_keywords": OntologyConfig(
         source=uniprot_keywords_source,
         description="UniProt Keywords ontology",
+        preload=True,
+    ),
+    "reactome_pathways": OntologyConfig(
+        source=reactome_pathways_source,
+        description="Reactome pathway ontology",
+        preload=True,
+    ),
+    "wikipathways": OntologyConfig(
+        source=wikipathways_source,
+        description="WikiPathways pathway ontology",
         preload=True,
     ),
 }
