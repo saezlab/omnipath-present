@@ -12,13 +12,19 @@ function createDb() {
 
 let dbInstance: ReturnType<typeof createDb> | null = null;
 
+function getDatabaseUrl(): string {
+	return env.DATABASE_URL_INTERNAL || env.DATABASE_URL || '';
+}
+
 export function getPool(): Pool {
-	if (!env.DATABASE_URL) {
-		throw new Error('DATABASE_URL is not configured');
+	const databaseUrl = getDatabaseUrl();
+
+	if (!databaseUrl) {
+		throw new Error('DATABASE_URL_INTERNAL or DATABASE_URL is not configured');
 	}
 
 	if (!pool) {
-		pool = new Pool({ connectionString: env.DATABASE_URL });
+		pool = new Pool({ connectionString: databaseUrl });
 	}
 
 	return pool;
