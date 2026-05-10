@@ -1,0 +1,111 @@
+# Self-contained docker-compose for non-Dokploy deployments
+# (e.g. shared dev hosts running multiple parallel instances).
+#
+# Use with the templated systemd unit at deploy/systemd/omnipath-present@.service,
+# or directly:
+#
+#   docker compose -p omnipath-present-<instance> \
+#     -f docker-compose.deploy.yaml \
+#     --env-file <instance>.env up -d
+#
+# Required env vars (typically in <instance>.env):
+#   SVELTE_PORT, API_PORT, POSTGRES_PORT  - host port bindings (per-instance)
+#   DATA_DIR, ONTOLOGY_DIR, GOLD_ROOT_DIR - parquet/ontology paths (read-only mounts)
+#   POSTGRES_DATA_VOLUME_NAME             - per-instance Postgres volume name
+#   ONTOLOGY_CACHE_VOLUME_NAME            - per-instance ontology cache volume name
+#
+# Optional:
+#   PUBLIC_ENVIRONMENT, PUBLIC_DOMAIN     - SvelteKit build args
+#   OPENROUTER_API_KEY, CHAT_MODEL_PROVIDER, OPENROUTER_CHAT_MODEL
+#   POSTGRES_SHM_SIZE and tuning vars     - same defaults as docker-compose.yaml
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_DB: omnipath
+      POSTGRES_USER: omnipath
+      POSTGRES_PASSWORD: omnipath
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:?POSTGRES_PORT must be set}:5432"
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
+    command:
+      - postgres
+      - -c
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-8GB}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-128MB}
+      - -c
+      - synchronous_commit=${POSTGRES_SYNCHRONOUS_COMMIT:-off}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnipath -d omnipath"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  api-service:
+    build:
+      context: .
+      dockerfile: api-service/Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      ONTOLOGY_DATA_DIR: /data/obo
+      OMNIPATH_PARQUET_DIR: /data/parquet
+      ONTOLOGY_CACHE_DIR: /app/cache
+      OMNIPATH_GOLD_ROOT: /gold
+      DATABASE_URL: postgresql://omnipath:omnipath@postgres:5432/omnipath
+    ports:
+      - "127.0.0.1:${API_PORT:?API_PORT must be set}:8081"
+    volumes:
+      - ${DATA_DIR:?DATA_DIR must be set}:/data/parquet:ro
+      - ${ONTOLOGY_DIR:?ONTOLOGY_DIR must be set}:/data/obo:ro
+      - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
+      - ontology_cache:/app/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  omnipath-svelte:
+    build:
+      context: ./omnipath-svelte
+      dockerfile: Dockerfile
+      args:
+        PUBLIC_ENVIRONMENT: ${PUBLIC_ENVIRONMENT:-development}
+        PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+        API_SERVICE_URL: http://api-service:8081
+        DOCKERIZED: "true"
+    restart: unless-stopped
+    environment:
+      API_SERVICE_URL: http://api-service:8081
+      DOCKERIZED: "true"
+      DATABASE_URL: postgresql://omnipath:omnipath@postgres:5432/omnipath
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
+    ports:
+      - "127.0.0.1:${SVELTE_PORT:?SVELTE_PORT must be set}:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-service:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_DATA_VOLUME_NAME:?POSTGRES_DATA_VOLUME_NAME must be set}
+  ontology_cache:
+    name: ${ONTOLOGY_CACHE_VOLUME_NAME:?ONTOLOGY_CACHE_VOLUME_NAME must be set}

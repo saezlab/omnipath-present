@@ -1,0 +1,34 @@
+# Templated systemd user unit for an omnipath-present instance.
+#
+# Each instance lives at ~/instances/<name>/ with its own source clone
+# and per-instance .env file. Enable an instance:
+#
+#   systemctl --user enable --now omnipath-present@<name>.service
+#
+# Instance layout:
+#
+#   ~/instances/<name>/
+#     src/    # git clone of omnipath-present
+#     .env    # SVELTE_PORT, API_PORT, POSTGRES_PORT, DATA_DIR, ONTOLOGY_DIR,
+#             # GOLD_ROOT_DIR, POSTGRES_DATA_VOLUME_NAME, ONTOLOGY_CACHE_VOLUME_NAME
+#
+# The unit drives `docker compose` against docker-compose.deploy.yaml with a
+# per-instance project name so containers, networks, and volumes are isolated
+# between instances.
+
+[Unit]
+Description=omnipath-present compose stack (instance %i)
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/instances/%i/src
+ExecStart=/bin/bash -lc 'docker compose -p omnipath-present-%i -f docker-compose.deploy.yaml --env-file %h/instances/%i/.env up -d --build --wait'
+ExecStop=/bin/bash -lc 'docker compose -p omnipath-present-%i -f docker-compose.deploy.yaml --env-file %h/instances/%i/.env down'
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target
