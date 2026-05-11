@@ -14,7 +14,7 @@ export type EntitySearchCursor = {
 };
 
 function toEntityRow(row: {
-  entity_pk: string | number;
+  entity_id: string | number;
   canonical_identifier: string;
   canonical_identifier_type: string;
   entity_type: string | null;
@@ -24,7 +24,7 @@ function toEntityRow(row: {
   relation_count?: string | number | null;
 }): Entity & { relationCount?: number } {
   return {
-    entityPk: Number(row.entity_pk),
+    entityPk: Number(row.entity_id),
     canonicalIdentifier: row.canonical_identifier,
     canonicalIdentifierType: row.canonical_identifier_type,
     entityType: row.entity_type,
@@ -137,21 +137,21 @@ export async function searchEntities({
       const terms = normalizeStringValues(filters.annotation_term_ids!);
       const termParam = pushParam(terms);
       whereParts.push(`(
-        e.entity_pk = ANY(${eidParam}::bigint[])
+        e.entity_id = ANY(${eidParam}::bigint[])
         OR EXISTS (
           SELECT 1
           FROM ${SEARCH_SCHEMA}.entity_relation er
           WHERE er.relation_category = 'association'
-            AND er.subject_entity_pk = e.entity_pk
-            AND er.object_entity_pk IN (
-              SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${termParam}::text[])
+            AND er.subject_entity_id = e.entity_id
+            AND er.object_entity_id IN (
+              SELECT ent.entity_id FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${termParam}::text[])
             )
         )
       )`);
     } else if (hasEntityPks) {
       const ePks = filters.entity_pks!.filter(Number.isFinite).map(String);
       const param = pushParam(ePks);
-      whereParts.push(`e.entity_pk = ANY(${param}::bigint[])`);
+      whereParts.push(`e.entity_id = ANY(${param}::bigint[])`);
     } else if (hasAnnotationTermIds) {
       const terms = normalizeStringValues(filters.annotation_term_ids!);
       const param = pushParam(terms);
@@ -159,9 +159,9 @@ export async function searchEntities({
         SELECT 1
         FROM ${SEARCH_SCHEMA}.entity_relation er
         WHERE er.relation_category = 'association'
-          AND er.subject_entity_pk = e.entity_pk
-          AND er.object_entity_pk IN (
-            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
+          AND er.subject_entity_id = e.entity_id
+          AND er.object_entity_id IN (
+            SELECT ent.entity_id FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
           )
       )`);
     }
@@ -178,7 +178,7 @@ export async function searchEntities({
       const sources = normalizeStringValues(filters.sources);
       if (sources.length) {
         const param = pushParam(sources);
-        whereParts.push(`e.sources && ${param}::text[]`);
+        whereParts.push(`e.sources ?| ${param}::text[]`);
       }
     }
 
@@ -198,9 +198,9 @@ export async function searchEntities({
         SELECT 1
         FROM ${SEARCH_SCHEMA}.entity_relation er
         WHERE er.relation_category = 'association'
-          AND er.subject_entity_pk = e.entity_pk
-          AND er.object_entity_pk IN (
-            SELECT ent.entity_pk FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
+          AND er.subject_entity_id = e.entity_id
+          AND er.object_entity_id IN (
+            SELECT ent.entity_id FROM ${SEARCH_SCHEMA}.entity ent WHERE ent.entity_type = 'OM:0012:Cv Term' AND ent.canonical_identifier_type = 'OM:0204:Cv Term Accession' AND ent.canonical_identifier = ANY(${param}::text[])
           )
       )`);
       }
@@ -209,14 +209,14 @@ export async function searchEntities({
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
     const queryFilteredMatchedEntitiesCte = queryParam
       ? `matching_entity_pks AS MATERIALIZED (
-           SELECT ARRAY_AGG(DISTINCT ei.entity_pk) AS pks
+           SELECT ARRAY_AGG(DISTINCT ei.entity_id) AS pks
            FROM ${SEARCH_SCHEMA}.entity_identifier ei
            WHERE LOWER(ei.identifier) = ${queryParam}
          ),
          matched_entities AS (
            SELECT e.*
            FROM ${SEARCH_SCHEMA}.entity e, matching_entity_pks q
-           WHERE e.entity_pk = ANY(q.pks)
+           WHERE e.entity_id = ANY(q.pks)
            ${whereParts.length ? `AND ${whereParts.join(" AND ")}` : ""}
          )`
       : `matched_entities AS (
@@ -231,13 +231,13 @@ export async function searchEntities({
     if (normalizedCursor) {
       const countParam = pushPageParam(pageParams, normalizedCursor.relationCount);
       const pkParam = pushPageParam(pageParams, normalizedCursor.entityPk);
-      pageCursorWhere = `WHERE (m.relation_count < ${countParam} OR (m.relation_count = ${countParam} AND m.entity_pk > ${pkParam}))`;
+      pageCursorWhere = `WHERE (m.relation_count < ${countParam} OR (m.relation_count = ${countParam} AND m.entity_id > ${pkParam}))`;
     }
     pageParams.push(limit);
     const limitParam = `$${pageParams.length}`;
 
     const rowsResult = await client.query<{
-      entity_pk: string | number;
+      entity_id: string | number;
       canonical_identifier: string;
       canonical_identifier_type: string;
       entity_type: string | null;
@@ -249,12 +249,12 @@ export async function searchEntities({
       `WITH ${queryFilteredMatchedEntitiesCte}, matched AS (
          SELECT me.*, COALESCE(rc.relation_count, 0)::bigint AS relation_count
          FROM matched_entities me
-         LEFT JOIN ${SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_pk = me.entity_pk
+         LEFT JOIN ${SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_id = me.entity_id
        )
        SELECT m.*
        FROM matched m
        ${pageCursorWhere}
-       ORDER BY m.relation_count DESC, m.entity_pk ASC
+       ORDER BY m.relation_count DESC, m.entity_id ASC
        LIMIT ${limitParam}`,
       pageParams,
     );
@@ -344,7 +344,7 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
            FROM (
              SELECT DISTINCT source.value AS value
              FROM ${SEARCH_SCHEMA}.entity e
-             CROSS JOIN LATERAL unnest(e.sources) AS source(value)
+             CROSS JOIN LATERAL jsonb_array_elements_text(e.sources) AS source(value)
              WHERE source.value <> ''
            ) t`,
         ),
@@ -428,7 +428,7 @@ export async function getScopedEntityFacetCounts({
       const termParam = pushParam(normalizedTermIds);
       scopeParts.push(`SELECT b.entity_bitmap AS bitmap
         FROM ${S}.entity e
-        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_pk = e.entity_pk
+        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = e.entity_id
         WHERE e.canonical_identifier = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
@@ -457,11 +457,11 @@ export async function getScopedEntityFacetCounts({
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
       ctes.push(`query_bitmap AS MATERIALIZED (
-        SELECT rb_build_agg(entity_pk::integer) AS bitmap
+        SELECT rb_build_agg(entity_id::integer) AS bitmap
         FROM ${S}.entity
         WHERE LOWER(canonical_identifier) = ${queryParam}
-           OR entity_pk IN (
-             SELECT entity_pk FROM ${S}.entity_identifier WHERE LOWER(identifier) = ${queryParam}
+           OR entity_id IN (
+             SELECT entity_id FROM ${S}.entity_identifier WHERE LOWER(identifier) = ${queryParam}
            )
       )`);
     }

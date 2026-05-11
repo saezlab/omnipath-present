@@ -27,7 +27,7 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const queryText = `SELECT
       ei.identifier,
-      e.entity_pk,
+      e.entity_id,
       e.canonical_identifier,
       e.canonical_identifier_type,
       e.entity_type,
@@ -35,13 +35,13 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
       e.entity_attributes,
       e.sources
     FROM ${SEARCH_SCHEMA}.entity_identifier ei
-    JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_pk = ei.entity_pk
+    JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_id = ei.entity_id
     WHERE %WHERE%
-    ORDER BY e.entity_pk`;
+    ORDER BY e.entity_id`;
 
     type QueryRow = {
       identifier: string;
-      entity_pk: string;
+      entity_id: string;
       canonical_identifier: string;
       canonical_identifier_type: string;
       entity_type: string | null;
@@ -76,7 +76,7 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
 
     for (const row of [...exactResult.rows, ...fallbackResult.rows]) {
       const key = row.identifier.toLowerCase();
-      const entityPk = Number(row.entity_pk);
+      const entityPk = Number(row.entity_id);
       const entityRow: Entity = {
         entityPk,
         canonicalIdentifier: row.canonical_identifier,

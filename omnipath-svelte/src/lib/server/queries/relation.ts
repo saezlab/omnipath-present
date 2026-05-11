@@ -10,20 +10,20 @@ export type RelationWithEntities = EntityRelation & {
 };
 
 function toRelationRow(row: {
-  relation_pk: string | number;
-  subject_entity_pk: string | number;
+  relation_id: string | number;
+  subject_entity_id: string | number;
   predicate: string;
-  object_entity_pk: string | number;
+  object_entity_id: string | number;
   relation_category: string;
   participant_types: string[] | null;
   evidence_count: string | number;
   sources: string[] | null;
 }): EntityRelation {
   return {
-    relationPk: Number(row.relation_pk),
-    subjectEntityPk: Number(row.subject_entity_pk),
+    relationPk: Number(row.relation_id),
+    subjectEntityPk: Number(row.subject_entity_id),
     predicate: row.predicate,
-    objectEntityPk: Number(row.object_entity_pk),
+    objectEntityPk: Number(row.object_entity_id),
     relationCategory: row.relation_category,
     participantTypes: (row.participant_types || []).filter(Boolean),
     evidenceCount: Number(row.evidence_count),
@@ -93,36 +93,36 @@ function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
   };
 
   const entityPkPredicate = (placeholder: string) =>
-    `(subject_entity_pk = ANY(${placeholder}) OR object_entity_pk = ANY(${placeholder}))`;
+    `(subject_entity_id = ANY(${placeholder}) OR object_entity_id = ANY(${placeholder}))`;
 
-  const annotationTermPredicate = (placeholder: string) => `entity_relation.relation_pk IN (
+  const annotationTermPredicate = (placeholder: string) => `entity_relation.relation_id IN (
       WITH term_entities AS (
-        SELECT term_entity.entity_pk
+        SELECT term_entity.entity_id
         FROM ${schema}.entity term_entity
         WHERE term_entity.entity_type = 'OM:0012:Cv Term'
           AND term_entity.canonical_identifier_type = 'OM:0204:Cv Term Accession'
           AND term_entity.canonical_identifier = ANY(${placeholder})
       ),
       annotated_entity_pks AS (
-        SELECT DISTINCT association.subject_entity_pk AS entity_pk
+        SELECT DISTINCT association.subject_entity_id AS entity_id
         FROM ${schema}.entity_relation association
-        JOIN term_entities term_entity ON term_entity.entity_pk = association.object_entity_pk
+        JOIN term_entities term_entity ON term_entity.entity_id = association.object_entity_id
         WHERE association.relation_category = 'association'
       ),
       matching_relation_pks AS (
-        SELECT rat.relation_pk
+        SELECT rat.relation_id
         FROM ${schema}.relation_annotation_term rat
-        JOIN term_entities term_entity ON term_entity.entity_pk = rat.term_entity_pk
+        JOIN term_entities term_entity ON term_entity.entity_id = rat.term_entity_id
         UNION
-        SELECT subject_relation.relation_pk
+        SELECT subject_relation.relation_id
         FROM ${schema}.entity_relation subject_relation
-        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_pk = subject_relation.subject_entity_pk
+        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_id = subject_relation.subject_entity_id
         UNION
-        SELECT object_relation.relation_pk
+        SELECT object_relation.relation_id
         FROM ${schema}.entity_relation object_relation
-        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_pk = object_relation.object_entity_pk
+        JOIN annotated_entity_pks annotated_entity ON annotated_entity.entity_id = object_relation.object_entity_id
       )
-      SELECT relation_pk FROM matching_relation_pks
+      SELECT relation_id FROM matching_relation_pks
     )`;
 
   if (filters.relationCategories?.length) {
@@ -135,17 +135,17 @@ function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
 
   const interactionTypes = normalizeStringValues(filters.interactionTypes);
   if (interactionTypes.length) {
-    whereParts.push(`participant_types @> ${pushParam(interactionTypes, "text[]")}`);
+    whereParts.push(`participant_types @> to_jsonb(${pushParam(interactionTypes, "text[]")})`);
   }
 
   const subjectEntityPks = normalizeNumberValues(filters.subjectEntityPks);
   if (subjectEntityPks.length) {
-    whereParts.push(`subject_entity_pk = ANY(${pushParam(subjectEntityPks, "bigint[]")})`);
+    whereParts.push(`subject_entity_id = ANY(${pushParam(subjectEntityPks, "bigint[]")})`);
   }
 
   const objectEntityPks = normalizeNumberValues(filters.objectEntityPks);
   if (objectEntityPks.length) {
-    whereParts.push(`object_entity_pk = ANY(${pushParam(objectEntityPks, "bigint[]")})`);
+    whereParts.push(`object_entity_id = ANY(${pushParam(objectEntityPks, "bigint[]")})`);
   }
 
   const entityPks = normalizeNumberValues(filters.entityPks);
@@ -154,7 +154,7 @@ function buildRelationSearchWhere(filters: RelationFilters, schema: string) {
   }
 
   if (filters.sources?.length) {
-    whereParts.push(`sources && ${pushParam(filters.sources, "text[]")}`);
+    whereParts.push(`sources ?| ${pushParam(filters.sources, "text[]")}`);
   }
 
   const annotationTerms = normalizeStringValues(filters.annotationTerms);
@@ -196,10 +196,10 @@ export async function searchRelations({
 
     const pageParams = [...params, limit, offset];
     const relationsResult = await client.query<{
-      relation_pk: string | number;
-      subject_entity_pk: string | number;
+      relation_id: string | number;
+      subject_entity_id: string | number;
       predicate: string;
-      object_entity_pk: string | number;
+      object_entity_id: string | number;
       relation_category: string;
       participant_types: string[] | null;
       evidence_count: string | number;
@@ -208,7 +208,7 @@ export async function searchRelations({
       `SELECT *
        FROM ${SEARCH_SCHEMA}.entity_relation
        ${whereClause}
-       ORDER BY relation_pk
+       ORDER BY relation_id
        LIMIT $${pageParams.length - 1}
        OFFSET $${pageParams.length}`,
       pageParams,
@@ -300,7 +300,7 @@ export async function getRelationFilterOptions(): Promise<RelationFilterOptions>
            FROM (
              SELECT DISTINCT participant_type.value AS value
              FROM ${SEARCH_SCHEMA}.entity_relation r
-             CROSS JOIN LATERAL unnest(r.participant_types) AS participant_type(value)
+             CROSS JOIN LATERAL jsonb_array_elements_text(r.participant_types) AS participant_type(value)
              WHERE r.relation_category = 'interaction'
                AND participant_type.value <> ''
            ) t`,
@@ -394,15 +394,15 @@ export async function getScopedRelationFacetCounts({
       const termParam = pushParam(normalizedTermIds);
       scopeParts.push(`SELECT b.relation_bitmap AS bitmap
         FROM ${S}.entity e
-        JOIN ${S}.annotation_term_relation_bitmap b ON b.term_entity_pk = e.entity_pk
+        JOIN ${S}.annotation_term_relation_bitmap b ON b.term_entity_id = e.entity_id
         WHERE e.canonical_identifier = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build_agg(relation_pk::integer) AS bitmap
+      scopeParts.push(`SELECT rb_build_agg(relation_id::integer) AS bitmap
         FROM ${S}.entity_relation
-        WHERE subject_entity_pk = ANY(${ePkParam}::bigint[])
-           OR object_entity_pk = ANY(${ePkParam}::bigint[])`);
+        WHERE subject_entity_id = ANY(${ePkParam}::bigint[])
+           OR object_entity_id = ANY(${ePkParam}::bigint[])`);
     }
 
     if (scopeParts.length > 0) {
