@@ -28,7 +28,7 @@ RemainAfterExit=yes
 WorkingDirectory=%h/instances/%i/src
 ExecStart=/bin/bash -lc 'docker compose -p omnipath-present-%i -f docker-compose.deploy.yaml --env-file %h/instances/%i/.env up -d --build --wait'
 ExecStop=/bin/bash -lc 'docker compose -p omnipath-present-%i -f docker-compose.deploy.yaml --env-file %h/instances/%i/.env down'
-TimeoutStartSec=600
+TimeoutStartSec=1800
 
 [Install]
 WantedBy=default.target
