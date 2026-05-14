@@ -27,12 +27,16 @@ export function toPublicEntityId(
     | {
         canonicalIdentifierType: string;
         canonicalIdentifier: string;
+        idType?: string | null;
+        id?: string | null;
       }
     | {
         canonicalIdentifierType?: string | null;
         canonicalIdentifier?: string | null;
         canonical_identifier_type?: string | null;
         canonical_identifier?: string | null;
+        id_type?: string | null;
+        id?: string | null;
       },
 ): string {
   const typedRow = entityRow as {
@@ -40,9 +44,12 @@ export function toPublicEntityId(
     canonicalIdentifier?: string | null;
     canonical_identifier_type?: string | null;
     canonical_identifier?: string | null;
+    idType?: string | null;
+    id_type?: string | null;
+    id?: string | null;
   };
 
-  const type = typedRow.canonicalIdentifierType || typedRow.canonical_identifier_type || "";
-  const identifier = typedRow.canonicalIdentifier || typedRow.canonical_identifier || "";
+  const type = typedRow.canonicalIdentifierType || typedRow.canonical_identifier_type || typedRow.idType || typedRow.id_type || "";
+  const identifier = typedRow.canonicalIdentifier || typedRow.canonical_identifier || typedRow.id || "";
   return `${type}|${identifier}`;
 }

@@ -66,7 +66,7 @@ export async function getOntologyTermsByIds(termIds: string[]): Promise<Ontology
   if (normalized.length === 0) return [];
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const result = await client.query<OntologyTermRow>(
       `SELECT terms.*
        FROM ${ontologyTermsTable(S)}
@@ -82,21 +82,24 @@ export async function getOntologyTermsByIds(termIds: string[]): Promise<Ontology
 
 export async function searchOntologyTerms({
   query = "",
+  prefixes,
   ontologyIds,
   limit = 24,
   offset = 0,
 }: {
   query?: string;
+  prefixes?: string[];
   ontologyIds?: string[];
   limit?: number;
   offset?: number;
 } = {}): Promise<OntologyTermWithAnnotationCounts[]> {
+  const normalizedPrefixes = Array.from(new Set((prefixes || []).map((prefix) => prefix.trim()).filter(Boolean)));
   const normalizedOntologyIds = Array.from(new Set((ontologyIds || []).map((id) => id.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
   const client = await getPool().connect();
 
   try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const params: unknown[] = [];
     const whereParts: string[] = [];
 
@@ -104,6 +107,11 @@ export async function searchOntologyTerms({
       params.push(`%${trimmedQuery}%`);
       const placeholder = `$${params.length}`;
       whereParts.push(ontologyTermSearchPredicate(placeholder));
+    }
+
+    if (normalizedPrefixes.length > 0) {
+      params.push(normalizedPrefixes);
+      whereParts.push(`terms.ontology_prefix = ANY($${params.length}::text[])`);
     }
 
     if (normalizedOntologyIds.length > 0) {
@@ -179,7 +187,7 @@ export async function getOntologyPrefixes(): Promise<string[]> {
   ontologyPrefixesInFlight = (async () => {
     const client = await getPool().connect();
     try {
-      const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+      const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
       const result = await client.query<{ prefix: string | null }>(
         `SELECT DISTINCT ontology_prefix AS prefix
          FROM ${ontologyTermsTable(S)}
@@ -239,7 +247,7 @@ async function searchScopedOntologyTermsRelational({
     const termParam = pushParam(termIds);
     cteParts.push(`scope_entity_pks AS MATERIALIZED (
       SELECT DISTINCT er.subject_entity_id AS entity_id
-      FROM ${schema}.entity_relation er
+      FROM ${schema}.relation er
       WHERE er.relation_category = 'association'
         AND er.object_entity_id IN (
           SELECT terms.term_entity_id FROM ${ontologyTermsTable(schema)} WHERE terms.term_id = ANY(${termParam}::text[])
@@ -248,12 +256,12 @@ async function searchScopedOntologyTermsRelational({
   }
 
   let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
-    : `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
+    ? `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
+    : `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.entity_relation er WHERE er.relation_category = 'association' AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::bigint[]))`;
+    scopeTermPksFrom = `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::bigint[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
@@ -485,7 +493,7 @@ export async function searchScopedOntologyTerms({
   const client = await getPool().connect();
 
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
 
     // Fast path: use bitmap-based set intersection when the table is populated.
     const bitmapCheck = await client.query<{ ready: boolean }>(
@@ -561,7 +569,7 @@ export async function getScopedOntologyPrefixCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const params: unknown[] = [];
 
     const pushParam = (value: unknown): string => {
@@ -676,7 +684,7 @@ export async function getScopedOntologyIdCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -774,7 +782,7 @@ export async function getScopedOntologySourceCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const params: unknown[] = [];
 
     const pushParam = (value: unknown): string => {
@@ -798,12 +806,11 @@ export async function getScopedOntologySourceCounts({
          FROM (
            SELECT source.value AS source, COUNT(*) AS scoped_count
            FROM ${ontologyTermsTable(S)}
-           CROSS JOIN LATERAL jsonb_array_elements_text(terms.sources) AS source(value)
+           CROSS JOIN LATERAL unnest(terms.sources) AS source(value)
            WHERE ${termWhereClause}
            GROUP BY source.value
          ) source_counts
-         LEFT JOIN ${S}.resources r ON r.resource_id = source_counts.source
-         ORDER BY source_counts.scoped_count DESC, COALESCE(r.resource_name, source_counts.source) ASC, source_counts.source ASC`,
+         ORDER BY source_counts.scoped_count DESC, source_counts.source ASC, source_counts.source ASC`,
         params,
       );
 
@@ -845,7 +852,7 @@ export async function getScopedOntologySourceCounts({
        FROM ${ontologyTermsTable(S)}
        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
        CROSS JOIN scope_base sb
-       CROSS JOIN LATERAL jsonb_array_elements_text(terms.sources) AS source(value)
+       CROSS JOIN LATERAL unnest(terms.sources) AS source(value)
        WHERE rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) > 0
          AND source.value <> ''
          ${whereClause}
@@ -867,24 +874,12 @@ export async function getScopedOntologySourceCounts({
  *  Populated by omnipath_build; this is a convenience wrapper for manual rebuilds.
  */
 export async function rebuildAllBitmaps(): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    await client.query(`CALL ${S}.rebuild_all_bitmaps()`);
-  } finally {
-    client.release();
-  }
+  throw new Error("Bitmap rebuilds are owned by omnipath_build/minimal, not the Svelte app");
 }
 
 /** @deprecated Use {@link rebuildAllBitmaps} instead. Rebuilds only annotation-term → entity bitmaps. */
 export async function rebuildAnnotationTermBitmaps(): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    await client.query(`CALL ${S}.rebuild_annotation_term_bitmaps()`);
-  } finally {
-    client.release();
-  }
+  throw new Error("Bitmap rebuilds are owned by omnipath_build/minimal, not the Svelte app");
 }
 
 export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise<string[]> {
@@ -893,12 +888,12 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
 
   const client = await getPool().connect();
   try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "minimal";
     const result = await client.query(
       `SELECT DISTINCT
-         es.canonical_identifier,
-         es.canonical_identifier_type
-       FROM ${SEARCH_SCHEMA}.entity_relation er
+         es.id AS canonical_identifier,
+         es.id_type AS canonical_identifier_type
+       FROM ${SEARCH_SCHEMA}.relation er
        JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.subject_entity_id
        WHERE er.relation_category = 'association'
          AND er.object_entity_id IN (

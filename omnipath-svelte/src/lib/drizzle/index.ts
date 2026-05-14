@@ -1,19 +1,45 @@
-import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-
-import {
-  entity,
-  entityIdentifier,
-  entityRelation,
-  entityRelationEvidence,
-} from "./schema";
-
 export * from "./schema";
 
-export type Entity = InferSelectModel<typeof entity>;
-export type EntityInsert = InferInsertModel<typeof entity>;
-export type EntityIdentifier = InferSelectModel<typeof entityIdentifier>;
-export type EntityRelation = InferSelectModel<typeof entityRelation>;
-export type EntityRelationEvidence = InferSelectModel<typeof entityRelationEvidence>;
+export type Entity = {
+  entityPk: number;
+  canonicalIdentifier: string;
+  canonicalIdentifierType: string;
+  entityType: string | null;
+  taxonomyId: string | null;
+  entityAttributes: unknown;
+  sources: string[];
+  relationCount?: number;
+};
+
+export type EntityInsert = Entity;
+
+export type EntityIdentifier = {
+  id?: number | bigint;
+  entityPk: number;
+  identifier: string;
+  identifierType: string;
+};
+
+export type EntityRelation = {
+  relationPk: number;
+  subjectEntityPk: number;
+  predicate: string;
+  objectEntityPk: number;
+  relationCategory: string | null;
+  participantTypes: string[];
+  evidenceCount: number;
+  sources: string[];
+};
+
+export type EntityRelationEvidence = {
+  source: string;
+  relationEvidencePk: number;
+  relationPk: number;
+  recordAttributes: unknown;
+  subjectAttributes: unknown;
+  objectAttributes: unknown;
+  evidence: unknown;
+};
 
 export type Identifier = {
   key: string;

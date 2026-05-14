@@ -4,6 +4,7 @@ export async function load() {
 	const resources = await listResources();
 	return {
 		resources,
-		summary: summarizeResources(resources)
+		summary: summarizeResources(resources),
+		resourcesUnavailable: resources.length === 0
 	};
 }

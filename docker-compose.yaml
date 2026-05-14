@@ -81,6 +81,7 @@ services:
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
             DATABASE_URL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
             DATABASE_URL_INTERNAL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
+            OMNIPATH_PG_SCHEMA: minimal
             CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-openrouter}
             OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-gpt-4o}
         ports:

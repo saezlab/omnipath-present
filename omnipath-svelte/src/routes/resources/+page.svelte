@@ -291,7 +291,11 @@
 					</div>
 				{:else}
 					<div class="rounded-[1.25rem] border border-border/60 bg-card px-6 py-14 text-center text-muted-foreground shadow-sm">
-						No resources matched the current search and filter settings.
+						{#if data.resourcesUnavailable}
+							Resource metadata is not available from the API service for this build.
+						{:else}
+							No resources matched the current search and filter settings.
+						{/if}
 					</div>
 				{/if}
 		</section>

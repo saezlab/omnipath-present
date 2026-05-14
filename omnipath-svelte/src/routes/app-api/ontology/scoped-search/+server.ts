@@ -8,6 +8,8 @@ export const GET: RequestHandler = async ({ url }) => {
   const entityPks = entityPksParam ? entityPksParam.split(",").map(Number).filter(Number.isFinite) : [];
   const termIdsParam = url.searchParams.get("termIds");
   const termIds = termIdsParam ? termIdsParam.split(",") : [];
+  const prefixesParam = url.searchParams.get("prefixes");
+  const prefixes = prefixesParam ? prefixesParam.split(",") : undefined;
   const ontologyIdsParam = url.searchParams.get("ontologyIds");
   const ontologyIds = ontologyIdsParam ? ontologyIdsParam.split(",") : undefined;
   const limit = Number(url.searchParams.get("limit") || "24");
@@ -17,6 +19,7 @@ export const GET: RequestHandler = async ({ url }) => {
     entityPks,
     termIds,
     query,
+    prefixes,
     ontologyIds,
     limit: Number.isFinite(limit) ? limit : 24,
     offset: Number.isFinite(offset) ? offset : 0,
@@ -30,6 +33,7 @@ export const POST: RequestHandler = async ({ request }) => {
     entityPks?: number[];
     termIds?: string[];
     query?: string;
+    prefixes?: string[];
     ontologyIds?: string[];
     limit?: number;
     offset?: number;
@@ -39,6 +43,7 @@ export const POST: RequestHandler = async ({ request }) => {
     entityPks: body.entityPks || [],
     termIds: body.termIds || [],
     query: body.query || "",
+    prefixes: body.prefixes,
     ontologyIds: body.ontologyIds,
     limit: body.limit ?? 24,
     offset: body.offset ?? 0,

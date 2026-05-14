@@ -1,15 +1,86 @@
-import { eq, inArray } from "drizzle-orm";
-import { getDb } from "$lib/server/db/client";
-import { entityRelationEvidence, type EntityRelationEvidence } from "$lib/drizzle";
+import { getPool } from "$lib/server/db/client";
+import type { EntityRelationEvidence } from "$lib/drizzle";
+
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+
+function annotationArraySql(schema: string, whereSql: string): string {
+  return `COALESCE((
+    SELECT jsonb_agg(
+      jsonb_build_object(
+        'term', a.term,
+        'value', a.value,
+        'unit', a.unit,
+        'scope', a.scope
+      )
+      ORDER BY a.annotation_id
+    )
+    FROM ${schema}.annotation a
+    WHERE ${whereSql}
+  ), '[]'::jsonb)`;
+}
+
+async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<EntityRelationEvidence[]> {
+  const normalized = Array.from(new Set(relationPks.filter(Number.isFinite)));
+  if (normalized.length === 0) return [];
+
+  const schema = SEARCH_SCHEMA();
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      source: string;
+      relation_evidence_id: string | number;
+      relation_id: string | number;
+      record_attributes: unknown;
+      subject_attributes: unknown;
+      object_attributes: unknown;
+      evidence: unknown;
+    }>(
+      `SELECT
+         re.source,
+         re.relation_evidence_id,
+         rer.relation_id,
+         ${annotationArraySql(schema, "a.relation_evidence_id = re.relation_evidence_id AND a.scope IN ('record', 'relation')")} AS record_attributes,
+         ${annotationArraySql(schema, "a.entity_evidence_id = re.subject_entity_evidence_id")} AS subject_attributes,
+         ${annotationArraySql(schema, "a.entity_evidence_id = re.object_entity_evidence_id")} AS object_attributes,
+         COALESCE((
+           SELECT jsonb_agg(
+             jsonb_build_object(
+               'term', a.term,
+               'value', a.value,
+               'unit', a.unit,
+               'scope', a.scope
+             )
+             ORDER BY a.annotation_id
+           )
+           FROM ${schema}.relation_evidence_annotation rea
+           JOIN ${schema}.annotation a ON a.annotation_id = rea.annotation_id
+           WHERE rea.relation_evidence_id = re.relation_evidence_id
+         ), ${annotationArraySql(schema, "a.relation_evidence_id = re.relation_evidence_id AND a.scope NOT IN ('record', 'relation')")}) AS evidence
+       FROM ${schema}.relation_evidence_relation rer
+       JOIN ${schema}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
+       WHERE rer.relation_id = ANY($1::bigint[])
+       ORDER BY rer.relation_id, re.source, re.relation_evidence_id`,
+      [normalized],
+    );
+
+    return result.rows.map((row) => ({
+      source: row.source,
+      relationEvidencePk: Number(row.relation_evidence_id),
+      relationPk: Number(row.relation_id),
+      recordAttributes: row.record_attributes,
+      subjectAttributes: row.subject_attributes,
+      objectAttributes: row.object_attributes,
+      evidence: row.evidence,
+    }));
+  } finally {
+    client.release();
+  }
+}
 
 export async function getEvidenceByRelationPk(relationPk: number): Promise<EntityRelationEvidence[]> {
-  const db = getDb();
-  return db.select().from(entityRelationEvidence).where(eq(entityRelationEvidence.relationPk, relationPk));
+  return getEvidenceByRelationPksInternal([relationPk]);
 }
 
 export async function getEvidenceByRelationPks(relationPks: number[]): Promise<EntityRelationEvidence[]> {
-  const normalized = Array.from(new Set(relationPks.filter(Number.isFinite)));
-  if (normalized.length === 0) return [];
-  const db = getDb();
-  return db.select().from(entityRelationEvidence).where(inArray(entityRelationEvidence.relationPk, normalized));
+  return getEvidenceByRelationPksInternal(relationPks);
 }

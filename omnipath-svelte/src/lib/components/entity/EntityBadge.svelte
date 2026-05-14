@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle } from '@lucide/svelte';
+  import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle, Tags } from '@lucide/svelte';
 
   const entityTypeConfig: Record<string, { icon: typeof CircleDot; color: string; bgColor: string; label: string }> = {
     protein: { icon: CircleDot, color: 'text-blue-500', bgColor: 'from-blue-50/80 to-blue-100/80 dark:from-blue-900/30 dark:to-blue-800/30', label: 'Protein' },
@@ -13,6 +13,7 @@
     complex: { icon: Shapes, color: 'text-indigo-500', bgColor: 'from-indigo-50/80 to-indigo-100/80 dark:from-indigo-900/30 dark:to-indigo-800/30', label: 'Complex' },
     pathway: { icon: Waypoints, color: 'text-cyan-500', bgColor: 'from-cyan-50/80 to-cyan-100/80 dark:from-cyan-900/30 dark:to-cyan-800/30', label: 'Pathway' },
     reaction: { icon: Waypoints, color: 'text-pink-500', bgColor: 'from-pink-50/80 to-pink-100/80 dark:from-pink-900/30 dark:to-pink-800/30', label: 'Reaction' },
+    cvterm: { icon: Tags, color: 'text-amber-600', bgColor: 'from-amber-50/80 to-amber-100/80 dark:from-amber-900/30 dark:to-amber-800/30', label: 'CV Term' },
   };
 
   const defaultConfig = { icon: HelpCircle, color: 'text-slate-500', bgColor: 'from-slate-50/80 to-slate-100/80 dark:from-slate-800/80 dark:to-slate-900/80', label: 'Entity' };
@@ -42,7 +43,7 @@
     <div class="flex items-center gap-1.5 min-h-[32px]">
       <TypeIcon class="h-4 w-4 {typeConfig.color} shrink-0" />
       <div class="flex flex-col justify-center flex-1 min-w-0">
-        <span class="text-xs font-medium text-slate-900 dark:text-slate-100 truncate leading-tight" title={displayName || canonicalIdentifier}>
+        <span class="truncate text-xs font-medium leading-tight text-slate-900 dark:text-slate-100" title={`${typeConfig.label}: ${displayName || canonicalIdentifier}`}>
           {displayName || canonicalIdentifier}
         </span>
         {#if displayName && !isDuplicate}

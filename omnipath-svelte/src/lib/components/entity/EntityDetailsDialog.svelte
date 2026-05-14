@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ExternalLink } from '@lucide/svelte';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
@@ -7,8 +8,10 @@
 		getAllowedEntityDescriptions,
 		getEntityDisplayName,
 		getEntityIdentifiers,
+		getEntityPublicId,
 		getEntitySmiles,
 		getEntityTypeLabel,
+		getIdentifierTypeLabel,
 		isSmallMoleculeEntity,
 		type EntityLike
 	} from '$lib/entities/display';
@@ -18,7 +21,44 @@
 		entity: EntityLike | null;
 	}
 
+	type AnnotationRow = {
+		term: string;
+		label: string;
+		value: string;
+		unit: string;
+		source: string;
+	};
+
 	let { open = $bindable(false), entity }: Props = $props();
+	let hydratedEntity = $state<EntityLike | null>(null);
+	let loadingDetails = $state(false);
+
+	$effect(() => {
+		if (!open || !entity) {
+			hydratedEntity = null;
+			loadingDetails = false;
+			return;
+		}
+
+		const publicId = getEntityPublicId(entity);
+		let cancelled = false;
+		loadingDetails = true;
+
+		(async () => {
+			try {
+				const response = await fetch(`/app-api/entities/${encodeURIComponent(publicId)}`);
+				if (!response.ok) return;
+				const payload = (await response.json()) as { entity?: EntityLike | null };
+				if (!cancelled) hydratedEntity = payload.entity ?? entity;
+			} finally {
+				if (!cancelled) loadingDetails = false;
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	const TAXONOMY_LABELS: Record<string, string> = {
 		'9606': 'Human',
@@ -112,27 +152,86 @@
 			})
 			.map(([label, items]) => ({ label, items }));
 	}
+
+	function normalizeAnnotationRows(attributes: unknown[]): AnnotationRow[] {
+		return attributes.flatMap((attribute) => {
+			if (typeof attribute !== 'object' || attribute === null || !('term' in attribute)) return [];
+			const row = attribute as { term?: unknown; value?: unknown; unit?: unknown; source?: unknown };
+			const term = typeof row.term === 'string' ? row.term.trim() : '';
+			const value = typeof row.value === 'string' ? row.value.trim() : '';
+			const unit = typeof row.unit === 'string' ? row.unit.trim() : '';
+			const source = typeof row.source === 'string' ? row.source.trim() : '';
+			const label = getIdentifierTypeLabel(term);
+			if (!term || !value) return [];
+			if (label.toLowerCase() === 'amino acid sequence') return [];
+			return [{ term, label, value, unit, source }];
+		});
+	}
+
+	function isPubmedAnnotation(row: AnnotationRow) {
+		const termLabel = row.label.toLowerCase();
+		return termLabel === 'pubmed' || termLabel === 'pmid' || termLabel.includes('pubmed');
+	}
+
+	function annotationSortRank(row: AnnotationRow): number {
+		const label = row.label.toLowerCase();
+		if (label === 'function') return 0;
+		if (label === 'subcellular location') return 1;
+		if (label === 'disease involvement' || label === 'disease') return 2;
+		return 10;
+	}
+
+	function sortAnnotations(rows: AnnotationRow[]): AnnotationRow[] {
+		return [...rows].sort((a, b) => annotationSortRank(a) - annotationSortRank(b) || a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
+	}
+
+	function pubmedIdsFromAnnotations(rows: AnnotationRow[]): string[] {
+		const ids = new Set<string>();
+		for (const row of rows) {
+			if (!isPubmedAnnotation(row)) continue;
+			`${row.value} ${row.unit}`.match(/\b\d{4,9}\b/g)?.forEach((id) => ids.add(id));
+		}
+		return Array.from(ids).sort((a, b) => Number(a) - Number(b));
+	}
+
+	function sourcesForPubmedId(rows: AnnotationRow[], pubmedId: string): string[] {
+		const sources = new Set<string>();
+		for (const row of rows) {
+			if (!isPubmedAnnotation(row) || !row.source) continue;
+			const ids: string[] = `${row.value} ${row.unit}`.match(/\b\d{4,9}\b/g) ?? [];
+			if (ids.includes(pubmedId)) sources.add(row.source);
+		}
+		return Array.from(sources).sort();
+	}
 </script>
 
 <Dialog bind:open>
 	<DialogContent class="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-2xl">
 		{#if entity}
-			{@const detailSections = getDescriptionSections(entity)}
-			{@const detailIdentifiers = getEntityIdentifiers(entity)}
-			{@const detailSmiles = getEntitySmiles(entity)}
-			{@const detailTaxonomy = formatTaxonomyId(entity.taxonomyId)}
-			{@const showMoleculeStructure = isSmallMoleculeEntity(entity) && detailSmiles}
+			{@const detailEntity = hydratedEntity ?? entity}
+			{@const detailSections = getDescriptionSections(detailEntity)}
+			{@const detailIdentifiers = getEntityIdentifiers(detailEntity)}
+			{@const detailSmiles = getEntitySmiles(detailEntity)}
+			{@const detailTaxonomy = formatTaxonomyId(detailEntity.taxonomyId)}
+			{@const showMoleculeStructure = isSmallMoleculeEntity(detailEntity) && detailSmiles}
+			{@const detailAttributes = Array.isArray(detailEntity.entityAttributes) ? detailEntity.entityAttributes : []}
+			{@const detailAnnotationRows = normalizeAnnotationRows(detailAttributes)}
+			{@const detailPubmedIds = pubmedIdsFromAnnotations(detailAnnotationRows)}
+			{@const detailNonPubmedAnnotations = sortAnnotations(detailAnnotationRows.filter((row) => !isPubmedAnnotation(row)))}
 			<DialogHeader>
-				<DialogTitle>{getEntityDisplayName(entity)}</DialogTitle>
+				<DialogTitle>{getEntityDisplayName(detailEntity)}</DialogTitle>
 			</DialogHeader>
 			<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
 				<div class="flex flex-wrap items-center gap-2">
-					<Badge variant="secondary">{getEntityTypeLabel(entity)}</Badge>
+					<Badge variant="secondary">{getEntityTypeLabel(detailEntity)}</Badge>
 					{#if detailTaxonomy}
 						<Badge variant="outline">Taxon: {detailTaxonomy}</Badge>
 					{/if}
-					<IdentifierBadge identifierType={entity.canonicalIdentifierType} value={entity.canonicalIdentifier} variant="subtle" />
+					<IdentifierBadge identifierType={detailEntity.canonicalIdentifierType} value={detailEntity.canonicalIdentifier} variant="subtle" />
 				</div>
+				{#if loadingDetails && !hydratedEntity}
+					<p class="text-sm text-muted-foreground">Loading annotations...</p>
+				{/if}
 				{#if showMoleculeStructure}
 					<div class="rounded-lg border bg-muted/10 p-4">
 						<div class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -157,17 +256,64 @@
 						{/each}
 					</div>
 				{/if}
-				{#if detailIdentifiers.length > 0}
+				{#if detailNonPubmedAnnotations.length > 0}
 					<div class="space-y-2">
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-							Identifiers
+							Annotations
 						</h3>
-						<div class="flex flex-wrap gap-2">
+						<div class="grid min-w-0 gap-2">
+							{#each detailNonPubmedAnnotations as annotation}
+								<div class="min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/10 px-3 py-2 text-sm">
+									<div class="flex min-w-0 items-center justify-between gap-2">
+										<div class="truncate text-xs font-medium text-muted-foreground" title={annotation.term}>{annotation.label}</div>
+										{#if annotation.source}
+											<Badge variant="secondary" class="shrink-0 text-[10px]">{annotation.source}</Badge>
+										{/if}
+									</div>
+									<div class="mt-1 max-h-32 max-w-full overflow-auto whitespace-pre-wrap break-all text-foreground">
+										{annotation.value}{annotation.unit ? ` ${annotation.unit}` : ''}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+				{#if detailPubmedIds.length > 0}
+					<details class="group rounded-lg border bg-muted/5 px-3 py-2">
+						<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+							Publications ({detailPubmedIds.length})
+						</summary>
+						<div class="mt-3 flex min-w-0 flex-wrap gap-1.5">
+							{#each detailPubmedIds as pubmedId}
+								{@const pubmedSources = sourcesForPubmedId(detailAnnotationRows, pubmedId)}
+								<a
+									href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
+									target="_blank"
+									rel="noreferrer"
+									class="inline-flex max-w-full items-center gap-1 rounded-lg border bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
+									title={pubmedSources.length ? `Sources: ${pubmedSources.join(', ')}` : undefined}
+								>
+									PMID:{pubmedId}
+									<ExternalLink class="size-3" />
+									{#if pubmedSources.length > 0}
+										<span class="max-w-24 truncate text-muted-foreground">{pubmedSources.join(', ')}</span>
+									{/if}
+								</a>
+							{/each}
+						</div>
+					</details>
+				{/if}
+				{#if detailIdentifiers.length > 0}
+					<details class="group rounded-lg border bg-muted/5 px-3 py-2">
+						<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+							Identifiers ({detailIdentifiers.length})
+						</summary>
+						<div class="mt-3 flex flex-wrap gap-2">
 							{#each detailIdentifiers as identifier}
 								<IdentifierBadge identifierType={identifier.key} value={identifier.value} />
 							{/each}
 						</div>
-					</div>
+					</details>
 				{/if}
 			</div>
 		{/if}

@@ -166,6 +166,19 @@ class AnnotationExportRequest(BaseModel):
     filename: str | None = None
 
 
+class RelationContextExportRequest(BaseModel):
+    """Request payload for bundled relation/entity/annotation context exports."""
+
+    filters: dict[str, Any] = Field(default_factory=dict)
+    require_both_participants_in_entity_scope: bool = True
+    include_annotations: bool = True
+    include_evidence: bool = True
+    filename: str | None = None
+
+
+InteractionContextExportRequest = RelationContextExportRequest
+
+
 class SliceRequest(BaseModel):
     """Request payload for filtered JSON slices."""
 

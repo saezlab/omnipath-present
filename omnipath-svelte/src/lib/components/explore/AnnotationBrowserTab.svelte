@@ -53,7 +53,7 @@
   const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
   const selectedOntologyIds = $derived(filters.ontology_ids || []);
 
-  // Fetch ontology-id counts from annotation terms available in the current scope.
+  // Fetch ontology counts from annotation terms available in the current scope.
   $effect(() => {
     const q = query;
     const ePks = selectedEntityPks || [];

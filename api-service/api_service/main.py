@@ -30,6 +30,7 @@ from .models import (
     EntityExportRequest,
     RelationExportRequest,
     AnnotationExportRequest,
+    RelationContextExportRequest,
     ResourceDownloadRequest,
     SliceRequest,
     SliceResponse,
@@ -751,6 +752,36 @@ def export_relations_parquet(request: RelationExportRequest, background_tasks: B
         default_filename="relations_subset",
         log_label="Relation",
     )
+
+
+@app.post("/exports/relation-context/zip")
+def export_relation_context_zip(request: RelationContextExportRequest, background_tasks: BackgroundTasks):
+    from .exports import build_relation_context_zip
+
+    try:
+        artifact, manifest = build_relation_context_zip(
+            filters=request.filters,
+            require_both_participants_in_entity_scope=request.require_both_participants_in_entity_scope,
+            include_annotations=request.include_annotations,
+            include_evidence=request.include_evidence,
+            filename=request.filename,
+        )
+        response = _build_file_response(
+            path=artifact.path,
+            media_type=artifact.media_type,
+            filename=artifact.filename,
+            background_tasks=background_tasks,
+            temporary=artifact.is_temporary,
+        )
+        response.headers["X-Export-Relations-Count"] = str(manifest["relations_count"])
+        response.headers["X-Export-Entities-Count"] = str(manifest["entities_count"])
+        response.headers["X-Export-Annotations-Count"] = str(manifest["annotations_count"])
+        return response
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Relation context export failed")
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
 
 
 @app.get("/exports/relations/parquet")

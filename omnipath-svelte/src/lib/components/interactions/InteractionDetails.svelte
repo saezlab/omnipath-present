@@ -7,6 +7,7 @@
     getEntityPublicId,
     getEntitySecondaryName,
     getEntityTypeLabel,
+    getIdentifierTypeLabel,
   } from '$lib/entities/display';
   import type { InteractionDetailsData, InteractionListRow, ParsedAnnotation, EvidenceGroup } from '$lib/types/interactions';
   import { getEntityTypeEmoji } from '$lib/utils/entity-types';
@@ -23,7 +24,15 @@
     const text = value.trim();
     const parts = text.split(":");
 
-    // Format: PREFIX:NUMBER:Label (e.g., OM:1228:Source, MI:0840:positive)
+    // New minimal format: Label:PREFIX:NUMBER (e.g. Ncbi Tax Id:OM:0205)
+    if (parts.length >= 3 && /^[A-Z][A-Z0-9_-]*$/.test(parts[parts.length - 2])) {
+      return {
+        term: parts.slice(0, -2).join(":").trim(),
+        termId: `${parts[parts.length - 2]}:${parts[parts.length - 1]}`,
+      };
+    }
+
+    // Legacy format: PREFIX:NUMBER:Label (e.g., OM:1228:Source, MI:0840:positive)
     if (parts.length >= 3) {
       return {
         termId: `${parts[0]}:${parts[1]}`,
@@ -170,8 +179,7 @@
   }
 
   function formatParticipantType(value: string) {
-    const parts = value.split(":");
-    const label = parts.length >= 3 ? parts.slice(2).join(":") : value;
+    const label = getIdentifierTypeLabel(value);
     return {
       label,
       icon: getEntityTypeEmoji(label),
@@ -222,9 +230,9 @@
         {emptyText}
       </div>
     {:else}
-      <div class="flex flex-wrap gap-1.5">
+      <div class="flex min-w-0 flex-wrap gap-1.5">
         {#each annotations as annotation}
-          <span class="inline-flex max-w-full flex-col rounded-lg border bg-background px-2.5 py-1.5 text-xs">
+          <span class="inline-flex min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-background px-2.5 py-1.5 text-xs">
             <span class="truncate font-medium leading-tight">{formatAnnotationText(annotation)}</span>
             {#if annotation.termId || annotation.unitId}
               <span class="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">

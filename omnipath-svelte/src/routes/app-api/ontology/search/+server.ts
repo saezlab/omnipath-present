@@ -4,6 +4,8 @@ import { jsonBigIntSafe } from "$lib/server/api-utils";
 
 export const GET: RequestHandler = async ({ url }) => {
   const query = url.searchParams.get("q") || "";
+  const prefixesParam = url.searchParams.get("prefixes");
+  const prefixes = prefixesParam ? prefixesParam.split(",") : undefined;
   const ontologyIdsParam = url.searchParams.get("ontologyIds");
   const ontologyIds = ontologyIdsParam ? ontologyIdsParam.split(",") : undefined;
   const limit = Number(url.searchParams.get("limit") || "24");
@@ -11,6 +13,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
   const result = await searchOntologyTerms({
     query,
+    prefixes,
     ontologyIds,
     limit: Number.isFinite(limit) ? limit : 24,
     offset: Number.isFinite(offset) ? offset : 0,

@@ -2,7 +2,7 @@ export type SubsetResource = "entities" | "relations" | "ontology";
 
 export interface AnnotationSubsetFilters {
   prefixes?: string[];
-  ontology_prefixes?: string[];
+  ontology_ids?: string[];
   entity_pks?: number[];
 }
 

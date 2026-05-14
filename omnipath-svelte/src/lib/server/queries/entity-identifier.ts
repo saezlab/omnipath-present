@@ -1,18 +1,48 @@
-import { eq, inArray } from "drizzle-orm";
-import { getDb, getPool } from "$lib/server/db/client";
-import { entity, entityIdentifier, type Entity, type EntityIdentifier } from "$lib/drizzle";
+import { getPool } from "$lib/server/db/client";
+import type { Entity, EntityIdentifier } from "$lib/drizzle";
 import { normalizeStringValues, toPublicEntityId } from "$lib/entity-public-id";
 
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+
 export async function getIdentifiersByEntityPk(entityPk: number): Promise<EntityIdentifier[]> {
-  const db = getDb();
-  return db.select().from(entityIdentifier).where(eq(entityIdentifier.entityPk, entityPk));
+  return getIdentifiersByEntityPks([entityPk]);
 }
 
 export async function getIdentifiersByEntityPks(entityPks: number[]): Promise<EntityIdentifier[]> {
   const normalized = Array.from(new Set(entityPks.filter(Number.isFinite)));
   if (normalized.length === 0) return [];
-  const db = getDb();
-  return db.select().from(entityIdentifier).where(inArray(entityIdentifier.entityPk, normalized));
+
+  const schema = SEARCH_SCHEMA();
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      identifier_id: string | number;
+      identifier_type: string;
+      identifier: string;
+    }>(
+      `SELECT DISTINCT
+         eer.entity_id,
+         i.identifier_id,
+         i.type AS identifier_type,
+         i.value AS identifier
+       FROM ${schema}.entity_evidence_resolution eer
+       JOIN ${schema}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
+       JOIN ${schema}.identifier i ON i.identifier_id = eei.identifier_id
+       WHERE eer.entity_id = ANY($1::bigint[])
+       ORDER BY eer.entity_id, i.type, i.value`,
+      [normalized],
+    );
+
+    return result.rows.map((row) => ({
+      id: Number(row.identifier_id),
+      entityPk: Number(row.entity_id),
+      identifier: row.identifier,
+      identifierType: row.identifier_type,
+    }));
+  } finally {
+    client.release();
+  }
 }
 
 export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
@@ -22,81 +52,54 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
   const normalized = normalizeStringValues(identifiers);
   if (normalized.length === 0) return { matches: [], entities: [] };
 
+  const schema = SEARCH_SCHEMA();
   const client = await getPool().connect();
   try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const queryText = `SELECT
-      ei.identifier,
-      e.entity_id,
-      e.canonical_identifier,
-      e.canonical_identifier_type,
-      e.entity_type,
-      e.taxonomy_id,
-      e.entity_attributes,
-      e.sources
-    FROM ${SEARCH_SCHEMA}.entity_identifier ei
-    JOIN ${SEARCH_SCHEMA}.entity e ON e.entity_id = ei.entity_id
-    WHERE %WHERE%
-    ORDER BY e.entity_id`;
-
-    type QueryRow = {
-      identifier: string;
-      entity_id: string;
-      canonical_identifier: string;
-      canonical_identifier_type: string;
+    const lowered = normalized.map((identifier) => identifier.toLowerCase());
+    const result = await client.query<{
+      lookup_identifier: string;
+      entity_id: string | number;
+      id: string;
+      id_type: string;
       entity_type: string | null;
       taxonomy_id: string | null;
-      entity_attributes: unknown;
-      sources: string[];
-    };
-
-    const exactResult = await client.query<QueryRow>(
-      queryText.replace("%WHERE%", `ei.identifier = ANY($1::text[])`),
-      [normalized],
+    }>(
+      `SELECT DISTINCT
+         i.value AS lookup_identifier,
+         e.entity_id,
+         e.id,
+         e.id_type,
+         e.entity_type,
+         e.taxonomy_id
+       FROM ${schema}.identifier i
+       JOIN ${schema}.entity_evidence_identifier eei ON eei.identifier_id = i.identifier_id
+       JOIN ${schema}.entity_evidence_resolution eer ON eer.entity_evidence_id = eei.entity_evidence_id
+       JOIN ${schema}.entity e ON e.entity_id = eer.entity_id
+       WHERE LOWER(i.value) = ANY($1::text[])
+       ORDER BY e.entity_id`,
+      [lowered],
     );
-
-    const exactMatchedKeys = new Set(exactResult.rows.map((row) => row.identifier.toLowerCase()));
-    const loweredMisses = Array.from(
-      new Set(
-        normalized
-          .map((identifier) => identifier.toLowerCase())
-          .filter((identifier) => !exactMatchedKeys.has(identifier)),
-      ),
-    );
-
-    const fallbackResult = loweredMisses.length
-      ? await client.query<QueryRow>(
-          queryText.replace("%WHERE%", `LOWER(ei.identifier) = ANY($1::text[])`),
-          [loweredMisses],
-        )
-      : { rows: [] as QueryRow[] };
 
     const matchMap = new Map<string, string[]>();
     const entityMap = new Map<number, Entity>();
-
-    for (const row of [...exactResult.rows, ...fallbackResult.rows]) {
-      const key = row.identifier.toLowerCase();
+    for (const row of result.rows) {
       const entityPk = Number(row.entity_id);
       const entityRow: Entity = {
         entityPk,
-        canonicalIdentifier: row.canonical_identifier,
-        canonicalIdentifierType: row.canonical_identifier_type,
+        canonicalIdentifier: row.id,
+        canonicalIdentifierType: row.id_type,
         entityType: row.entity_type,
         taxonomyId: row.taxonomy_id,
-        entityAttributes: row.entity_attributes as Entity["entityAttributes"],
-        sources: row.sources,
+        entityAttributes: null,
+        sources: [],
       };
+      entityMap.set(entityPk, entityRow);
 
-      if (!entityMap.has(entityPk)) {
-        entityMap.set(entityPk, entityRow);
-      }
-
-      const entityIds = matchMap.get(key) || [];
-      const entityId = toPublicEntityId(entityRow);
-      if (!entityIds.includes(entityId)) {
-        entityIds.push(entityId);
-      }
-      matchMap.set(key, entityIds);
+      const key = row.lookup_identifier.toLowerCase();
+      const ids = matchMap.get(key) ?? [];
+      const publicId = toPublicEntityId(entityRow);
+      if (!ids.includes(publicId)) ids.push(publicId);
+      matchMap.set(key, ids);
     }
 
     return {

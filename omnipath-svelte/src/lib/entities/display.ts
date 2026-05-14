@@ -33,6 +33,11 @@ export function isSmallMoleculeEntity(entity: EntityLike): boolean {
     || typeLabel === "lipid";
 }
 
+export function isCvTermEntity(entity: EntityLike): boolean {
+  const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
+  return typeLabel === "cvterm";
+}
+
 export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[] {
   const typedEntity = entity as { identifiers?: unknown };
   const raw = Array.isArray(typedEntity.identifiers) ? typedEntity.identifiers : [];
@@ -65,6 +70,10 @@ export function getIdentifierTypeLabel(identifierType: string): string {
 
   if (parts.length >= 3 && /^[A-Z][A-Z0-9_-]*$/.test(parts[0])) {
     return parts.slice(2).join(":").trim() || text;
+  }
+
+  if (parts.length >= 3 && /^[A-Z][A-Z0-9_-]*$/.test(parts[parts.length - 2])) {
+    return parts.slice(0, -2).join(":").trim() || text;
   }
 
   return parts[parts.length - 1]?.trim() || text;
@@ -190,12 +199,14 @@ export function getAllowedEntityDescriptions(entity: EntityLike): string[] {
   if (!Array.isArray(entity.entityAttributes)) return [];
 
   const allowedTerms = new Set(DESCRIPTION_ATTRIBUTE_TERM_KEYS.map((term) => term.toLowerCase()));
+  const allowedLabels = new Set(DESCRIPTION_ATTRIBUTE_TERM_KEYS.map((term) => getIdentifierTypeLabel(term).toLowerCase()));
 
   return entity.entityAttributes.flatMap((attribute) => {
     if (!isObject(attribute)) return [];
     const term = typeof attribute.term === "string" ? attribute.term.trim().toLowerCase() : "";
     const value = typeof attribute.value === "string" ? attribute.value.trim() : "";
-    if (!term || !value || !allowedTerms.has(term)) return [];
+    const label = getIdentifierTypeLabel(term).toLowerCase();
+    if (!term || !value || (!allowedTerms.has(term) && !allowedLabels.has(label))) return [];
     return [value];
   });
 }
@@ -265,6 +276,12 @@ export function getEntityDisplayName(entity: EntityLike): string {
 export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   const { names, geneSymbols } = classifyEntityIdentifiers(entity);
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
+
+  if (isCvTermEntity(entity)) {
+    const primary = names[0];
+    const canonicalIdentifier = entity.canonicalIdentifier || undefined;
+    return primary && canonicalIdentifier && primary !== canonicalIdentifier ? canonicalIdentifier : undefined;
+  }
 
   if (entityTypeLabel === "protein") {
     const canonicalIdentifier = entity.canonicalIdentifier || undefined;

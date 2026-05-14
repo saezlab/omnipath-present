@@ -1,6 +1,4 @@
-import { asc } from 'drizzle-orm';
-import { resources } from '$lib/drizzle';
-import { getDb } from '$lib/server/db/client';
+import { getPool } from '$lib/server/db/client';
 
 export interface ResourceRecord {
 	resource_id: string;
@@ -35,34 +33,75 @@ export interface ResourcesSummary {
 	categoryCounts: Record<string, number>;
 }
 
-function normalizeTextArray(values: string[] | null | undefined): string[] {
-	return (values || []).filter(Boolean);
+function normalizeTextArray(values: unknown): string[] {
+	return Array.isArray(values) ? values.map(String).filter(Boolean) : [];
 }
 
-export async function listResources(): Promise<ResourceRecord[]> {
-	const db = getDb();
-	const rows = await db.select().from(resources).orderBy(asc(resources.resourceName), asc(resources.resourceId));
+function normalizeNumber(value: unknown): number {
+	const parsed = Number(value || 0);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
 
-	return rows.map((row) => ({
-		resource_id: row.resourceId,
-		resource_name: row.resourceName || row.resourceId,
-		resource_kind: row.resourceKind,
-		description: row.description,
-		homepage_url: row.homepageUrl,
-		license: row.license,
-		pubmed_id: row.pubmedId,
-		categories: normalizeTextArray(row.categories),
-		annotation_ontologies: normalizeTextArray(row.annotationOntologies),
-		entity_count: row.entityCount || 0,
-		interaction_count: row.interactionCount || 0,
-		association_count: row.associationCount || 0,
-		identifier_count: row.identifierCount || 0,
-		ontology_term_count: row.ontologyTermCount || 0,
-		total_size_bytes: row.totalSizeBytes || 0,
-		last_downloaded_at: row.lastDownloadedAt,
-		last_built_at: row.lastBuiltAt,
-		build_status: row.buildStatus
-	}));
+function normalizeDate(value: unknown): string | null {
+	if (value instanceof Date) return value.toISOString();
+	return typeof value === 'string' ? value : null;
+}
+
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || 'minimal';
+
+export async function listResources(): Promise<ResourceRecord[]> {
+	const schema = SEARCH_SCHEMA();
+	const client = await getPool().connect();
+	try {
+		const result = await client.query<Record<string, unknown>>(
+			`SELECT
+			   resource_id,
+			   resource_name,
+			   description,
+			   homepage_url,
+			   license,
+			   pubmed_id,
+			   resource_kind,
+			   categories,
+			   annotation_ontologies,
+			   entity_count,
+			   interaction_count,
+			   association_count,
+			   identifier_count,
+			   ontology_term_count,
+			   total_size_bytes,
+			   last_downloaded_at,
+			   last_built_at,
+			   build_status
+			 FROM ${schema}.resources
+			 ORDER BY total_size_bytes DESC, resource_id`,
+		);
+
+		return result.rows
+			.map((row) => ({
+				resource_id: String(row.resource_id || ''),
+				resource_name: String(row.resource_name || row.resource_id || ''),
+				resource_kind: typeof row.resource_kind === 'string' ? row.resource_kind : null,
+				description: typeof row.description === 'string' ? row.description : null,
+				homepage_url: typeof row.homepage_url === 'string' ? row.homepage_url : null,
+				license: typeof row.license === 'string' ? row.license : null,
+				pubmed_id: typeof row.pubmed_id === 'string' ? row.pubmed_id : null,
+				categories: normalizeTextArray(row.categories),
+				annotation_ontologies: normalizeTextArray(row.annotation_ontologies),
+				entity_count: normalizeNumber(row.entity_count),
+				interaction_count: normalizeNumber(row.interaction_count),
+				association_count: normalizeNumber(row.association_count),
+				identifier_count: normalizeNumber(row.identifier_count),
+				ontology_term_count: normalizeNumber(row.ontology_term_count),
+				total_size_bytes: normalizeNumber(row.total_size_bytes),
+				last_downloaded_at: normalizeDate(row.last_downloaded_at),
+				last_built_at: normalizeDate(row.last_built_at),
+				build_status: typeof row.build_status === 'string' ? row.build_status : null
+			}))
+			.filter((row: ResourceRecord) => row.resource_id);
+	} finally {
+		client.release();
+	}
 }
 
 export function summarizeResources(resources: ResourceRecord[]): ResourcesSummary {

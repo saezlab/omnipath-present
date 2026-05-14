@@ -22,7 +22,6 @@ export interface SearchFilters {
   content_category_cv_terms?: string[];
   ncbi_tax_id?: string[];
   ontology_terms?: string[];
-  ontology_prefixes?: string[];
   ontology_ids?: string[];
 
   parent_entity_ids?: Array<string | number>;
@@ -66,4 +65,3 @@ export interface SearchSource {
   function_records_json?: string;
   [key: string]: unknown;
 }
-

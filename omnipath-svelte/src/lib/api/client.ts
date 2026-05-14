@@ -84,6 +84,7 @@ export async function fetchEntityFilterOptions() {
   return res.json() as Promise<{
     entity_types: string[];
     sources: string[];
+    taxonomy_ids: string[];
   }>;
 }
 
@@ -177,6 +178,7 @@ export async function fetchEntitiesByPks(pks: number[]) {
 
 export async function fetchOntologySearch(params: {
   query?: string;
+  prefixes?: string[];
   ontologyIds?: string[];
   limit?: number;
   offset?: number;
@@ -185,6 +187,7 @@ export async function fetchOntologySearch(params: {
   if (params.query) url.searchParams.set("q", params.query);
   if (params.limit != null) url.searchParams.set("limit", String(params.limit));
   if (params.offset != null) url.searchParams.set("offset", String(params.offset));
+  if (params.prefixes?.length) url.searchParams.set("prefixes", params.prefixes.join(","));
   if (params.ontologyIds?.length) url.searchParams.set("ontologyIds", params.ontologyIds.join(","));
 
   const res = await fetch(url);
@@ -209,6 +212,7 @@ export async function fetchScopedOntologySearch(params: {
   entityPks?: number[];
   termIds?: string[];
   query?: string;
+  prefixes?: string[];
   ontologyIds?: string[];
   limit?: number;
   offset?: number;
@@ -220,6 +224,7 @@ export async function fetchScopedOntologySearch(params: {
       entityPks: params.entityPks || [],
       termIds: params.termIds || [],
       query: params.query || "",
+      prefixes: params.prefixes,
       ontologyIds: params.ontologyIds,
       limit: params.limit ?? 24,
       offset: params.offset ?? 0,

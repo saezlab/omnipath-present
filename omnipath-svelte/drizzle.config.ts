@@ -1,7 +1,8 @@
 import { config } from 'dotenv';
 import { defineConfig } from 'drizzle-kit';
 
-config({ path: '.env.local' });
+config({ path: '.env' });
+config({ path: '.env.local', override: true });
 
 export default defineConfig({
   out: './src/lib/drizzle',
@@ -10,6 +11,7 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
+  schemaFilter: [process.env.OMNIPATH_PG_SCHEMA || 'minimal'],
   verbose: true,
   casing: 'snake_case'
 });

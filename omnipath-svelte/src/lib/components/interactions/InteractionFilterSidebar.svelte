@@ -5,6 +5,7 @@
   import { Label } from '$lib/components/ui/label/index.js';
   import type { SearchFilters } from '$lib/types/search';
   import { fetchScopedRelationFacetCounts } from '$lib/api/client';
+  import { getIdentifierTypeLabel } from '$lib/entities/display';
   import { getEntityTypeEmoji } from '$lib/utils/entity-types';
   import { formatNumber } from '$lib/utils/format';
 
@@ -121,8 +122,7 @@
   }
 
   function formatParticipantType(value: string) {
-    const parts = value.split(':');
-    const label = parts.length >= 3 ? parts.slice(2).join(':') : value;
+    const label = getIdentifierTypeLabel(value);
     return {
       label,
       icon: getEntityTypeEmoji(label),
