@@ -25,7 +25,7 @@
 	<title>OmniPath Skills</title>
 	<meta
 		name="description"
-		content="Download or copy OmniPath coding-agent skills for subset exports and resource zip workflows."
+		content="Download or copy the OmniPath coding-agent skill for Postgres-backed API workflows."
 	/>
 </svelte:head>
 

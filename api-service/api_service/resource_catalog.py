@@ -1,37 +1,88 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
-import polars as pl
-from fastapi import HTTPException
+from datetime import datetime
+from typing import Any
 
 
-def get_data_root() -> Path:
-    return Path(os.getenv("OMNIPATH_PARQUET_DIR", os.getenv("ONTOLOGY_DATA_DIR", "./data"))).expanduser().resolve()
+def _database_url() -> str:
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    return url
 
 
-def get_resources_parquet_path() -> Path:
-    parquet_path = get_data_root() / "resources.parquet"
-    if not parquet_path.exists() or not parquet_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Resources parquet not found: {parquet_path}")
-    return parquet_path
+def _schema() -> str:
+    return os.getenv("OMNIPATH_PG_SCHEMA", "minimal")
 
 
-def list_resources() -> list[dict]:
-    parquet_path = get_resources_parquet_path()
-    df = pl.read_parquet(parquet_path)
+def _connect():
+    import psycopg
+    from psycopg.rows import dict_row
 
-    rows: list[dict] = []
-    for row in df.to_dicts():
-        normalized: dict = {}
-        for key, value in row.items():
-            if isinstance(value, list):
-                normalized[key] = value
-            elif value is None:
-                normalized[key] = None
-            else:
-                normalized[key] = value
-        rows.append(normalized)
+    return psycopg.connect(_database_url(), row_factory=dict_row)
 
-    return rows
+
+def _as_text_array(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    return []
+
+
+def _as_iso(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value if isinstance(value, str) else None
+
+
+def list_resources() -> list[dict[str, Any]]:
+    sql = f"""
+        SELECT
+          resource_id,
+          resource_name,
+          description,
+          homepage_url,
+          license,
+          pubmed_id,
+          resource_kind,
+          categories,
+          annotation_ontologies,
+          entity_count,
+          interaction_count,
+          association_count,
+          identifier_count,
+          ontology_term_count,
+          total_size_bytes,
+          last_downloaded_at,
+          last_built_at,
+          build_status
+        FROM {_schema()}.resources
+        ORDER BY total_size_bytes DESC, resource_id
+    """
+
+    with _connect() as conn:
+        rows = conn.execute(sql).fetchall()
+
+    return [
+        {
+            "resource_id": row["resource_id"],
+            "resource_name": row["resource_name"] or row["resource_id"],
+            "description": row["description"],
+            "homepage_url": row["homepage_url"],
+            "license": row["license"],
+            "pubmed_id": row["pubmed_id"],
+            "resource_kind": row["resource_kind"],
+            "categories": _as_text_array(row["categories"]),
+            "annotation_ontologies": _as_text_array(row["annotation_ontologies"]),
+            "entity_count": int(row["entity_count"] or 0),
+            "interaction_count": int(row["interaction_count"] or 0),
+            "association_count": int(row["association_count"] or 0),
+            "identifier_count": int(row["identifier_count"] or 0),
+            "ontology_term_count": int(row["ontology_term_count"] or 0),
+            "total_size_bytes": int(row["total_size_bytes"] or 0),
+            "last_downloaded_at": _as_iso(row["last_downloaded_at"]),
+            "last_built_at": _as_iso(row["last_built_at"]),
+            "build_status": row["build_status"],
+        }
+        for row in rows
+    ]

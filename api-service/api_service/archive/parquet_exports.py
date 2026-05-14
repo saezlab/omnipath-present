@@ -1,4 +1,8 @@
-"""Graph-native Parquet filtering and export helpers."""
+"""Archived graph-native Parquet filtering and export helpers.
+
+This module is retained for reference while the active API service uses
+Postgres-backed endpoints only.
+"""
 
 from __future__ import annotations
 

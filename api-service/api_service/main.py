@@ -1,18 +1,11 @@
 """FastAPI application for API service."""
 
-import json
 import logging
-import os
 import re
-import tempfile
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from pathlib import Path
-from time import perf_counter
 
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
-from pydantic import ValidationError
+from fastapi import Body, FastAPI, HTTPException, Query
 
 from .models import (
     TermInfo,
@@ -27,20 +20,11 @@ from .models import (
     TreeResponse,
     OntologyInfo,
     OntologiesResponse,
-    EntityExportRequest,
-    RelationExportRequest,
-    AnnotationExportRequest,
-    RelationContextExportRequest,
-    ResourceDownloadRequest,
-    SliceRequest,
-    SliceResponse,
     EntityResolveRequest,
-    EntityResolveMatch,
     EntityResolveResponse,
 )
 from .registry import registry
 from .resource_catalog import list_resources
-from .resource_downloads import build_multi_resource_download, build_single_resource_download
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -260,88 +244,33 @@ async def list_ontologies():
     return OntologiesResponse(ontologies=ontologies)
 
 
-def _database_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
-    return url
-
-
 def _normalize_identifiers(identifiers: list[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for identifier in identifiers:
         value = str(identifier).strip()
-        key = value.lower()
-        if not value or key in seen:
+        if not value or value in seen:
             continue
-        seen.add(key)
+        seen.add(value)
         normalized.append(value)
     return normalized
 
 
-SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
-
-
 @app.post("/entities/resolve", response_model=EntityResolveResponse)
 def resolve_entities(request: EntityResolveRequest):
-    """Resolve raw identifiers to candidate entity primary keys using Postgres."""
+    """Resolve raw identifiers to exact candidate entity primary keys using Postgres."""
     identifiers = _normalize_identifiers(request.identifiers)
     if not identifiers:
         raise HTTPException(status_code=400, detail="No identifiers provided")
 
-    try:
-        import psycopg
-        from psycopg.rows import dict_row
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail="Postgres driver is not installed") from exc
+    from .graph import resolve_entities as resolve_graph_entities
 
-    query = f"""
-        SELECT
-            ei.identifier,
-            e.entity_pk,
-            e.canonical_identifier,
-            e.canonical_identifier_type,
-            e.entity_type,
-            e.taxonomy_id,
-            e.entity_attributes,
-            e.sources
-        FROM {SEARCH_SCHEMA}.entity_identifier ei
-        JOIN {SEARCH_SCHEMA}.entity e ON e.entity_pk = ei.entity_pk
-        WHERE {{where_clause}}
-        ORDER BY e.entity_pk
-    """
-
-    lookup_identifiers = sorted({identifier.lower() for identifier in identifiers})
-
-    with psycopg.connect(_database_url(), row_factory=dict_row) as conn:
-        rows = list(conn.execute(query.format(where_clause="LOWER(ei.identifier) = ANY(%s)"), (lookup_identifiers,)))
-
-    match_map: dict[str, list[int]] = {}
-    entities_by_pk: dict[int, dict] = {}
-    for row in rows:
-        entity_pk = int(row["entity_pk"])
-        key = str(row["identifier"]).lower()
-        match_map.setdefault(key, [])
-        if entity_pk not in match_map[key]:
-            match_map[key].append(entity_pk)
-        entities_by_pk.setdefault(entity_pk, {
-            "entity_pk": entity_pk,
-            "canonical_identifier": row["canonical_identifier"],
-            "canonical_identifier_type": row["canonical_identifier_type"],
-            "entity_type": row["entity_type"],
-            "taxonomy_id": row["taxonomy_id"],
-            "entity_attributes": row["entity_attributes"],
-            "sources": row["sources"] or [],
-        })
-
-    return EntityResolveResponse(
-        matches=[
-            EntityResolveMatch(identifier=identifier, entityPks=match_map.get(identifier.lower(), []))
-            for identifier in identifiers
-        ],
-        entities=list(entities_by_pk.values()),
-    )
+    return resolve_graph_entities({
+        "identifiers": identifiers,
+        "filters": request.filters,
+        "preferredTaxonomyIds": request.preferredTaxonomyIds,
+        "limit": request.limit,
+    })
 
 
 # --- Term lookup ---
@@ -556,12 +485,112 @@ def get_entities_scoped_facets(payload: dict = Body(default_factory=dict)):
     return scoped_entity_facet_counts(payload)
 
 
+@app.get("/sources")
+def get_available_sources(domain: str | None = None):
+    """Return available source values with entity/relation counts."""
+    from .facets import list_sources
+
+    return {"sources": list_sources(domain)}
+
+
+@app.post("/entities/search")
+def post_entities_search(payload: dict = Body(default_factory=dict)):
+    """Search entities by identifier/name and optional annotation/type/source/taxon filters."""
+    from .graph import search_entities
+
+    return search_entities(payload)
+
+
+@app.get("/entities/search")
+def get_entities_search(
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Search entities by identifier/name using query parameters."""
+    from .graph import search_entities
+
+    return search_entities({"query": q, "limit": limit, "offset": offset})
+
+
+@app.post("/entities/by-pks")
+def post_entities_by_pks(payload: dict = Body(default_factory=dict)):
+    """Hydrate entity primary keys into entity records with identifiers."""
+    from .graph import entities_by_pks
+
+    return {"entities": entities_by_pks(payload.get("entityPks") or payload.get("entity_pks") or payload.get("pks") or [])}
+
+
+@app.post("/ontology/entities")
+def post_entities_for_ontology_terms(payload: dict = Body(default_factory=dict)):
+    """Return entities annotated by one or more ontology term IDs."""
+    from .graph import entities_for_terms
+
+    return entities_for_terms(payload)
+
+
 @app.post("/relations/scoped-facets")
 def get_relations_scoped_facets(payload: dict = Body(default_factory=dict)):
     """Return relation facet counts after applying the current relation scope/filters."""
     from .facets import scoped_relation_facet_counts
 
     return scoped_relation_facet_counts(payload)
+
+
+@app.post("/relations/search")
+def post_relations_search(payload: dict = Body(default_factory=dict)):
+    """Search relations by entity scope, predicate, relation category, source, or ontology terms."""
+    from .graph import search_relations
+
+    return search_relations(payload)
+
+
+@app.get("/relations/search")
+def get_relations_search(
+    entityPks: str | None = None,
+    predicates: str | None = None,
+    relationCategories: str | None = None,
+    annotationTerms: str | None = None,
+    requireBothParticipants: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Search relations using query parameters."""
+    from .graph import search_relations
+
+    return search_relations({
+        "filters": {
+            "entityPks": [value for value in (entityPks or "").split(",") if value],
+            "predicates": [value for value in (predicates or "").split(",") if value],
+            "relationCategories": [value for value in (relationCategories or "").split(",") if value],
+            "annotationTerms": [value for value in (annotationTerms or "").split(",") if value],
+            "requireBothParticipants": requireBothParticipants,
+        },
+        "limit": limit,
+        "offset": offset,
+    })
+
+
+@app.get("/relations/{relation_id}")
+def get_relation_record(relation_id: int):
+    """Return one relation with hydrated subject and object entities."""
+    from .graph import get_relation
+
+    relation = get_relation(relation_id)
+    if relation is None:
+        raise HTTPException(status_code=404, detail=f"Relation '{relation_id}' not found")
+    return relation
+
+
+@app.get("/relations/{relation_id}/evidence")
+def get_relation_evidence(relation_id: int):
+    """Return evidence and annotations for a relation."""
+    from .graph import relation_evidence
+
+    result = relation_evidence(relation_id)
+    if not result["evidence"]:
+        raise HTTPException(status_code=404, detail=f"Relation '{relation_id}' evidence not found")
+    return result
 
 
 @app.post("/ontology/scoped-search")
@@ -594,280 +623,9 @@ def get_ontology_scoped_search(
     })
 
 
-# --- Data export ---
-
-
-def _build_file_response(*, path: Path, media_type: str, filename: str, background_tasks: BackgroundTasks, temporary: bool):
-    if temporary:
-        background_tasks.add_task(lambda p: Path(p).unlink(missing_ok=True), str(path))
-
-    return FileResponse(
-        path=str(path),
-        media_type=media_type,
-        filename=filename,
-    )
-
-
-def _parse_export_request_from_query(
-    model_class,
-    *,
-    query: str = "",
-    filters: str | None = None,
-    filename: str | None = None,
-):
-    filters_payload: dict = {}
-    if filters:
-        try:
-            parsed = json.loads(filters)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Invalid filters JSON") from exc
-        if not isinstance(parsed, dict):
-            raise HTTPException(status_code=400, detail="filters must decode to a JSON object")
-        filters_payload = parsed
-
-    try:
-        return model_class.model_validate({
-            "query": query or "",
-            "filters": filters_payload,
-            "filename": filename,
-        })
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-
-
-def _filters_payload(request) -> dict:
-    if hasattr(request.filters, "model_dump"):
-        return request.filters.model_dump(exclude_none=True)
-    return dict(request.filters or {})
-
-
-def _run_export(
-    *,
-    request: EntityExportRequest | RelationExportRequest | AnnotationExportRequest,
-    background_tasks: BackgroundTasks,
-    write_subset_direct,
-    default_filename: str,
-    log_label: str,
-):
-    try:
-        filters_payload = _filters_payload(request)
-
-        temp_file = tempfile.NamedTemporaryFile(prefix=f"{default_filename}_", suffix=".parquet", delete=False)
-        temp_path = Path(temp_file.name)
-        temp_file.close()
-
-        started = perf_counter()
-        row_count = write_subset_direct(request.query or "", filters_payload, temp_path)
-        elapsed_ms = int((perf_counter() - started) * 1000)
-
-        safe_name = (request.filename or default_filename).strip() or default_filename
-        download_name = safe_name if safe_name.lower().endswith(".parquet") else f"{safe_name}.parquet"
-
-        response = _build_file_response(
-            path=temp_path,
-            media_type="application/x-parquet",
-            filename=download_name,
-            background_tasks=background_tasks,
-            temporary=True,
-        )
-        response.headers["X-Export-Row-Count"] = str(row_count)
-        response.headers["X-Export-Strategy"] = "parquet"
-        response.headers["X-Export-Duration-Ms"] = str(elapsed_ms)
-        return response
-
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("%s export failed", log_label)
-        raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
-
-
-@app.post("/exports/entities/parquet")
-def export_entities_parquet(request: EntityExportRequest, background_tasks: BackgroundTasks):
-    from .exports import write_entity_subset_parquet_direct
-
-    return _run_export(
-        request=request,
-        background_tasks=background_tasks,
-        write_subset_direct=write_entity_subset_parquet_direct,
-        default_filename="entities_subset",
-        log_label="Entity",
-    )
-
-
-@app.get("/exports/entities/parquet")
-def export_entities_parquet_get(
-    background_tasks: BackgroundTasks,
-    query: str = "",
-    filters: str | None = Query(default=None),
-    filename: str | None = None,
-):
-    request = _parse_export_request_from_query(
-        EntityExportRequest,
-        query=query,
-        filters=filters,
-        filename=filename,
-    )
-    return export_entities_parquet(request, background_tasks)
-
-
-@app.post("/exports/annotations/parquet")
-def export_annotations_parquet(request: AnnotationExportRequest, background_tasks: BackgroundTasks):
-    from .exports import write_annotation_subset_parquet_direct
-
-    return _run_export(
-        request=request,
-        background_tasks=background_tasks,
-        write_subset_direct=write_annotation_subset_parquet_direct,
-        default_filename="annotations_subset",
-        log_label="Annotation",
-    )
-
-
-@app.get("/exports/annotations/parquet")
-def export_annotations_parquet_get(
-    background_tasks: BackgroundTasks,
-    query: str = "",
-    filters: str | None = Query(default=None),
-    filename: str | None = None,
-):
-    request = _parse_export_request_from_query(
-        AnnotationExportRequest,
-        query=query,
-        filters=filters,
-        filename=filename,
-    )
-    return export_annotations_parquet(request, background_tasks)
-
-
-@app.post("/exports/relations/parquet")
-def export_relations_parquet(request: RelationExportRequest, background_tasks: BackgroundTasks):
-    from .exports import write_relation_subset_parquet_direct
-
-    return _run_export(
-        request=request,
-        background_tasks=background_tasks,
-        write_subset_direct=write_relation_subset_parquet_direct,
-        default_filename="relations_subset",
-        log_label="Relation",
-    )
-
-
-@app.post("/exports/relation-context/zip")
-def export_relation_context_zip(request: RelationContextExportRequest, background_tasks: BackgroundTasks):
-    from .exports import build_relation_context_zip
-
-    try:
-        artifact, manifest = build_relation_context_zip(
-            filters=request.filters,
-            require_both_participants_in_entity_scope=request.require_both_participants_in_entity_scope,
-            include_annotations=request.include_annotations,
-            include_evidence=request.include_evidence,
-            filename=request.filename,
-        )
-        response = _build_file_response(
-            path=artifact.path,
-            media_type=artifact.media_type,
-            filename=artifact.filename,
-            background_tasks=background_tasks,
-            temporary=artifact.is_temporary,
-        )
-        response.headers["X-Export-Relations-Count"] = str(manifest["relations_count"])
-        response.headers["X-Export-Entities-Count"] = str(manifest["entities_count"])
-        response.headers["X-Export-Annotations-Count"] = str(manifest["annotations_count"])
-        return response
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Relation context export failed")
-        raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
-
-
-@app.get("/exports/relations/parquet")
-def export_relations_parquet_get(
-    background_tasks: BackgroundTasks,
-    query: str = "",
-    filters: str | None = Query(default=None),
-    filename: str | None = None,
-):
-    request = _parse_export_request_from_query(
-        RelationExportRequest,
-        query=query,
-        filters=filters,
-        filename=filename,
-    )
-    return export_relations_parquet(request, background_tasks)
-
-
-@app.post("/entities/slice", response_model=SliceResponse)
-def get_entities_slice(request: SliceRequest):
-    from .exports import collect_entity_slice
-
-    rows, total = collect_entity_slice(request.query, request.filters, limit=request.limit, offset=request.offset)
-    return SliceResponse(rows=rows, total=total, limit=request.limit, offset=request.offset)
-
-
-@app.post("/relations/slice", response_model=SliceResponse)
-def get_relations_slice(request: SliceRequest):
-    from .exports import collect_relation_slice
-
-    rows, total = collect_relation_slice(request.query, request.filters, limit=request.limit, offset=request.offset)
-    return SliceResponse(rows=rows, total=total, limit=request.limit, offset=request.offset)
-
-
-@app.get("/relations/{relation_pk}/evidence")
-def get_relation_evidence(relation_pk: int):
-    from .exports import collect_relation_evidence
-
-    rows = collect_relation_evidence(relation_pk)
-    if not rows:
-        raise HTTPException(status_code=404, detail=f"Relation '{relation_pk}' evidence not found")
-    return {"relation_pk": relation_pk, "evidence": rows}
-
-
-@app.get("/relation-evidence/{relation_evidence_pk}")
-def get_relation_evidence_record(relation_evidence_pk: int):
-    from .exports import collect_relation_evidence_by_pk
-
-    row = collect_relation_evidence_by_pk(relation_evidence_pk)
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Relation evidence '{relation_evidence_pk}' not found")
-    return row
+# --- Postgres graph data ---
 
 
 @app.get("/resources")
 def get_resources_catalog():
     return list_resources()
-
-
-@app.get("/resources/{resource_id}/download")
-def download_single_resource(resource_id: str, background_tasks: BackgroundTasks):
-    artifact = build_single_resource_download(resource_id)
-    response = _build_file_response(
-        path=artifact.path,
-        media_type=artifact.media_type,
-        filename=artifact.filename,
-        background_tasks=background_tasks,
-        temporary=artifact.is_temporary,
-    )
-    response.headers["X-Resource-Download-Mode"] = "single"
-    response.headers["X-Resource-Id"] = resource_id
-    return response
-
-
-@app.post("/resources/download")
-def download_multiple_resources(request: ResourceDownloadRequest, background_tasks: BackgroundTasks):
-    artifact = build_multi_resource_download(request.resource_ids, filename=request.filename)
-    response = _build_file_response(
-        path=artifact.path,
-        media_type=artifact.media_type,
-        filename=artifact.filename,
-        background_tasks=background_tasks,
-        temporary=artifact.is_temporary,
-    )
-    response.headers["X-Resource-Download-Mode"] = "bundle"
-    response.headers["X-Resource-Count"] = str(len(request.resource_ids))
-    return response
-
-

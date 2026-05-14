@@ -1,8 +1,5 @@
 """Tests for ontology service API."""
 
-from pathlib import Path
-import tempfile
-
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
@@ -195,54 +192,138 @@ def test_relation_scoped_facets_endpoint(client):
 def test_ontology_scoped_search_endpoint(client):
     with patch("api_service.facets.search_ontology_terms") as mock_search:
         mock_search.return_value = [{"termId": "GO:0006915", "label": "apoptotic process"}]
-        response = client.post("/ontology/scoped-search", json={"query": "apoptosis"})
+        response = client.post("/ontology/scoped-search", json={"query": "apoptosis", "filters": {"sources": ["signor"]}})
 
     assert response.status_code == 200
     assert response.json()[0]["termId"] == "GO:0006915"
+    mock_search.assert_called_once_with({"query": "apoptosis", "filters": {"sources": ["signor"]}})
 
 
-def test_download_single_resource(client):
-    """Single-resource downloads serve the prebuilt archive."""
-    from api_service.resource_downloads import DownloadArtifact
-
-    with tempfile.TemporaryDirectory() as tmp:
-        artifact_path = Path(tmp) / "signor.zip"
-        artifact_path.write_bytes(b"zip-bytes")
-
-        with patch("api_service.main.build_single_resource_download") as mock_download:
-            mock_download.return_value = DownloadArtifact(
-                path=artifact_path,
-                media_type="application/zip",
-                filename="signor.zip",
-                is_temporary=False,
-            )
-            response = client.get("/resources/signor/download")
+def test_sources_endpoint(client):
+    with patch("api_service.facets.list_sources") as mock_sources:
+        mock_sources.return_value = [{"source": "signor", "entityCount": 2, "relationCount": 3, "totalCount": 5}]
+        response = client.get("/sources?domain=relation")
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/zip"
-    assert "signor.zip" in response.headers["content-disposition"]
-    assert response.content == b"zip-bytes"
+    assert response.json()["sources"][0]["source"] == "signor"
+    mock_sources.assert_called_once_with("relation")
 
 
-
-def test_download_multiple_resources(client):
-    """Multi-resource downloads return a zip bundle."""
-    from api_service.resource_downloads import DownloadArtifact
-
-    with tempfile.TemporaryDirectory() as tmp:
-        artifact_path = Path(tmp) / "resources.zip"
-        artifact_path.write_bytes(b"zip-bytes")
-
-        with patch("api_service.main.build_multi_resource_download") as mock_download:
-            mock_download.return_value = DownloadArtifact(
-                path=artifact_path,
-                media_type="application/zip",
-                filename="resources_bundle.zip",
-                is_temporary=False,
-            )
-            response = client.post("/resources/download", json={"resource_ids": ["signor", "reactome"]})
+def test_entities_resolve_endpoint(client):
+    with patch("api_service.graph.resolve_entities") as mock_resolve:
+        mock_resolve.return_value = {
+            "matches": [
+                {
+                    "identifier": "TP53",
+                    "entityPks": [128747],
+                    "candidates": [
+                        {
+                            "entityPk": 128747,
+                            "canonicalIdentifier": "P04637",
+                            "taxonomyId": "9606",
+                            "identifiers": [{"identifier": "TP53", "identifierType": "Gene Name Primary:OM:0200"}],
+                        }
+                    ],
+                    "ambiguous": False,
+                    "bestEntityPk": 128747,
+                }
+            ],
+            "entities": [{"entityPk": 128747, "canonicalIdentifier": "P04637"}],
+        }
+        response = client.post(
+            "/entities/resolve",
+            json={"identifiers": ["TP53"], "filters": {"taxonomyIds": ["9606"]}, "preferredTaxonomyIds": ["9606"]},
+        )
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/zip"
-    assert "resources_bundle.zip" in response.headers["content-disposition"]
-    assert response.content == b"zip-bytes"
+    assert response.json()["matches"][0]["bestEntityPk"] == 128747
+    mock_resolve.assert_called_once_with({
+        "identifiers": ["TP53"],
+        "filters": {"taxonomyIds": ["9606"]},
+        "preferredTaxonomyIds": ["9606"],
+        "limit": 20,
+    })
+
+
+def test_entities_search_endpoint(client):
+    with patch("api_service.graph.search_entities") as mock_search:
+        mock_search.return_value = {
+            "entities": [{"entityPk": 1, "canonicalIdentifier": "P04637"}],
+            "total": 1,
+            "limit": 10,
+            "offset": 0,
+        }
+        response = client.post("/entities/search", json={"query": "TP53", "limit": 10})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["entities"][0]["canonicalIdentifier"] == "P04637"
+    mock_search.assert_called_once_with({"query": "TP53", "limit": 10})
+
+
+def test_entities_by_pks_endpoint(client):
+    with patch("api_service.graph.entities_by_pks") as mock_lookup:
+        mock_lookup.return_value = [{"entityPk": 1, "canonicalIdentifier": "P04637"}]
+        response = client.post("/entities/by-pks", json={"entityPks": [1]})
+
+    assert response.status_code == 200
+    assert response.json()["entities"][0]["entityPk"] == 1
+    mock_lookup.assert_called_once_with([1])
+
+
+def test_ontology_entities_endpoint(client):
+    with patch("api_service.graph.entities_for_terms") as mock_lookup:
+        mock_lookup.return_value = {
+            "entities": [{"entityPk": 1, "canonicalIdentifier": "P04637"}],
+            "total": 1,
+            "limit": 50,
+            "offset": 0,
+        }
+        response = client.post("/ontology/entities", json={"termIds": ["KW-0597"], "filters": {"sources": ["signor"]}})
+
+    assert response.status_code == 200
+    assert response.json()["entities"][0]["entityPk"] == 1
+    mock_lookup.assert_called_once_with({"termIds": ["KW-0597"], "filters": {"sources": ["signor"]}})
+
+
+def test_relations_search_endpoint(client):
+    with patch("api_service.graph.search_relations") as mock_search:
+        mock_search.return_value = {
+            "relations": [{"relationPk": 10, "predicate": "interacts_with"}],
+            "total": 1,
+            "limit": 5,
+            "offset": 0,
+        }
+        response = client.post(
+            "/relations/search",
+            json={"filters": {"entityPks": [1], "predicates": ["interacts_with"]}, "limit": 5},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["relations"][0]["relationPk"] == 10
+    mock_search.assert_called_once_with({"filters": {"entityPks": [1], "predicates": ["interacts_with"]}, "limit": 5})
+
+
+def test_relation_lookup_and_evidence_endpoints(client):
+    with patch("api_service.graph.get_relation") as mock_relation:
+        mock_relation.return_value = {"relationPk": 10, "predicate": "interacts_with"}
+        response = client.get("/relations/10")
+
+    assert response.status_code == 200
+    assert response.json()["relationPk"] == 10
+
+    with patch("api_service.graph.relation_evidence") as mock_evidence:
+        mock_evidence.return_value = {
+            "relationPk": 10,
+            "evidence": [{"relationEvidencePk": 100, "source": "signor"}],
+        }
+        response = client.get("/relations/10/evidence")
+
+    assert response.status_code == 200
+    assert response.json()["evidence"][0]["source"] == "signor"
+
+
+def test_resource_download_routes_are_retired(client):
+    """Resource downloads are not part of the active Postgres-only API."""
+    assert client.get("/resources/signor/download").status_code == 404
+    assert client.post("/resources/download", json={"resource_ids": ["signor", "reactome"]}).status_code == 404

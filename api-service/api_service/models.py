@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -101,113 +101,13 @@ class OntologiesResponse(BaseModel):
     ontologies: list[OntologyInfo]
 
 
-RelationCategory = Literal["interaction", "association"]
-
-
-class EntityFilters(BaseModel):
-    """Graph-native filters for entity slices/exports."""
-
-    entity_pks: list[int] = Field(default_factory=list)
-    entity_ids: list[int] = Field(default_factory=list)
-    entity_types: list[str] = Field(default_factory=list)
-    taxonomy_ids: list[str] = Field(default_factory=list)
-    ncbi_tax_id: list[str] = Field(default_factory=list)
-    sources: list[str] = Field(default_factory=list)
-
-
-class AnnotationFilters(BaseModel):
-    """Graph-native filters for ontology term exports."""
-
-    prefixes: list[str] = Field(default_factory=list)
-    ontology_prefixes: list[str] = Field(default_factory=list)
-    entity_pks: list[int] = Field(default_factory=list)
-
-
-class RelationFilters(BaseModel):
-    """Graph-native filters for relation slices/exports."""
-
-    relation_pks: list[int] = Field(default_factory=list)
-    subject_entity_pks: list[int] = Field(default_factory=list)
-    object_entity_pks: list[int] = Field(default_factory=list)
-    entity_pks: list[int] = Field(default_factory=list)
-    entity_ids: list[int] = Field(default_factory=list)
-    predicates: list[str] = Field(default_factory=list)
-    interaction_types: list[str] = Field(default_factory=list)
-    relation_categories: list[RelationCategory] = Field(default_factory=list)
-    participant_types: list[str] = Field(default_factory=list)
-    sources: list[str] = Field(default_factory=list)
-    annotation_terms: list[str] = Field(default_factory=list)
-    # UI filter key currently used for ontology-term scoped relation filters.
-    ontology_terms: list[str] = Field(default_factory=list)
-    annotation_scopes: list[str] = Field(default_factory=list)
-
-
-class EntityExportRequest(BaseModel):
-    """Request payload for entity subset export."""
-
-    query: str = ""
-    filters: EntityFilters = Field(default_factory=EntityFilters)
-    filename: str | None = None
-
-
-class RelationExportRequest(BaseModel):
-    """Request payload for relation subset export."""
-
-    query: str = ""
-    filters: RelationFilters = Field(default_factory=RelationFilters)
-    filename: str | None = None
-
-
-class AnnotationExportRequest(BaseModel):
-    """Request payload for ontology term export."""
-
-    query: str = ""
-    filters: AnnotationFilters = Field(default_factory=AnnotationFilters)
-    filename: str | None = None
-
-
-class RelationContextExportRequest(BaseModel):
-    """Request payload for bundled relation/entity/annotation context exports."""
-
-    filters: dict[str, Any] = Field(default_factory=dict)
-    require_both_participants_in_entity_scope: bool = True
-    include_annotations: bool = True
-    include_evidence: bool = True
-    filename: str | None = None
-
-
-InteractionContextExportRequest = RelationContextExportRequest
-
-
-class SliceRequest(BaseModel):
-    """Request payload for filtered JSON slices."""
-
-    query: str = ""
-    filters: dict[str, Any] = Field(default_factory=dict)
-    limit: int = Field(default=50, ge=1, le=1000)
-    offset: int = Field(default=0, ge=0)
-
-
-class SliceResponse(BaseModel):
-    """Filtered slice response."""
-
-    rows: list[dict[str, Any]] = Field(default_factory=list)
-    total: int | None = None
-    limit: int
-    offset: int
-
-
-class ResourceDownloadRequest(BaseModel):
-    """Request payload for bundling one or more resource gold artifact sets."""
-
-    resource_ids: list[str] = Field(default_factory=list)
-    filename: str | None = None
-
-
 class EntityResolveRequest(BaseModel):
     """Request payload for identifier-to-entity_pk resolution."""
 
     identifiers: list[str] = Field(default_factory=list)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    preferredTaxonomyIds: list[str] = Field(default_factory=list)
+    limit: int = Field(default=20, ge=1, le=100)
 
 
 class EntityResolveMatch(BaseModel):
@@ -215,6 +115,9 @@ class EntityResolveMatch(BaseModel):
 
     identifier: str
     entityPks: list[int] = Field(default_factory=list)
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    ambiguous: bool = False
+    bestEntityPk: int | None = None
 
 
 class EntityResolveResponse(BaseModel):

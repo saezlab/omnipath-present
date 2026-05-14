@@ -1,7 +1,5 @@
 <script lang="ts">
-	import { BookOpenText, ChevronDown, ChevronUp, Database, Download, ExternalLink, Network, Search, Tags } from '@lucide/svelte';
-	import { toast } from 'svelte-sonner';
-	import { Button } from '$lib/components/ui/button/index.js';
+	import { BookOpenText, ChevronDown, ChevronUp, Database, ExternalLink, Network, Search, Tags } from '@lucide/svelte';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -16,7 +14,6 @@
 	let query = $state('');
 	let selectedCategory = $state('all');
 	let expandedIds = $state<Set<string>>(new Set());
-	let downloadingIds = $state<Set<string>>(new Set());
 
 	const categories = [
 		{ value: 'all', label: 'All' },
@@ -108,33 +105,6 @@
 			? new Set([...expandedIds].filter((id) => id !== resourceId))
 			: new Set(expandedIds).add(resourceId);
 	}
-
-	async function handleDownload(resource: ResourceRecord) {
-		try {
-			downloadingIds = new Set(downloadingIds).add(resource.resource_id);
-			const response = await fetch(`/app-api/resources/${encodeURIComponent(resource.resource_id)}/download`);
-			if (!response.ok) {
-				const text = await response.text();
-				throw new Error(text || `Download failed (${response.status})`);
-			}
-			const disposition = response.headers.get('Content-Disposition') || '';
-			const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
-			const fileName = match?.[1] ? decodeURIComponent(match[1]) : `${resource.resource_id}.zip`;
-			const blob = await response.blob();
-			const url = window.URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = fileName;
-			document.body.appendChild(link);
-			link.click();
-			link.remove();
-			window.URL.revokeObjectURL(url);
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Download failed');
-		} finally {
-			downloadingIds = new Set([...downloadingIds].filter((id) => id !== resource.resource_id));
-		}
-	}
 </script>
 
 
@@ -206,7 +176,6 @@
 					<div class="grid grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
 						{#each filteredResources as resource (resource.resource_id)}
 							{@const expanded = expandedIds.has(resource.resource_id)}
-							{@const downloading = downloadingIds.has(resource.resource_id)}
 							{@const Icon = iconForResource(resource)}
 							<article class="flex h-full flex-col rounded-[1.25rem] border border-border/50 bg-card/70 p-4 transition-all hover:bg-muted/[0.18]">
 								<div class="flex items-start justify-between gap-3">
@@ -250,11 +219,6 @@
 												More details <ChevronDown class="h-4 w-4" />
 											{/if}
 										</button>
-
-										<Button class="rounded-full" variant="outline" size="sm" onclick={() => handleDownload(resource)} disabled={downloading || resource.build_status !== 'success'} title={resource.build_status !== 'success' ? 'No download available for this resource' : undefined}>
-											<Download class="h-4 w-4" />
-											{downloading ? 'Downloading…' : 'Download'}
-										</Button>
 									</div>
 
 									{#if expanded}
