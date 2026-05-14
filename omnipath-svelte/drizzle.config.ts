@@ -11,7 +11,7 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
-  schemaFilter: [process.env.OMNIPATH_PG_SCHEMA || 'minimal'],
+  schemaFilter: [process.env.OMNIPATH_PG_SCHEMA || 'public'],
   verbose: true,
   casing: 'snake_case'
 });

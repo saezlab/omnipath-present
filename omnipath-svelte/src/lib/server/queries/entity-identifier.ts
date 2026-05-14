@@ -2,7 +2,7 @@ import { getPool } from "$lib/server/db/client";
 import type { Entity, EntityIdentifier } from "$lib/drizzle";
 import { normalizeStringValues, toPublicEntityId } from "$lib/entity-public-id";
 
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 export async function getIdentifiersByEntityPk(entityPk: number): Promise<EntityIdentifier[]> {
   return getIdentifiersByEntityPks([entityPk]);

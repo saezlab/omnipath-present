@@ -2,7 +2,7 @@ import { getPool } from "$lib/server/db/client";
 import type { Entity, EntityRelation } from "$lib/drizzle";
 import { toPublicEntityId } from "$lib/entity-public-id";
 
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 export type RelationWithEntities = EntityRelation & {
   subjectEntity: Entity;

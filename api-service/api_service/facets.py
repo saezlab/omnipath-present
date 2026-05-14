@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "minimal")
+SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
 
 
 def _database_url() -> str:

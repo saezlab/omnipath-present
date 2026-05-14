@@ -6,7 +6,7 @@ import os
 from hashlib import md5
 from typing import Any
 
-SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "minimal")
+SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
 CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012"
 
 

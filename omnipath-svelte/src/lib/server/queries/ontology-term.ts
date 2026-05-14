@@ -66,7 +66,7 @@ export async function getOntologyTermsByIds(termIds: string[]): Promise<Ontology
   if (normalized.length === 0) return [];
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query<OntologyTermRow>(
       `SELECT terms.*
        FROM ${ontologyTermsTable(S)}
@@ -99,7 +99,7 @@ export async function searchOntologyTerms({
   const client = await getPool().connect();
 
   try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const params: unknown[] = [];
     const whereParts: string[] = [];
 
@@ -187,7 +187,7 @@ export async function getOntologyPrefixes(): Promise<string[]> {
   ontologyPrefixesInFlight = (async () => {
     const client = await getPool().connect();
     try {
-      const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+      const S = process.env.OMNIPATH_PG_SCHEMA || "public";
       const result = await client.query<{ prefix: string | null }>(
         `SELECT DISTINCT ontology_prefix AS prefix
          FROM ${ontologyTermsTable(S)}
@@ -493,7 +493,7 @@ export async function searchScopedOntologyTerms({
   const client = await getPool().connect();
 
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
 
     // Fast path: use bitmap-based set intersection when the table is populated.
     const bitmapCheck = await client.query<{ ready: boolean }>(
@@ -569,7 +569,7 @@ export async function getScopedOntologyPrefixCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
     const params: unknown[] = [];
 
     const pushParam = (value: unknown): string => {
@@ -684,7 +684,7 @@ export async function getScopedOntologyIdCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -782,7 +782,7 @@ export async function getScopedOntologySourceCounts({
 
   const client = await getPool().connect();
   try {
-    const S = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
     const params: unknown[] = [];
 
     const pushParam = (value: unknown): string => {
@@ -888,7 +888,7 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
 
   const client = await getPool().connect();
   try {
-    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "minimal";
+    const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query(
       `SELECT DISTINCT
          es.id AS canonical_identifier,

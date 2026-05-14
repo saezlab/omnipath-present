@@ -6,7 +6,7 @@ import { parsePublicEntityIds } from "$lib/server/entity-public-id";
 export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; relationCount?: number };
 
 const CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012";
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 export type EntitySearchCursor = {
   relationCount: number;

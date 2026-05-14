@@ -47,7 +47,7 @@ function normalizeDate(value: unknown): string | null {
 	return typeof value === 'string' ? value : null;
 }
 
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || 'minimal';
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || 'public';
 
 export async function listResources(): Promise<ResourceRecord[]> {
 	const schema = SEARCH_SCHEMA();

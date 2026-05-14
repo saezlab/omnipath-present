@@ -27,7 +27,7 @@ For graph data endpoints, point the service at the Postgres database and schema:
 
 ```bash
 export DATABASE_URL=postgresql://user:password@localhost:5432/omnipath
-export OMNIPATH_PG_SCHEMA=minimal
+export OMNIPATH_PG_SCHEMA=public
 ```
 
 ## API Endpoints

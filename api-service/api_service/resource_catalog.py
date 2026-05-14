@@ -13,7 +13,7 @@ def _database_url() -> str:
 
 
 def _schema() -> str:
-    return os.getenv("OMNIPATH_PG_SCHEMA", "minimal")
+    return os.getenv("OMNIPATH_PG_SCHEMA", "public")
 
 
 def _connect():

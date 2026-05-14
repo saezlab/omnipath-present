@@ -1,7 +1,7 @@
 import { pgSchema, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
-export const minimal = pgSchema("minimal");
+export const minimal = pgSchema("public");
 
 const roaringbitmap = customType<{ data: unknown; driverData: unknown }>({
 	dataType() {

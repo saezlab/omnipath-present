@@ -1,7 +1,7 @@
 import { getPool } from "$lib/server/db/client";
 import type { EntityRelationEvidence } from "$lib/drizzle";
 
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 function annotationArraySql(schema: string, whereSql: string): string {
   return `COALESCE((

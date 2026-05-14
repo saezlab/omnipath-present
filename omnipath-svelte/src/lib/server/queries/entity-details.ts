@@ -1,7 +1,7 @@
 import { getPool } from "$lib/server/db/client";
 import { getEntityByPublicId } from "$lib/server/queries/entity";
 
-const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "minimal";
+const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 type EntityAnnotationRow = {
   term: string;
