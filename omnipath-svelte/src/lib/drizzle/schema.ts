@@ -1,7 +1,6 @@
-import { pgSchema, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType } from "drizzle-orm/pg-core"
+import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
-export const minimal = pgSchema("public");
 
 const roaringbitmap = customType<{ data: unknown; driverData: unknown }>({
 	dataType() {
@@ -10,7 +9,7 @@ const roaringbitmap = customType<{ data: unknown; driverData: unknown }>({
 });
 
 
-export const resolverProteinIdentifierLookupInMinimal = minimal.table("resolver_protein_identifier_lookup", {
+export const resolverProteinIdentifierLookupInMinimal = pgTable("resolver_protein_identifier_lookup", {
 	source: text().notNull(),
 	keyType: text("key_type").notNull(),
 	keyValue: text("key_value").notNull(),
@@ -24,7 +23,7 @@ export const resolverProteinIdentifierLookupInMinimal = minimal.table("resolver_
 	index("resolver_protein_lookup_primary_idx").using("btree", table.primaryUniprot.asc().nullsLast().op("text_ops")),
 ]);
 
-export const resolverChemicalIdentifierLookupInMinimal = minimal.table("resolver_chemical_identifier_lookup", {
+export const resolverChemicalIdentifierLookupInMinimal = pgTable("resolver_chemical_identifier_lookup", {
 	source: text().notNull(),
 	keyType: text("key_type").notNull(),
 	keyValue: text("key_value").notNull(),
@@ -36,7 +35,7 @@ export const resolverChemicalIdentifierLookupInMinimal = minimal.table("resolver
 	index("resolver_chemical_lookup_key_idx").using("btree", table.keyType.asc().nullsLast().op("text_ops"), table.keyValue.asc().nullsLast().op("text_ops")),
 ]);
 
-export const sourceRowInMinimal = minimal.table("source_row", {
+export const sourceRowInMinimal = pgTable("source_row", {
 	sourceRowId: bigserial("source_row_id", { mode: "bigint" }).primaryKey().notNull(),
 	source: text().notNull(),
 	dataset: text().notNull(),
@@ -48,7 +47,7 @@ export const sourceRowInMinimal = minimal.table("source_row", {
 	unique("source_row_source_dataset_row_id_key").on(table.dataset, table.rowId, table.source),
 ]);
 
-export const entityEvidenceInMinimal = minimal.table("entity_evidence", {
+export const entityEvidenceInMinimal = pgTable("entity_evidence", {
 	entityEvidenceId: bigserial("entity_evidence_id", { mode: "bigint" }).primaryKey().notNull(),
 	source: text().notNull(),
 	dataset: text().notNull(),
@@ -70,7 +69,7 @@ export const entityEvidenceInMinimal = minimal.table("entity_evidence", {
 	unique("entity_evidence_source_dataset_row_id_occurrence_id_key").on(table.dataset, table.occurrenceId, table.rowId, table.source),
 ]);
 
-export const identifierInMinimal = minimal.table("identifier", {
+export const identifierInMinimal = pgTable("identifier", {
 	identifierId: bigserial("identifier_id", { mode: "bigint" }).primaryKey().notNull(),
 	type: text().notNull(),
 	value: text().notNull(),
@@ -79,7 +78,7 @@ export const identifierInMinimal = minimal.table("identifier", {
 	uniqueIndex("identifier_type_value_hash_idx").using("btree", table.type.asc().nullsLast().op("text_ops"), table.valueHash.asc().nullsLast().op("text_ops")),
 ]);
 
-export const annotationInMinimal = minimal.table("annotation", {
+export const annotationInMinimal = pgTable("annotation", {
 	annotationId: bigserial("annotation_id", { mode: "bigint" }).primaryKey().notNull(),
 	term: text().notNull(),
 	value: text(),
@@ -112,7 +111,7 @@ export const annotationInMinimal = minimal.table("annotation", {
 	check("annotation_target_check", sql`((((entity_evidence_id IS NOT NULL))::integer + ((relation_evidence_id IS NOT NULL))::integer) + ((entity_id IS NOT NULL))::integer) = 1`),
 ]);
 
-export const relationEvidenceInMinimal = minimal.table("relation_evidence", {
+export const relationEvidenceInMinimal = pgTable("relation_evidence", {
 	relationEvidenceId: bigserial("relation_evidence_id", { mode: "bigint" }).primaryKey().notNull(),
 	source: text().notNull(),
 	dataset: text().notNull(),
@@ -163,7 +162,7 @@ export const relationEvidenceInMinimal = minimal.table("relation_evidence", {
 	check("relation_evidence_subject_endpoint_check", sql`(((subject_entity_evidence_id IS NOT NULL))::integer + ((subject_entity_id IS NOT NULL))::integer) = 1`),
 ]);
 
-export const entityInMinimal = minimal.table("entity", {
+export const entityInMinimal = pgTable("entity", {
 	entityId: bigserial("entity_id", { mode: "bigint" }).primaryKey().notNull(),
 	entityType: text("entity_type").notNull(),
 	idType: text("id_type").notNull(),
@@ -179,7 +178,7 @@ export const entityInMinimal = minimal.table("entity", {
 	check("entity_resolution_status_check", sql`resolution_status = ANY (ARRAY['resolved'::text, 'unresolved'::text])`),
 ]);
 
-export const entityResolutionCandidateInMinimal = minimal.table("entity_resolution_candidate", {
+export const entityResolutionCandidateInMinimal = pgTable("entity_resolution_candidate", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).notNull(),
 	entityType: text("entity_type").notNull(),
@@ -202,7 +201,7 @@ export const entityResolutionCandidateInMinimal = minimal.table("entity_resoluti
 		}).onDelete("cascade"),
 ]);
 
-export const entityEvidenceResolutionInMinimal = minimal.table("entity_evidence_resolution", {
+export const entityEvidenceResolutionInMinimal = pgTable("entity_evidence_resolution", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).primaryKey().notNull(),
 	status: text().notNull(),
@@ -228,7 +227,7 @@ export const entityEvidenceResolutionInMinimal = minimal.table("entity_evidence_
 	check("entity_evidence_resolution_status_check", sql`status = ANY (ARRAY['resolved'::text, 'ambiguous'::text, 'unresolved'::text, 'unsupported'::text])`),
 ]);
 
-export const entityRelationCountsInMinimal = minimal.table("entity_relation_counts", {
+export const entityRelationCountsInMinimal = pgTable("entity_relation_counts", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityId: bigint("entity_id", { mode: "number" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -242,7 +241,7 @@ export const entityRelationCountsInMinimal = minimal.table("entity_relation_coun
 		}).onDelete("cascade"),
 ]);
 
-export const relationInMinimal = minimal.table("relation", {
+export const relationInMinimal = pgTable("relation", {
 	relationId: bigserial("relation_id", { mode: "bigint" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	subjectEntityId: bigint("subject_entity_id", { mode: "number" }).notNull(),
@@ -265,7 +264,7 @@ export const relationInMinimal = minimal.table("relation", {
 		}),
 ]);
 
-export const ontologyTermsInMinimal = minimal.table("ontology_terms", {
+export const ontologyTermsInMinimal = pgTable("ontology_terms", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	termEntityId: bigint("term_entity_id", { mode: "number" }).primaryKey().notNull(),
 	termId: text("term_id").notNull(),
@@ -292,7 +291,7 @@ export const ontologyTermsInMinimal = minimal.table("ontology_terms", {
 		}).onDelete("cascade"),
 ]);
 
-export const annotationTermEntityBitmapInMinimal = minimal.table("annotation_term_entity_bitmap", {
+export const annotationTermEntityBitmapInMinimal = pgTable("annotation_term_entity_bitmap", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	termEntityId: bigint("term_entity_id", { mode: "number" }).primaryKey().notNull(),
 	// TODO: failed to parse database type 'roaringbitmap'
@@ -307,7 +306,7 @@ export const annotationTermEntityBitmapInMinimal = minimal.table("annotation_ter
 		}).onDelete("cascade"),
 ]);
 
-export const annotationTermRelationBitmapInMinimal = minimal.table("annotation_term_relation_bitmap", {
+export const annotationTermRelationBitmapInMinimal = pgTable("annotation_term_relation_bitmap", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	termEntityId: bigint("term_entity_id", { mode: "number" }).primaryKey().notNull(),
 	// TODO: failed to parse database type 'roaringbitmap'
@@ -322,7 +321,7 @@ export const annotationTermRelationBitmapInMinimal = minimal.table("annotation_t
 		}).onDelete("cascade"),
 ]);
 
-export const resolverMappingPolicyInMinimal = minimal.table("resolver_mapping_policy", {
+export const resolverMappingPolicyInMinimal = pgTable("resolver_mapping_policy", {
 	entityFamily: text("entity_family").notNull(),
 	resolverSource: text("resolver_source"),
 	keyType: text("key_type").notNull(),
@@ -334,7 +333,7 @@ export const resolverMappingPolicyInMinimal = minimal.table("resolver_mapping_po
 	check("resolver_mapping_policy_action_check", sql`action = ANY (ARRAY['accept'::text, 'candidate_only'::text, 'ignore'::text])`),
 ]);
 
-export const entityEvidenceIdentifierInMinimal = minimal.table("entity_evidence_identifier", {
+export const entityEvidenceIdentifierInMinimal = pgTable("entity_evidence_identifier", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -355,7 +354,7 @@ export const entityEvidenceIdentifierInMinimal = minimal.table("entity_evidence_
 	primaryKey({ columns: [table.entityEvidenceId, table.identifierId], name: "entity_evidence_identifier_pkey"}),
 ]);
 
-export const relationEvidenceRelationInMinimal = minimal.table("relation_evidence_relation", {
+export const relationEvidenceRelationInMinimal = pgTable("relation_evidence_relation", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	relationId: bigint("relation_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -376,7 +375,7 @@ export const relationEvidenceRelationInMinimal = minimal.table("relation_evidenc
 	unique("relation_evidence_relation_relation_evidence_id_key").on(table.relationEvidenceId),
 ]);
 
-export const relationEvidenceAnnotationInMinimal = minimal.table("relation_evidence_annotation", {
+export const relationEvidenceAnnotationInMinimal = pgTable("relation_evidence_annotation", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	relationId: bigint("relation_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -405,7 +404,7 @@ export const relationEvidenceAnnotationInMinimal = minimal.table("relation_evide
 	unique("relation_evidence_annotation_annotation_id_key").on(table.annotationId),
 ]);
 
-export const facetEntityBitmapInMinimal = minimal.table("facet_entity_bitmap", {
+export const facetEntityBitmapInMinimal = pgTable("facet_entity_bitmap", {
 	facetName: text("facet_name").notNull(),
 	facetValue: text("facet_value").notNull(),
 	// TODO: failed to parse database type 'roaringbitmap'
@@ -416,7 +415,7 @@ export const facetEntityBitmapInMinimal = minimal.table("facet_entity_bitmap", {
 	primaryKey({ columns: [table.facetName, table.facetValue], name: "facet_entity_bitmap_pkey"}),
 ]);
 
-export const facetRelationBitmapInMinimal = minimal.table("facet_relation_bitmap", {
+export const facetRelationBitmapInMinimal = pgTable("facet_relation_bitmap", {
 	facetName: text("facet_name").notNull(),
 	facetValue: text("facet_value").notNull(),
 	facetCategory: text("facet_category").default("").notNull(),
