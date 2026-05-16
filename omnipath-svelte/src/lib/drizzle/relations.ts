@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityResolutionCandidateInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal } from "./schema";
+import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal } from "./schema";
 
 export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinimal, ({one, many}) => ({
 	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
@@ -17,7 +17,6 @@ export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinima
 	relationEvidenceInMinimals_objectEntityEvidenceId: many(relationEvidenceInMinimal, {
 		relationName: "relationEvidenceInMinimal_objectEntityEvidenceId_entityEvidenceInMinimal_entityEvidenceId"
 	}),
-	entityResolutionCandidateInMinimals: many(entityResolutionCandidateInMinimal),
 	entityEvidenceResolutionInMinimals: many(entityEvidenceResolutionInMinimal),
 	entityEvidenceIdentifierInMinimals: many(entityEvidenceIdentifierInMinimal),
 }));
@@ -83,13 +82,6 @@ export const entityInMinimalRelations = relations(entityInMinimal, ({many}) => (
 	ontologyTermsInMinimals: many(ontologyTermsInMinimal),
 	annotationTermEntityBitmapInMinimals: many(annotationTermEntityBitmapInMinimal),
 	annotationTermRelationBitmapInMinimals: many(annotationTermRelationBitmapInMinimal),
-}));
-
-export const entityResolutionCandidateInMinimalRelations = relations(entityResolutionCandidateInMinimal, ({one}) => ({
-	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
-		fields: [entityResolutionCandidateInMinimal.entityEvidenceId],
-		references: [entityEvidenceInMinimal.entityEvidenceId]
-	}),
 }));
 
 export const entityEvidenceResolutionInMinimalRelations = relations(entityEvidenceResolutionInMinimal, ({one}) => ({

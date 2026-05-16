@@ -105,6 +105,16 @@ def _chain_bitmaps(parts: list[str]) -> str:
     return expr
 
 
+def _entity_identifiers_json_sql(alias: str = "e") -> str:
+    return f"""CASE
+        WHEN jsonb_typeof({alias}.identifiers) = 'array' THEN {alias}.identifiers
+        WHEN jsonb_typeof({alias}.identifiers) = 'object'
+          AND jsonb_typeof({alias}.identifiers -> 'evidence_identifiers') = 'array'
+          THEN {alias}.identifiers -> 'evidence_identifiers'
+        ELSE '[]'::jsonb
+      END"""
+
+
 def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     entity_pks = _ints(payload.get("entityPks") or payload.get("entity_pks"))
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
@@ -153,14 +163,11 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
             query_bitmap AS MATERIALIZED (
                 SELECT rb_build_agg(e.entity_id::integer) AS bitmap
                 FROM {SEARCH_SCHEMA}.entity e
-                WHERE LOWER(e.id) = {push(query_lower)}
+                WHERE LOWER(e.canonical_identifier) = {push(query_lower)}
                    OR EXISTS (
                        SELECT 1
-                       FROM {SEARCH_SCHEMA}.entity_evidence_resolution eer
-                       JOIN {SEARCH_SCHEMA}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-                       JOIN {SEARCH_SCHEMA}.identifier i ON i.identifier_id = eei.identifier_id
-                       WHERE eer.entity_id = e.entity_id
-                         AND LOWER(i.value) = %s
+                       FROM jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text)
+                       WHERE LOWER(item.identifier) = %s
                    )
             )
         """)
@@ -241,6 +248,7 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
     predicates = _strings(payload.get("predicates"))
     participant_types = _strings(payload.get("participantTypes") or payload.get("participant_types") or payload.get("interactionTypes") or payload.get("interaction_types"))
     sources = _strings(payload.get("sources"))
+    taxonomy_ids = _strings(payload.get("ncbi_tax_id") or payload.get("taxonomy_ids") or payload.get("taxonomyIds"))
 
     params: list[Any] = []
 
@@ -306,6 +314,14 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
                 WHERE facet_name = 'source' AND facet_value = ANY({push(sources)}::text[])
             )
         """)
+    if taxonomy_ids:
+        ctes.append(f"""
+            taxonomy_filter_bitmap AS MATERIALIZED (
+                SELECT COALESCE(rb_or_agg(relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+                FROM {SEARCH_SCHEMA}.facet_relation_bitmap
+                WHERE facet_name = 'taxonomy_id' AND facet_value = ANY({push(taxonomy_ids)}::text[])
+            )
+        """)
 
     joins = ["CROSS JOIN scope_base"]
     if predicates:
@@ -314,11 +330,14 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
         joins.append("CROSS JOIN participant_type_filter_bitmap")
     if sources:
         joins.append("CROSS JOIN source_filter_bitmap")
+    if taxonomy_ids:
+        joins.append("CROSS JOIN taxonomy_filter_bitmap")
     joins_sql = "\n".join(joins)
 
-    predicate_scope = _chain_bitmaps(["scope_base.bitmap", *(["participant_type_filter_bitmap.bitmap"] if participant_types else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
-    participant_scope = _chain_bitmaps(["scope_base.bitmap", *(["predicate_filter_bitmap.bitmap"] if predicates else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
-    source_scope = _chain_bitmaps(["scope_base.bitmap", *(["predicate_filter_bitmap.bitmap"] if predicates else []), *(["participant_type_filter_bitmap.bitmap"] if participant_types else [])])
+    predicate_scope = _chain_bitmaps(["scope_base.bitmap", *(["participant_type_filter_bitmap.bitmap"] if participant_types else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    participant_scope = _chain_bitmaps(["scope_base.bitmap", *(["predicate_filter_bitmap.bitmap"] if predicates else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    source_scope = _chain_bitmaps(["scope_base.bitmap", *(["predicate_filter_bitmap.bitmap"] if predicates else []), *(["participant_type_filter_bitmap.bitmap"] if participant_types else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    taxonomy_scope = _chain_bitmaps(["scope_base.bitmap", *(["predicate_filter_bitmap.bitmap"] if predicates else []), *(["participant_type_filter_bitmap.bitmap"] if participant_types else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
 
     sql = f"""
         WITH {', '.join(ctes)}
@@ -342,6 +361,13 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
         {joins_sql}
         WHERE f.facet_name = 'source'
           AND rb_cardinality(rb_and(f.relation_bitmap, {source_scope})) > 0
+        UNION ALL
+        SELECT 'taxonomy_id' AS facet_name, f.facet_value, f.facet_category,
+               rb_cardinality(rb_and(f.relation_bitmap, {taxonomy_scope})) AS scoped_count
+        FROM {SEARCH_SCHEMA}.facet_relation_bitmap f
+        {joins_sql}
+        WHERE f.facet_name = 'taxonomy_id'
+          AND rb_cardinality(rb_and(f.relation_bitmap, {taxonomy_scope})) > 0
         ORDER BY facet_name, scoped_count DESC
     """
     with _connect() as conn:

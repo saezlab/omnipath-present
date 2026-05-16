@@ -62,10 +62,10 @@ export OMNIPATH_PG_SCHEMA=public
 ### Graph data
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/entities/resolve` | Resolve exact identifiers through `id_hash`/`value_hash` and return ranked candidates with identifiers, type, taxon, sources, and relation counts |
+| POST | `/entities/resolve` | Resolve exact canonical IDs and `entity.identifiers` values, returning ranked candidates with identifiers, type, taxon, sources, and relation counts |
 | POST / GET | `/entities/search` | Search matching entities by exact identifier/name, with optional type, taxon, source, and annotation filters |
 | POST | `/entities/by-pks` | Hydrate numeric entity primary keys into entity records and identifiers |
-| POST / GET | `/relations/search` | Search relations by entity scope, predicate, category, source, participant type, or ontology term |
+| POST / GET | `/relations/search` | Search relations by entity scope, predicate, category, source, participant type, taxonomy, or ontology term |
 | GET | `/relations/{relation_id}` | Return one relation with subject/object entity records |
 | GET | `/relations/{relation_id}/evidence` | Return evidence rows and annotations for one relation |
 | POST / GET | `/ontology/scoped-search` | Search ontology terms by label, ID, ontology ID, selected entities, or selected terms |
@@ -108,6 +108,11 @@ curl -X POST http://localhost:8081/entities/search \
 curl -X POST http://localhost:8081/relations/search \
   -H "Content-Type: application/json" \
   -d '{"filters":{"entityPks":[128747],"relationCategories":["interaction"],"predicates":["positively_regulates"]},"limit":20}'
+
+# Search interactions where at least one participant has the selected taxonomy
+curl -X POST http://localhost:8081/relations/search \
+  -H "Content-Type: application/json" \
+  -d '{"filters":{"taxonomyIds":["9606"]},"limit":20}'
 
 # Search ontology terms, then expand a term to annotated entities
 curl -X POST http://localhost:8081/ontology/scoped-search \

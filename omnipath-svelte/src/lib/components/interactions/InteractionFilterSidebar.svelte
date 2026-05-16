@@ -24,8 +24,19 @@
   let predicatesByCategory = $state<Record<string, string[]>>({});
   let interactionTypeOptions = $state<string[]>([]);
   let sourceOptions = $state<string[]>([]);
+  let taxonomyOptions = $state<string[]>([]);
+  let taxonomyFacetLimit = $state(10);
   let scopedFacetCounts = $state<Map<string, { count: number; category?: string | null }>>(new Map());
   let loading = $state(true);
+
+  const TAXONOMY_LABELS: Record<string, string> = {
+    '9606': 'Human',
+    '10090': 'Mouse',
+    '10116': 'Rat',
+    '7227': 'Fruit fly',
+    '6239': 'C. elegans',
+    '7955': 'Zebrafish'
+  };
 
   // Fetch facet counts (scoped when selection present, global otherwise) and build filter options.
   // Counts reflect the current scope AND all OTHER active filters (cross-facet filtering).
@@ -40,6 +51,7 @@
       predicates: filters.predicates,
       interactionTypes: filters.interaction_types,
       sources: filters.sources,
+      taxonomyIds: filters.ncbi_tax_id,
     };
 
     let cancelled = false;
@@ -51,6 +63,7 @@
         const categories: Record<string, string[]> = {};
         const types: string[] = [];
         const sources: string[] = [];
+        const taxonomies: string[] = [];
 
         for (const c of counts) {
           map.set(`${c.facetName}:${c.facetValue}`, { count: c.scopedCount, category: c.facetCategory });
@@ -61,6 +74,8 @@
             types.push(c.facetValue);
           } else if (c.facetName === 'source') {
             sources.push(c.facetValue);
+          } else if (c.facetName === 'taxonomy_id') {
+            taxonomies.push(c.facetValue);
           }
         }
 
@@ -68,6 +83,7 @@
         predicatesByCategory = categories;
         interactionTypeOptions = types;
         sourceOptions = sources;
+        taxonomyOptions = taxonomies;
       })
       .catch(() => {
         if (!cancelled) {
@@ -75,6 +91,7 @@
           predicatesByCategory = {};
           interactionTypeOptions = [];
           sourceOptions = [];
+          taxonomyOptions = [];
         }
       })
       .finally(() => {
@@ -131,6 +148,10 @@
 
   function getCount(filterName: string, value: string): number | undefined {
     return scopedFacetCounts.get(`${filterName}:${value}`)?.count;
+  }
+
+  function formatTaxonomy(value: string): string {
+    return TAXONOMY_LABELS[value] ? `${TAXONOMY_LABELS[value]} (${value})` : value;
   }
 </script>
 
@@ -199,6 +220,22 @@
         {/each}
       </div>
     </div>
+
+    {#if taxonomyOptions.length > 0}
+      <div class="space-y-2">
+        <h4 class="text-sm font-semibold">Taxonomy</h4>
+        <div class="space-y-1 max-h-64 overflow-y-auto pr-2">
+          {#each taxonomyOptions.slice(0, taxonomyFacetLimit) as option}
+            {@render filterOptionRow('ncbi_tax_id', option, formatTaxonomy(option), filters.ncbi_tax_id || [], () => handleArrayToggle('ncbi_tax_id', option), '🌿', getCount('taxonomy_id', option))}
+          {/each}
+          {#if taxonomyOptions.length > taxonomyFacetLimit}
+            <Button variant="ghost" size="sm" class="mt-2 w-full text-xs" onclick={() => taxonomyFacetLimit += 10}>
+              Load more
+            </Button>
+          {/if}
+        </div>
+      </div>
+    {/if}
   </div>
 {/snippet}
 

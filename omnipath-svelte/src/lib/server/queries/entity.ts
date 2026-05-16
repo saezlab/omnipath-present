@@ -53,8 +53,26 @@ function entitySourcesSql(schema: string, entityAlias = "e"): string {
   )`;
 }
 
+function entityTypeSql(schema: string, alias = "e"): string {
+  return `(SELECT et.name FROM ${schema}.entity_type et WHERE et.entity_type_id = ${alias}.entity_type_id)`;
+}
+
+function canonicalTypeSql(schema: string, alias = "e"): string {
+  return `(SELECT it.name FROM ${schema}.identifier_type it WHERE it.identifier_type_id = ${alias}.canonical_identifier_type_id)`;
+}
+
+function entityIdentifiersJsonSql(alias = "e"): string {
+  return `CASE
+    WHEN jsonb_typeof(${alias}.identifiers) = 'array' THEN ${alias}.identifiers
+    WHEN jsonb_typeof(${alias}.identifiers) = 'object'
+      AND jsonb_typeof(${alias}.identifiers -> 'evidence_identifiers') = 'array'
+      THEN ${alias}.identifiers -> 'evidence_identifiers'
+    ELSE '[]'::jsonb
+  END`;
+}
+
 function entityBaseSelect(schema: string, alias = "e"): string {
-  return `${alias}.entity_id, ${alias}.id, ${alias}.id_type, ${alias}.entity_type, ${alias}.taxonomy_id, ${entitySourcesSql(schema, alias)} AS sources`;
+  return `${alias}.entity_id, ${alias}.canonical_identifier AS id, ${canonicalTypeSql(schema, alias)} AS id_type, ${entityTypeSql(schema, alias)} AS entity_type, ${alias}.taxonomy_id, ${entitySourcesSql(schema, alias)} AS sources`;
 }
 
 function ontologyTermEntityPredicate(schema: string, placeholder: string, entityAlias = "e"): string {
@@ -79,14 +97,14 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: number[]): 
       identifier: string;
     }>(
       `SELECT DISTINCT
-         eer.entity_id,
-         i.identifier_id,
-         i.type AS identifier_type,
-         i.value AS identifier
-       FROM ${schema}.entity_evidence_resolution eer
-       JOIN ${schema}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-       JOIN ${schema}.identifier i ON i.identifier_id = eei.identifier_id
-       WHERE eer.entity_id = ANY($1::bigint[])
+         e.entity_id,
+         NULL::bigint AS identifier_id,
+         item.identifier_type,
+         item.identifier
+	       FROM ${schema}.entity e
+	       CROSS JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text, identifier_type text)
+       WHERE e.entity_id = ANY($1::bigint[])
+         AND COALESCE(item.identifier, '') <> ''
        UNION
        SELECT DISTINCT
          terms.term_entity_id AS entity_id,
@@ -144,7 +162,7 @@ export async function getEntitiesByPublicIds(publicIds: string[]): Promise<Entit
     const params: unknown[] = [];
     for (const id of parsed) {
       params.push(id.canonicalIdentifierType, id.canonicalIdentifier);
-      whereParts.push(`(e.id_type = $${params.length - 1} AND e.id = $${params.length})`);
+      whereParts.push(`(${canonicalTypeSql(schema)} = $${params.length - 1} AND e.canonical_identifier = $${params.length})`);
     }
 
     const result = await client.query<{
@@ -218,10 +236,14 @@ export async function searchEntities({
   cursor?: EntitySearchCursor | null;
 } = {}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const schema = SEARCH_SCHEMA();
+  if (isUnfilteredEntitySearch(query, filters)) {
+    return searchEntitiesByRelationCount({ schema, limit, cursor });
+  }
+
   const client = await getPool().connect();
 
   try {
-    const whereParts: string[] = [`e.entity_type IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
+    const whereParts: string[] = [`${entityTypeSql(schema)} IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -232,13 +254,11 @@ export async function searchEntities({
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
       whereParts.push(`(
-        LOWER(e.id) = ${queryParam}
-        OR e.entity_id IN (
-          SELECT DISTINCT eer.entity_id
-          FROM ${schema}.entity_evidence_resolution eer
-          JOIN ${schema}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-          JOIN ${schema}.identifier i ON i.identifier_id = eei.identifier_id
-          WHERE LOWER(i.value) = ${queryParam}
+        LOWER(e.canonical_identifier) = ${queryParam}
+        OR EXISTS (
+          SELECT 1
+	          FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
+          WHERE LOWER(item.identifier) = ${queryParam}
         )
       )`);
     }
@@ -266,7 +286,7 @@ export async function searchEntities({
     const entityTypes = normalizeStringValues(filters.entity_types || []);
     if (entityTypes.length > 0) {
       const param = pushParam(entityTypes);
-      whereParts.push(`e.entity_type = ANY(${param}::text[])`);
+      whereParts.push(`${entityTypeSql(schema)} = ANY(${param}::text[])`);
     }
 
     const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id || []);
@@ -317,12 +337,100 @@ export async function searchEntities({
          FROM matched_entities me
          LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = me.entity_id
        )
-       SELECT m.*
-       FROM matched m
+	       SELECT
+	         m.entity_id,
+	         m.canonical_identifier AS id,
+	         ${canonicalTypeSql(schema, "m")} AS id_type,
+	         ${entityTypeSql(schema, "m")} AS entity_type,
+	         m.taxonomy_id,
+	         m.sources,
+	         m.relation_count
+	       FROM matched m
        ${pageCursorWhere}
        ORDER BY m.relation_count DESC, m.entity_id ASC
        LIMIT ${limitParam}`,
       pageParams,
+    );
+
+    const rows = result.rows.map(toEntityRow);
+    const nextCursor = rows.length === limit
+      ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
+      : null;
+
+    return { entities: await hydrateEntities(schema, rows), nextCursor };
+  } finally {
+    client.release();
+  }
+}
+
+function isUnfilteredEntitySearch(
+  query: string,
+  filters: {
+    entity_pks?: number[];
+    annotation_term_ids?: string[];
+    entity_types?: string[];
+    sources?: string[];
+    ncbi_tax_id?: string[];
+    ontology_terms?: string[];
+  },
+): boolean {
+  if (query.trim()) return false;
+  if ((filters.entity_pks?.filter(Number.isFinite) ?? []).length > 0) return false;
+  if (normalizeStringValues(filters.annotation_term_ids || []).length > 0) return false;
+  if (normalizeStringValues(filters.entity_types || []).length > 0) return false;
+  if (normalizeStringValues(filters.sources || []).length > 0) return false;
+  if (normalizeStringValues(filters.ncbi_tax_id || []).length > 0) return false;
+  if (normalizeStringValues(filters.ontology_terms || []).length > 0) return false;
+  return true;
+}
+
+async function searchEntitiesByRelationCount({
+  schema,
+  limit,
+  cursor,
+}: {
+  schema: string;
+  limit: number;
+  cursor?: EntitySearchCursor | null;
+}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
+  const normalizedCursor = normalizeEntitySearchCursor(cursor);
+  const params: unknown[] = [];
+  let cursorWhere = "";
+  if (normalizedCursor) {
+    params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
+    cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::bigint))";
+  }
+  params.push(limit);
+  const limitParam = `$${params.length}`;
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      id: string;
+      id_type: string;
+      entity_type: string | null;
+      taxonomy_id: string | null;
+      sources: string[] | null;
+      relation_count: string | number | null;
+    }>(
+      `SELECT
+         e.entity_id,
+         e.canonical_identifier AS id,
+         it.name AS id_type,
+         et.name AS entity_type,
+         e.taxonomy_id,
+         ${entitySourcesSql(schema, "e")} AS sources,
+         rc.relation_count
+       FROM ${schema}.entity_relation_counts rc
+       JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
+       JOIN ${schema}.entity_type et ON et.entity_type_id = e.entity_type_id
+       LEFT JOIN ${schema}.identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
+       WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
+         ${cursorWhere}
+       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       LIMIT ${limitParam}`,
+      params,
     );
 
     const rows = result.rows.map(toEntityRow);
@@ -365,15 +473,15 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
     const schema = SEARCH_SCHEMA();
     const client = await getPool().connect();
     try {
-      const typeResult = await client.query<{ values: string[] | null }>(
-        `SELECT array_agg(value ORDER BY value) AS values
-         FROM (
-           SELECT DISTINCT entity_type AS value
-           FROM ${schema}.entity
-           WHERE entity_type IS NOT NULL
-             AND entity_type <> '${CV_TERM_ENTITY_TYPE}'
-         ) t`,
-      );
+	      const typeResult = await client.query<{ values: string[] | null }>(
+	        `SELECT array_agg(value ORDER BY value) AS values
+	         FROM (
+	           SELECT DISTINCT ${entityTypeSql(schema)} AS value
+	           FROM ${schema}.entity e
+	           WHERE ${entityTypeSql(schema)} IS NOT NULL
+	             AND ${entityTypeSql(schema)} <> '${CV_TERM_ENTITY_TYPE}'
+	         ) t`,
+	      );
       const sourceResult = await client.query<{ values: string[] | null }>(
         `SELECT array_agg(facet_value ORDER BY facet_value) AS values
          FROM ${schema}.facet_entity_bitmap
@@ -477,13 +585,11 @@ export async function getScopedEntityFacetCounts({
       ctes.push(`query_bitmap AS MATERIALIZED (
         SELECT rb_build_agg(e.entity_id::integer) AS bitmap
         FROM ${schema}.entity e
-        WHERE LOWER(e.id) = ${queryParam}
+        WHERE LOWER(e.canonical_identifier) = ${queryParam}
            OR e.entity_id IN (
-             SELECT DISTINCT eer.entity_id
-             FROM ${schema}.entity_evidence_resolution eer
-             JOIN ${schema}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-             JOIN ${schema}.identifier i ON i.identifier_id = eei.identifier_id
-             WHERE LOWER(i.value) = ${queryParam}
+             SELECT e.entity_id
+	             FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
+             WHERE LOWER(item.identifier) = ${queryParam}
            )
       )`);
     }

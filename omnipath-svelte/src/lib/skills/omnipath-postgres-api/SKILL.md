@@ -20,11 +20,11 @@ http://localhost:8081
 1. Resolve or search proteins/entities before relation filtering.
    - `POST /entities/resolve`
    - Body: `{"identifiers":["P04637","TP53"],"filters":{"entityTypes":["Protein:MI:0326"]},"preferredTaxonomyIds":["9606"]}`
-   - Resolution uses exact `id_hash`/`value_hash` matching and returns candidates with all known identifiers, taxonomy, entity type, canonical ID, sources, relation count, and match metadata.
+   - Resolution uses exact canonical ID and `entity.identifiers` matching and returns candidates with all known identifiers, taxonomy, entity type, canonical ID, sources, relation count, and match metadata.
    - If `ambiguous` is true, do not guess unless the user supplied a taxon or another disambiguating identifier.
    - `POST /entities/search`
    - Body: `{"query":"TP53","filters":{"entityTypes":["Protein:MI:0326"]},"limit":10}`
-   - `/entities/search` also uses exact `id_hash`/`value_hash` matching. There are no fuzzy modes for entity lookup.
+   - `/entities/search` also uses exact canonical ID and `entity.identifiers` matching. There are no fuzzy modes for entity lookup.
    - `POST /entities/by-pks`
    - Body: `{"entityPks":[128747,137920]}`
 
@@ -32,6 +32,7 @@ http://localhost:8081
    - `POST /relations/search`
    - Body: `{"filters":{"entityPks":[128747],"relationCategories":["interaction"],"predicates":["positively_regulates"]},"limit":50}`
    - Add `requireBothParticipants:true` when `entityPks` is a selected set and both relation endpoints must be inside that set.
+   - Add `taxonomyIds`/`ncbi_tax_id` to keep relations where at least one participant has the selected taxonomy.
    - Use `GET /relations/{relationPk}` for one relation and `GET /relations/{relationPk}/evidence` for evidence rows and annotations.
 
 3. Search ontology terms, expand them to annotated entities, then retrieve relations among those entities.
@@ -46,7 +47,7 @@ http://localhost:8081
    - `POST /entities/scoped-facets`
    - Useful filters: `entityPks`, `annotationTermIds`, `entityTypes`, `sources`, `ncbi_tax_id`, `query`
    - `POST /relations/scoped-facets`
-   - Useful filters: `entityPks`, `annotationTermIds`, `predicates`, `participantTypes`, `interactionTypes`, `sources`
+   - Useful filters: `entityPks`, `annotationTermIds`, `predicates`, `participantTypes`, `interactionTypes`, `sources`, `taxonomyIds`, `ncbi_tax_id`
 
 5. List resource metadata from Postgres.
    - `GET /sources`

@@ -8,6 +8,7 @@
 		getAllowedEntityDescriptions,
 		getEntityDisplayName,
 		getEntityIdentifiers,
+		getEntityPrimaryIdentifierBadge,
 		getEntityPublicId,
 		getEntitySmiles,
 		getEntityTypeLabel,
@@ -27,6 +28,12 @@
 		value: string;
 		unit: string;
 		source: string;
+	};
+
+	type AnnotationGroup = {
+		label: string;
+		values: string[];
+		sources: string[];
 	};
 
 	let { open = $bindable(false), entity }: Props = $props();
@@ -162,7 +169,7 @@
 			const unit = typeof row.unit === 'string' ? row.unit.trim() : '';
 			const source = typeof row.source === 'string' ? row.source.trim() : '';
 			const label = getIdentifierTypeLabel(term);
-			if (!term || !value) return [];
+			if (!term) return [];
 			if (label.toLowerCase() === 'amino acid sequence') return [];
 			return [{ term, label, value, unit, source }];
 		});
@@ -173,8 +180,8 @@
 		return termLabel === 'pubmed' || termLabel === 'pmid' || termLabel.includes('pubmed');
 	}
 
-	function annotationSortRank(row: AnnotationRow): number {
-		const label = row.label.toLowerCase();
+	function annotationSortRank(labelValue: string): number {
+		const label = labelValue.toLowerCase();
 		if (label === 'function') return 0;
 		if (label === 'subcellular location') return 1;
 		if (label === 'disease involvement' || label === 'disease') return 2;
@@ -182,7 +189,32 @@
 	}
 
 	function sortAnnotations(rows: AnnotationRow[]): AnnotationRow[] {
-		return [...rows].sort((a, b) => annotationSortRank(a) - annotationSortRank(b) || a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
+		return [...rows].sort((a, b) => annotationSortRank(a.label) - annotationSortRank(b.label) || a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
+	}
+
+	function groupAnnotationsByLabel(rows: AnnotationRow[]): AnnotationGroup[] {
+		const groups = new Map<string, AnnotationGroup>();
+
+		for (const row of rows) {
+			const key = row.label.toLowerCase();
+			const group = groups.get(key) ?? {
+				label: row.label,
+				values: [],
+				sources: []
+			};
+			const value = row.value ? `${row.value}${row.unit ? ` ${row.unit}` : ''}` : '';
+			if (value && !group.values.includes(value)) group.values.push(value);
+			if (row.source && !group.sources.includes(row.source)) group.sources.push(row.source);
+			groups.set(key, group);
+		}
+
+		return Array.from(groups.values()).sort(
+			(a, b) => annotationSortRank(a.label) - annotationSortRank(b.label) || a.label.localeCompare(b.label)
+		).map((group) => ({
+			...group,
+			values: [...group.values].sort((a, b) => a.localeCompare(b)),
+			sources: [...group.sources].sort((a, b) => a.localeCompare(b))
+		}));
 	}
 
 	function pubmedIdsFromAnnotations(rows: AnnotationRow[]): string[] {
@@ -203,6 +235,7 @@
 		}
 		return Array.from(sources).sort();
 	}
+
 </script>
 
 <Dialog bind:open>
@@ -212,12 +245,13 @@
 			{@const detailSections = getDescriptionSections(detailEntity)}
 			{@const detailIdentifiers = getEntityIdentifiers(detailEntity)}
 			{@const detailSmiles = getEntitySmiles(detailEntity)}
+			{@const primaryIdentifierBadge = getEntityPrimaryIdentifierBadge(detailEntity)}
 			{@const detailTaxonomy = formatTaxonomyId(detailEntity.taxonomyId)}
 			{@const showMoleculeStructure = isSmallMoleculeEntity(detailEntity) && detailSmiles}
 			{@const detailAttributes = Array.isArray(detailEntity.entityAttributes) ? detailEntity.entityAttributes : []}
 			{@const detailAnnotationRows = normalizeAnnotationRows(detailAttributes)}
 			{@const detailPubmedIds = pubmedIdsFromAnnotations(detailAnnotationRows)}
-			{@const detailNonPubmedAnnotations = sortAnnotations(detailAnnotationRows.filter((row) => !isPubmedAnnotation(row)))}
+			{@const detailNonPubmedAnnotations = groupAnnotationsByLabel(sortAnnotations(detailAnnotationRows.filter((row) => !isPubmedAnnotation(row))))}
 			<DialogHeader>
 				<DialogTitle>{getEntityDisplayName(detailEntity)}</DialogTitle>
 			</DialogHeader>
@@ -227,7 +261,7 @@
 					{#if detailTaxonomy}
 						<Badge variant="outline">Taxon: {detailTaxonomy}</Badge>
 					{/if}
-					<IdentifierBadge identifierType={detailEntity.canonicalIdentifierType} value={detailEntity.canonicalIdentifier} variant="subtle" />
+					<IdentifierBadge identifierType={primaryIdentifierBadge.key} value={primaryIdentifierBadge.value} variant="subtle" />
 				</div>
 				{#if loadingDetails && !hydratedEntity}
 					<p class="text-sm text-muted-foreground">Loading annotations...</p>
@@ -264,15 +298,23 @@
 						<div class="grid min-w-0 gap-2">
 							{#each detailNonPubmedAnnotations as annotation}
 								<div class="min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/10 px-3 py-2 text-sm">
-									<div class="flex min-w-0 items-center justify-between gap-2">
-										<div class="truncate text-xs font-medium text-muted-foreground" title={annotation.term}>{annotation.label}</div>
-										{#if annotation.source}
-											<Badge variant="secondary" class="shrink-0 text-[10px]">{annotation.source}</Badge>
+									<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
+										<div class="truncate font-medium text-foreground">{annotation.label}</div>
+										{#if annotation.sources.length > 0}
+											<div class="flex min-w-0 flex-wrap justify-end gap-1">
+												{#each annotation.sources as source}
+													<Badge variant="secondary" class="max-w-32 truncate text-[10px]">{source}</Badge>
+												{/each}
+											</div>
 										{/if}
 									</div>
-									<div class="mt-1 max-h-32 max-w-full overflow-auto whitespace-pre-wrap break-all text-foreground">
-										{annotation.value}{annotation.unit ? ` ${annotation.unit}` : ''}
-									</div>
+									{#if annotation.values.length > 0}
+										<div class="mt-2 max-h-32 max-w-full space-y-1 overflow-auto">
+											{#each annotation.values as value}
+												<div class="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">{value}</div>
+											{/each}
+										</div>
+									{/if}
 								</div>
 							{/each}
 						</div>

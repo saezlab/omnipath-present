@@ -24,6 +24,10 @@ export function getEntityTypeLabel(entity: EntityLike): string {
   return entityType ? getIdentifierTypeLabel(entityType) : "Entity";
 }
 
+function isFallbackEntity(entity: EntityLike): boolean {
+  return getIdentifierTypeLabel(entity.canonicalIdentifierType || "").toLowerCase() === "fallback";
+}
+
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
   const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
   return typeLabel === "smallmolecule"
@@ -40,7 +44,11 @@ export function isCvTermEntity(entity: EntityLike): boolean {
 
 export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[] {
   const typedEntity = entity as { identifiers?: unknown };
-  const raw = Array.isArray(typedEntity.identifiers) ? typedEntity.identifiers : [];
+  const raw = Array.isArray(typedEntity.identifiers)
+    ? typedEntity.identifiers
+    : isObject(typedEntity.identifiers) && Array.isArray(typedEntity.identifiers.evidence_identifiers)
+      ? typedEntity.identifiers.evidence_identifiers
+      : [];
   return raw
     .map((item: unknown) => {
       if (!isObject(item)) return null;
@@ -63,8 +71,13 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
     .filter((identifier): identifier is EntityIdentifierLike => Boolean(identifier));
 }
 
-export function getIdentifierTypeLabel(identifierType: string): string {
-  const text = identifierType.trim();
+export function getEntityPrimaryIdentifierBadge(entity: EntityLike): EntityIdentifierLike {
+  const fallbackIdentifier = isFallbackEntity(entity) ? getEntityIdentifiers(entity)[0] : undefined;
+  return fallbackIdentifier ?? { key: entity.canonicalIdentifierType, value: entity.canonicalIdentifier };
+}
+
+export function getIdentifierTypeLabel(identifierType: string | null | undefined): string {
+  const text = identifierType?.trim() || "";
   if (!text) return "";
   const parts = text.split(":");
 
@@ -250,6 +263,10 @@ export function getEntityDisplayName(entity: EntityLike): string {
   const publicId = getEntityPublicId(entity);
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
+  if (isFallbackEntity(entity)) {
+    return geneSymbols[0] || names[0] || getEntityIdentifiers(entity)[0]?.value || publicId;
+  }
+
   if (isSmallMoleculeEntity(entity)) {
     const preferredName = getPreferredName(names);
     const chebiId = getIdentifierByType(entity, ["chebi"]);
@@ -276,6 +293,10 @@ export function getEntityDisplayName(entity: EntityLike): string {
 export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   const { names, geneSymbols } = classifyEntityIdentifiers(entity);
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
+
+  if (isFallbackEntity(entity)) {
+    return undefined;
+  }
 
   if (isCvTermEntity(entity)) {
     const primary = names[0];

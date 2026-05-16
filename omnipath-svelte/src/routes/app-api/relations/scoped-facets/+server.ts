@@ -45,6 +45,7 @@ export const POST: RequestHandler = async ({ request }) => {
     predicates?: string[];
     interactionTypes?: string[];
     sources?: string[];
+    taxonomyIds?: string[];
   };
 
   const entityPks = await resolveEntityIds(body.entityIds);
@@ -55,6 +56,7 @@ export const POST: RequestHandler = async ({ request }) => {
     predicates: body.predicates || [],
     interactionTypes: body.interactionTypes || [],
     sources: body.sources || [],
+    taxonomyIds: body.taxonomyIds || [],
   });
 
   return json(counts);

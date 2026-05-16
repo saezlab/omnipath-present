@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from hashlib import md5
 from typing import Any
 
 SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
@@ -33,10 +32,6 @@ def _strings(values: list[Any] | None) -> list[str]:
             seen.add(text)
             out.append(text)
     return out
-
-
-def _md5_text(value: str) -> str:
-    return md5(value.encode("utf-8")).hexdigest()
 
 
 def _ints(values: list[Any] | None) -> list[int]:
@@ -88,11 +83,29 @@ def _entity_sources_sql(alias: str = "e") -> str:
       )"""
 
 
+def _entity_type_sql(alias: str = "e") -> str:
+    return f"(SELECT et.name FROM {SEARCH_SCHEMA}.entity_type et WHERE et.entity_type_id = {alias}.entity_type_id)"
+
+
+def _canonical_type_sql(alias: str = "e") -> str:
+    return f"(SELECT it.name FROM {SEARCH_SCHEMA}.identifier_type it WHERE it.identifier_type_id = {alias}.canonical_identifier_type_id)"
+
+
+def _entity_identifiers_json_sql(alias: str = "e") -> str:
+    return f"""CASE
+        WHEN jsonb_typeof({alias}.identifiers) = 'array' THEN {alias}.identifiers
+        WHEN jsonb_typeof({alias}.identifiers) = 'object'
+          AND jsonb_typeof({alias}.identifiers -> 'evidence_identifiers') = 'array'
+          THEN {alias}.identifiers -> 'evidence_identifiers'
+        ELSE '[]'::jsonb
+      END"""
+
+
 def _entity_select(alias: str = "e") -> str:
     return f"""{alias}.entity_id,
-      {alias}.id,
-      {alias}.id_type,
-      {alias}.entity_type,
+      {alias}.canonical_identifier AS id,
+      {_canonical_type_sql(alias)} AS id_type,
+      {_entity_type_sql(alias)} AS entity_type,
       {alias}.taxonomy_id,
       {_entity_sources_sql(alias)} AS sources,
       COALESCE(rc.relation_count, 0)::bigint AS relation_count"""
@@ -115,14 +128,14 @@ def _identifiers_for_entity_pks(entity_pks: list[int]) -> dict[int, list[dict[st
         return {}
     sql = f"""
         SELECT DISTINCT
-          eer.entity_id,
-          i.identifier_id,
-          i.type AS identifier_type,
-          i.value AS identifier
-        FROM {SEARCH_SCHEMA}.entity_evidence_resolution eer
-        JOIN {SEARCH_SCHEMA}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-        JOIN {SEARCH_SCHEMA}.identifier i ON i.identifier_id = eei.identifier_id
-        WHERE eer.entity_id = ANY(%s::bigint[])
+          e.entity_id,
+          NULL::bigint AS identifier_id,
+          item.identifier_type,
+          item.identifier
+        FROM {SEARCH_SCHEMA}.entity e
+        CROSS JOIN LATERAL jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text, identifier_type text)
+        WHERE e.entity_id = ANY(%s::bigint[])
+          AND COALESCE(item.identifier, '') <> ''
         UNION
         SELECT DISTINCT
           terms.term_entity_id AS entity_id,
@@ -184,7 +197,7 @@ def _entity_filter_sql(filters: dict[str, Any], params: list[Any], alias: str = 
             AND terms.term_id = ANY({push(annotation_terms)}::text[])
         )""")
     if entity_types:
-        where.append(f"{alias}.entity_type = ANY({push(entity_types)}::text[])")
+        where.append(f"{_entity_type_sql(alias)} = ANY({push(entity_types)}::text[])")
     if taxonomy_ids:
         where.append(f"{alias}.taxonomy_id = ANY({push(taxonomy_ids)}::text[])")
     if sources:
@@ -207,10 +220,9 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
     if not identifiers:
         return {"matches": [], "entities": []}
 
-    identifier_hashes = [_md5_text(identifier) for identifier in identifiers]
     entity_params: list[Any] = []
     identifier_params: list[Any] = []
-    base_where = [f"e.entity_type IS DISTINCT FROM '{CV_TERM_ENTITY_TYPE}'"]
+    base_where = [f"{_entity_type_sql('e')} IS DISTINCT FROM '{CV_TERM_ENTITY_TYPE}'"]
     entity_where = [*base_where, *_entity_filter_sql(filters, entity_params, "e")]
     identifier_where = [*base_where, *_entity_filter_sql(filters, identifier_params, "e")]
     entity_where_sql = f"WHERE {' AND '.join(entity_where)}"
@@ -218,55 +230,54 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
     sql = f"""
         WITH requested AS (
           SELECT *
-          FROM unnest(%s::text[], %s::text[]) AS request(query_identifier, identifier_hash)
+          FROM unnest(%s::text[]) AS request(query_identifier)
         ),
         exact_matches AS (
           SELECT
             e.entity_id,
-            e.id,
-            e.id_type,
-            e.entity_type,
+            e.canonical_identifier AS id,
+            {_canonical_type_sql('e')} AS id_type,
+            {_entity_type_sql('e')} AS entity_type,
             e.taxonomy_id,
             requested.query_identifier,
-            e.id AS match_identifier,
-            e.id_type AS match_identifier_type,
+            e.canonical_identifier AS match_identifier,
+            {_canonical_type_sql('e')} AS match_identifier_type,
             'canonical' AS match_kind,
             1000
             + CASE WHEN e.taxonomy_id = ANY(%s::text[]) THEN 50 ELSE 0 END
-            + CASE WHEN e.entity_type = 'Protein:MI:0326' THEN 10 ELSE 0 END
+            + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
             {_entity_sources_sql("e")} AS sources
           FROM requested
-          JOIN {SEARCH_SCHEMA}.entity e ON e.id_hash = requested.identifier_hash AND e.id = requested.query_identifier
+          JOIN {SEARCH_SCHEMA}.entity e ON e.canonical_identifier = requested.query_identifier
           LEFT JOIN {SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_id = e.entity_id
           {entity_where_sql}
           UNION ALL
           SELECT
             e.entity_id,
-            e.id,
-            e.id_type,
-            e.entity_type,
+            e.canonical_identifier AS id,
+            {_canonical_type_sql('e')} AS id_type,
+            {_entity_type_sql('e')} AS entity_type,
             e.taxonomy_id,
             requested.query_identifier,
-            i.value AS match_identifier,
-            i.type AS match_identifier_type,
+            item.identifier AS match_identifier,
+            item.identifier_type AS match_identifier_type,
             'identifier' AS match_kind,
             CASE
-              WHEN i.type ILIKE 'Gene Name Primary:%%' THEN 950
-              WHEN i.type ILIKE 'Gene Name:%%' THEN 900
+              WHEN item.identifier_type ILIKE 'Gene Name Primary:%%' THEN 950
+              WHEN item.identifier_type ILIKE 'Gene Name:%%' THEN 900
               ELSE 800
             END
             + CASE WHEN e.taxonomy_id = ANY(%s::text[]) THEN 50 ELSE 0 END
-            + CASE WHEN e.entity_type = 'Protein:MI:0326' THEN 10 ELSE 0 END
+            + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
             {_entity_sources_sql("e")} AS sources
           FROM requested
-          JOIN {SEARCH_SCHEMA}.identifier i ON i.value_hash = requested.identifier_hash AND i.value = requested.query_identifier
-          JOIN {SEARCH_SCHEMA}.entity_evidence_identifier eei ON eei.identifier_id = i.identifier_id
-          JOIN {SEARCH_SCHEMA}.entity_evidence_resolution eer ON eer.entity_evidence_id = eei.entity_evidence_id
-          JOIN {SEARCH_SCHEMA}.entity e ON e.entity_id = eer.entity_id
+          JOIN {SEARCH_SCHEMA}.entity e ON TRUE
+          JOIN LATERAL jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text, identifier_type text)
+            ON item.identifier = requested.query_identifier
           LEFT JOIN {SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_id = e.entity_id
           {identifier_where_sql}
         )
@@ -288,7 +299,6 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
     """
     params = [
         identifiers,
-        identifier_hashes,
         preferred_taxonomy_ids,
         *entity_params,
         preferred_taxonomy_ids,
@@ -347,22 +357,17 @@ def search_entities(payload: dict[str, Any]) -> dict[str, Any]:
 
     where = []
     if not include_cv_terms:
-        where.append(f"e.entity_type IS DISTINCT FROM '{CV_TERM_ENTITY_TYPE}'")
+        where.append(f"{_entity_type_sql('e')} IS DISTINCT FROM '{CV_TERM_ENTITY_TYPE}'")
     if query:
-        query_hash = _md5_text(query)
         where.append(f"""(
-          (e.id_hash = {push(query_hash)} AND e.id = {push(query)})
+          (e.canonical_identifier = {push(query)})
           OR EXISTS (
             SELECT 1
-            FROM {SEARCH_SCHEMA}.entity_evidence_resolution eer
-            JOIN {SEARCH_SCHEMA}.entity_evidence_identifier eei ON eei.entity_evidence_id = eer.entity_evidence_id
-            JOIN {SEARCH_SCHEMA}.identifier i ON i.identifier_id = eei.identifier_id
-            WHERE eer.entity_id = e.entity_id
-              AND i.value_hash = %s
-              AND i.value = %s
+            FROM jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text)
+            WHERE item.identifier = %s
           )
         )""")
-        params.extend([query_hash, query])
+        params.append(query)
     where.extend(_entity_filter_sql(filters, params, "e"))
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
@@ -421,11 +426,11 @@ def _relation_select(alias: str = "r") -> str:
       ARRAY(
         SELECT DISTINCT entity_type
         FROM (
-          SELECT subject.entity_type
+          SELECT {_entity_type_sql('subject')} AS entity_type
           FROM {SEARCH_SCHEMA}.entity subject
           WHERE subject.entity_id = {alias}.subject_entity_id
           UNION
-          SELECT object.entity_type
+          SELECT {_entity_type_sql('object')} AS entity_type
           FROM {SEARCH_SCHEMA}.entity object
           WHERE object.entity_id = {alias}.object_entity_id
         ) participant_types
@@ -479,6 +484,7 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
     object_entity_pks = _ints(filters.get("objectEntityPks") or filters.get("object_entity_pks"))
     entity_pks = _ints(filters.get("entityPks") or filters.get("entity_pks"))
     sources = _strings(filters.get("sources"))
+    taxonomy_ids = _strings(filters.get("ncbi_tax_id") or filters.get("taxonomy_ids") or filters.get("taxonomyIds"))
     annotation_terms = _strings(filters.get("annotationTerms") or filters.get("annotation_terms") or filters.get("ontology_terms"))
     require_both = bool(filters.get("requireBothParticipants") or filters.get("require_both_participants"))
 
@@ -491,7 +497,7 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
     if participant_types:
         where.append(f"""EXISTS (
           SELECT 1 FROM {SEARCH_SCHEMA}.entity endpoint
-          WHERE endpoint.entity_type = ANY({push(participant_types)}::text[])
+          WHERE {_entity_type_sql('endpoint')} = ANY({push(participant_types)}::text[])
             AND endpoint.entity_id IN (r.subject_entity_id, r.object_entity_id)
         )""")
     if subject_entity_pks:
@@ -509,6 +515,14 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
           JOIN {SEARCH_SCHEMA}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
           WHERE rer.relation_id = r.relation_id
             AND re.source = ANY({push(sources)}::text[])
+        )""")
+    if taxonomy_ids:
+        where.append(f"""EXISTS (
+          SELECT 1
+          FROM {SEARCH_SCHEMA}.facet_relation_bitmap f
+          WHERE f.facet_name = 'taxonomy_id'
+            AND f.facet_value = ANY({push(taxonomy_ids)}::text[])
+            AND rb_contains(f.relation_bitmap, r.relation_id::integer)
         )""")
     if annotation_terms:
         term_param = push(annotation_terms)
@@ -556,18 +570,18 @@ def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
     entity_select = ""
     entity_joins = ""
     if include_entities:
-        entity_select = """,
+        entity_select = f""",
           subject.entity_id AS subject_entity_id,
-          subject.id AS subject_id,
-          subject.id_type AS subject_id_type,
-          subject.entity_type AS subject_entity_type,
+          subject.canonical_identifier AS subject_id,
+          {_canonical_type_sql('subject')} AS subject_id_type,
+          {_entity_type_sql('subject')} AS subject_entity_type,
           subject.taxonomy_id AS subject_taxonomy_id,
           ARRAY[]::text[] AS subject_sources,
           0::bigint AS subject_relation_count,
           object.entity_id AS object_entity_id,
-          object.id AS object_id,
-          object.id_type AS object_id_type,
-          object.entity_type AS object_entity_type,
+          object.canonical_identifier AS object_id,
+          {_canonical_type_sql('object')} AS object_id_type,
+          {_entity_type_sql('object')} AS object_entity_type,
           object.taxonomy_id AS object_taxonomy_id,
           ARRAY[]::text[] AS object_sources,
           0::bigint AS object_relation_count"""

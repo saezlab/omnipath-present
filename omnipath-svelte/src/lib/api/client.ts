@@ -316,6 +316,7 @@ export async function fetchScopedRelationFacetCounts(params: {
   predicates?: string[];
   interactionTypes?: string[];
   sources?: string[];
+  taxonomyIds?: string[];
 }) {
   const res = await fetch("/app-api/relations/scoped-facets", {
     method: "POST",

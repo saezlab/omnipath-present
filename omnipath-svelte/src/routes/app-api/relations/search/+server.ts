@@ -67,6 +67,11 @@ async function transformClientFilters(filters: Record<string, unknown>): Promise
     sources: Array.isArray(filters.sources)
       ? filters.sources.filter((v): v is string => typeof v === "string")
       : undefined,
+    taxonomyIds: Array.isArray(filters.ncbi_tax_id)
+      ? filters.ncbi_tax_id.filter((v): v is string => typeof v === "string")
+      : Array.isArray(filters.taxonomy_ids)
+        ? filters.taxonomy_ids.filter((v): v is string => typeof v === "string")
+        : undefined,
     annotationTerms: Array.isArray(filters.ontology_terms)
       ? filters.ontology_terms.filter((v): v is string => typeof v === "string")
       : undefined,

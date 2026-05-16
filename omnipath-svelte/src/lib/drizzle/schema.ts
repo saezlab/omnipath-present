@@ -1,4 +1,4 @@
-import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType } from "drizzle-orm/pg-core"
+import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType, jsonb, smallint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -69,13 +69,45 @@ export const entityEvidenceInMinimal = pgTable("entity_evidence", {
 	unique("entity_evidence_source_dataset_row_id_occurrence_id_key").on(table.dataset, table.occurrenceId, table.rowId, table.source),
 ]);
 
-export const identifierInMinimal = pgTable("identifier", {
-	identifierId: bigserial("identifier_id", { mode: "bigint" }).primaryKey().notNull(),
-	type: text().notNull(),
-	value: text().notNull(),
-	valueHash: text("value_hash").generatedAlwaysAs(sql`md5(value)`),
+export const identifierTypeInMinimal = pgTable("identifier_type", {
+	identifierTypeId: bigint("identifier_type_id", { mode: "number" }).primaryKey().notNull(),
+	name: text().notNull(),
 }, (table) => [
-	uniqueIndex("identifier_type_value_hash_idx").using("btree", table.type.asc().nullsLast().op("text_ops"), table.valueHash.asc().nullsLast().op("text_ops")),
+	unique("identifier_type_name_key").on(table.name),
+]);
+
+export const entityTypeInMinimal = pgTable("entity_type", {
+	entityTypeId: bigserial("entity_type_id", { mode: "number" }).primaryKey().notNull(),
+	name: text().notNull(),
+}, (table) => [
+	unique("entity_type_name_key").on(table.name),
+]);
+
+export const resolutionStatusInMinimal = pgTable("resolution_status", {
+	resolutionStatusId: smallint("resolution_status_id").primaryKey().notNull(),
+	name: text().notNull(),
+}, (table) => [
+	unique("resolution_status_name_key").on(table.name),
+]);
+
+export const resolutionReasonInMinimal = pgTable("resolution_reason", {
+	resolutionReasonId: smallint("resolution_reason_id").primaryKey().notNull(),
+	name: text().notNull(),
+}, (table) => [
+	unique("resolution_reason_name_key").on(table.name),
+]);
+
+export const identifierInMinimal = pgTable("identifier_evidence", {
+	identifierId: bigserial("identifier_id", { mode: "bigint" }).primaryKey().notNull(),
+	identifierTypeId: bigint("identifier_type_id", { mode: "number" }).notNull(),
+	value: text().notNull(),
+}, (table) => [
+	uniqueIndex("identifier_evidence_type_value_idx").using("btree", table.identifierTypeId.asc().nullsLast().op("int8_ops"), table.value.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.identifierTypeId],
+			foreignColumns: [identifierTypeInMinimal.identifierTypeId],
+			name: "identifier_evidence_type_id_fkey"
+		}),
 ]);
 
 export const annotationInMinimal = pgTable("annotation", {
@@ -164,55 +196,45 @@ export const relationEvidenceInMinimal = pgTable("relation_evidence", {
 
 export const entityInMinimal = pgTable("entity", {
 	entityId: bigserial("entity_id", { mode: "bigint" }).primaryKey().notNull(),
-	entityType: text("entity_type").notNull(),
-	idType: text("id_type").notNull(),
-	id: text().notNull(),
-	idHash: text("id_hash").generatedAlwaysAs(sql`md5(id)`),
+	entityTypeId: bigint("entity_type_id", { mode: "number" }).notNull(),
 	taxonomyId: text("taxonomy_id"),
-	resolutionStatus: text("resolution_status").notNull(),
+	canonicalIdentifierTypeId: bigint("canonical_identifier_type_id", { mode: "number" }),
+	canonicalIdentifier: text("canonical_identifier").notNull(),
+	identifiers: jsonb().notNull(),
+	resolutionStatusId: smallint("resolution_status_id").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("entity_id_hash_lookup_idx").using("btree", table.idType.asc().nullsLast().op("text_ops"), table.idHash.asc().nullsLast().op("text_ops")),
-	index("entity_status_idx").using("btree", table.resolutionStatus.asc().nullsLast().op("text_ops")),
-	uniqueIndex("entity_type_id_hash_idx").using("btree", table.entityType.asc().nullsLast().op("text_ops"), table.idType.asc().nullsLast().op("text_ops"), table.idHash.asc().nullsLast().op("text_ops")),
-	check("entity_resolution_status_check", sql`resolution_status = ANY (ARRAY['resolved'::text, 'unresolved'::text])`),
-]);
-
-export const entityResolutionCandidateInMinimal = pgTable("entity_resolution_candidate", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).notNull(),
-	entityType: text("entity_type").notNull(),
-	idType: text("id_type").notNull(),
-	id: text().notNull(),
-	idHash: text("id_hash").notNull().generatedAlwaysAs(sql`md5(id)`),
-	taxonomyId: text("taxonomy_id"),
-	supportCount: integer("support_count").notNull(),
-	resolverSources: text("resolver_sources").array().notNull(),
-	keyTypes: text("key_types").array().notNull(),
-	mappingTypes: text("mapping_types").array(),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	index("entity_candidate_entity_idx").using("btree", table.entityType.asc().nullsLast().op("text_ops"), table.idType.asc().nullsLast().op("text_ops"), table.idHash.asc().nullsLast().op("text_ops")),
-	uniqueIndex("entity_resolution_candidate_unique_idx").using("btree", table.entityEvidenceId.asc().nullsLast().op("int8_ops"), table.entityType.asc().nullsLast().op("text_ops"), table.idType.asc().nullsLast().op("text_ops"), table.idHash.asc().nullsLast().op("int8_ops")),
+	index("entity_status_idx").using("btree", table.resolutionStatusId.asc().nullsLast().op("int2_ops")),
+	uniqueIndex("entity_canonical_key_idx").using("btree", table.entityTypeId.asc().nullsLast().op("int8_ops"), table.taxonomyId.asc().nullsLast().op("text_ops"), table.canonicalIdentifierTypeId.asc().nullsLast().op("int8_ops"), table.canonicalIdentifier.asc().nullsLast().op("text_ops")),
 	foreignKey({
-			columns: [table.entityEvidenceId],
-			foreignColumns: [entityEvidenceInMinimal.entityEvidenceId],
-			name: "entity_resolution_candidate_entity_evidence_id_fkey"
-		}).onDelete("cascade"),
+			columns: [table.entityTypeId],
+			foreignColumns: [entityTypeInMinimal.entityTypeId],
+			name: "entity_entity_type_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.canonicalIdentifierTypeId],
+			foreignColumns: [identifierTypeInMinimal.identifierTypeId],
+			name: "entity_canonical_identifier_type_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.resolutionStatusId],
+			foreignColumns: [resolutionStatusInMinimal.resolutionStatusId],
+			name: "entity_resolution_status_id_fkey"
+		}),
 ]);
 
 export const entityEvidenceResolutionInMinimal = pgTable("entity_evidence_resolution", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).primaryKey().notNull(),
-	status: text().notNull(),
+	statusId: smallint("status_id").notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	entityId: bigint("entity_id", { mode: "number" }),
-	candidateCount: integer("candidate_count").default(0).notNull(),
-	reason: text(),
+	reasonId: smallint("reason_id"),
 	resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("entity_evidence_resolution_entity_idx").using("btree", table.entityId.asc().nullsLast().op("int8_ops")),
-	index("entity_resolution_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	index("entity_resolution_reason_idx").using("btree", table.reasonId.asc().nullsLast().op("int2_ops")),
+	index("entity_resolution_status_idx").using("btree", table.statusId.asc().nullsLast().op("int2_ops")),
 	foreignKey({
 			columns: [table.entityEvidenceId],
 			foreignColumns: [entityEvidenceInMinimal.entityEvidenceId],
@@ -223,8 +245,17 @@ export const entityEvidenceResolutionInMinimal = pgTable("entity_evidence_resolu
 			foreignColumns: [entityInMinimal.entityId],
 			name: "entity_evidence_resolution_entity_id_fkey"
 		}),
-	check("entity_evidence_resolution_entity_check", sql`((status = ANY (ARRAY['resolved'::text, 'unresolved'::text, 'ambiguous'::text])) AND (entity_id IS NOT NULL)) OR ((status = 'unsupported'::text) AND (entity_id IS NULL))`),
-	check("entity_evidence_resolution_status_check", sql`status = ANY (ARRAY['resolved'::text, 'ambiguous'::text, 'unresolved'::text, 'unsupported'::text])`),
+	foreignKey({
+			columns: [table.statusId],
+			foreignColumns: [resolutionStatusInMinimal.resolutionStatusId],
+			name: "entity_evidence_resolution_status_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.reasonId],
+			foreignColumns: [resolutionReasonInMinimal.resolutionReasonId],
+			name: "entity_evidence_resolution_reason_id_fkey"
+		}),
+	check("entity_evidence_resolution_entity_check", sql`((status_id = ANY (ARRAY[1, 2, 3])) AND (entity_id IS NOT NULL)) OR ((status_id = 4) AND (entity_id IS NULL))`),
 ]);
 
 export const entityRelationCountsInMinimal = pgTable("entity_relation_counts", {

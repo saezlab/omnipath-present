@@ -891,8 +891,8 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query(
       `SELECT DISTINCT
-         es.id AS canonical_identifier,
-         es.id_type AS canonical_identifier_type
+         es.canonical_identifier,
+         (SELECT it.name FROM ${SEARCH_SCHEMA}.identifier_type it WHERE it.identifier_type_id = es.canonical_identifier_type_id) AS canonical_identifier_type
        FROM ${SEARCH_SCHEMA}.relation er
        JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.subject_entity_id
        WHERE er.relation_category = 'association'
