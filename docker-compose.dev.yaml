@@ -1,12 +1,11 @@
-# Development docker-compose: Runs backend services only
-# Use this with `pnpm dev` in omnipath-svelte for local frontend development
+# Development docker-compose: runs backend services only.
+# Prefer `make dev`, which starts these services and then runs the SvelteKit
+# frontend from omnipath-svelte.
 #
-# Services read from DATA_DIR (defaults to omnipath_build latest output):
-#   DATA_DIR=../omnipath_build/data/combined
-#   - entity.parquet, entity_relation.parquet, entity_relation_evidence.parquet
-#   - relation_annotation_term.parquet, ontology_term.parquet, resources.parquet
-# OBO files for ontology loading come from ONTOLOGY_DIR (silver layer):
-#   ONTOLOGY_DIR=../omnipath_build/data/silver
+# Active graph/search data comes from Postgres. The API service also mounts
+# local OBO files from a sibling omnipath-build checkout for ontology lookup:
+#   ONTOLOGY_DIR=../omnipath-build/data/obo
+# DATA_DIR and GOLD_ROOT_DIR are still mounted for legacy/archive code paths.
 
 services:
     omnipathv2-postgres:
@@ -42,9 +41,9 @@ services:
         ports:
             - "8081:8081"
         volumes:
-            - ${DATA_DIR:-../omnipath_build/data/combined}:/data/parquet:ro
-            - ${ONTOLOGY_DIR:-../omnipath_build/data/silver}:/data/obo:ro
-            - ${GOLD_ROOT_DIR:-../omnipath_build/data/gold}:/gold:ro
+            - ${DATA_DIR:-../omnipath-build/data/combined/latest}:/data/parquet:ro
+            - ${ONTOLOGY_DIR:-../omnipath-build/data/obo}:/data/obo:ro
+            - ${GOLD_ROOT_DIR:-../omnipath-build/data/gold}:/gold:ro
             - ./api-service/cache:/app/cache
             # Mount source for hot reload during development
             - ./api-service/api_service:/app/api_service
