@@ -72,7 +72,7 @@ function entityIdentifiersJsonSql(alias = "e"): string {
 }
 
 function entityBaseSelect(schema: string, alias = "e"): string {
-  return `${alias}.entity_id, ${alias}.canonical_identifier AS id, ${canonicalTypeSql(schema, alias)} AS id_type, ${entityTypeSql(schema, alias)} AS entity_type, ${alias}.taxonomy_id, ${entitySourcesSql(schema, alias)} AS sources`;
+  return `${alias}.entity_id, ${alias}.canonical_identifier AS id, ${canonicalTypeSql(schema, alias)} AS id_type, ${entityTypeSql(schema, alias)} AS entity_type, ${alias}.taxonomy_id, ARRAY[]::text[] AS sources`;
 }
 
 function ontologyTermEntityPredicate(schema: string, placeholder: string, entityAlias = "e"): string {
@@ -249,6 +249,23 @@ export async function searchEntities({
       params.push(value);
       return `$${params.length}`;
     };
+    const filterCtes: string[] = [];
+    const filterJoins: string[] = [];
+    const filterBitmaps: string[] = [];
+    const addFacetFilter = (cteName: string, facetName: string, values: string[]) => {
+      if (values.length === 0) return;
+      const param = pushParam(values);
+      filterCtes.push(`${cteName} AS MATERIALIZED (
+        SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${schema}.facet_entity_bitmap
+        WHERE facet_name = '${facetName}'
+          AND facet_value = ANY(${param}::text[])
+      )`);
+      filterJoins.push(`CROSS JOIN ${cteName}`);
+      filterBitmaps.push(`${cteName}.bitmap`);
+    };
+    const bitmapIntersection = (bitmaps: string[]) =>
+      bitmaps.slice(1).reduce((expr, bitmap) => `rb_and(${expr}, ${bitmap})`, bitmaps[0]);
 
     const trimmedQuery = query.trim();
     if (trimmedQuery) {
@@ -284,27 +301,16 @@ export async function searchEntities({
     }
 
     const entityTypes = normalizeStringValues(filters.entity_types || []);
-    if (entityTypes.length > 0) {
-      const param = pushParam(entityTypes);
-      whereParts.push(`${entityTypeSql(schema)} = ANY(${param}::text[])`);
-    }
+    addFacetFilter("entity_type_filter_bitmap", "entity_type", entityTypes);
 
     const taxonomyIds = normalizeStringValues(filters.ncbi_tax_id || []);
-    if (taxonomyIds.length > 0) {
-      const param = pushParam(taxonomyIds);
-      whereParts.push(`e.taxonomy_id = ANY(${param}::text[])`);
-    }
+    addFacetFilter("taxonomy_filter_bitmap", "taxonomy_id", taxonomyIds);
 
     const sources = normalizeStringValues(filters.sources || []);
-    if (sources.length > 0) {
-      const param = pushParam(sources);
-      whereParts.push(`EXISTS (
-        SELECT 1
-        FROM ${schema}.facet_entity_bitmap f
-        WHERE f.facet_name = 'source'
-          AND f.facet_value = ANY(${param}::text[])
-          AND rb_cardinality(rb_and(f.entity_bitmap, rb_build(ARRAY[e.entity_id::integer]))) > 0
-      )`);
+    addFacetFilter("source_filter_bitmap", "source", sources);
+
+    if (filterBitmaps.length > 0) {
+      whereParts.push(`rb_contains(${bitmapIntersection(filterBitmaps)}, e.entity_id::integer)`);
     }
 
     const normalizedCursor = normalizeEntitySearchCursor(cursor);
@@ -327,9 +333,11 @@ export async function searchEntities({
       sources: string[] | null;
       relation_count: string | number | null;
     }>(
-      `WITH matched_entities AS MATERIALIZED (
+      `WITH ${filterCtes.length ? `${filterCtes.join(",\n")},` : ""}
+       matched_entities AS MATERIALIZED (
          SELECT e.*
          FROM ${schema}.entity e
+         ${filterJoins.join("\n")}
          WHERE ${whereParts.join(" AND ")}
        ),
        matched AS (
@@ -420,7 +428,7 @@ async function searchEntitiesByRelationCount({
          it.name AS id_type,
          et.name AS entity_type,
          e.taxonomy_id,
-         ${entitySourcesSql(schema, "e")} AS sources,
+         ARRAY[]::text[] AS sources,
          rc.relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
@@ -544,6 +552,76 @@ export async function getScopedEntityFacetCounts({
   const client = await getPool().connect();
   try {
     const schema = SEARCH_SCHEMA();
+    if (
+      normalizedEntityTypes.length > 0
+      && normalizedEntityPks.length === 0
+      && normalizedTermIds.length === 0
+      && normalizedSources.length === 0
+      && normalizedTaxonomyIds.length === 0
+      && !trimmedQuery
+    ) {
+      const result = await client.query<{ facet_name: string; facet_value: string; scoped_count: string | number }>(
+        `WITH type_filter_bitmap AS MATERIALIZED (
+           SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+           FROM ${schema}.facet_entity_bitmap
+           WHERE facet_name = 'entity_type'
+             AND facet_value = ANY($1::text[])
+         ),
+         facet_counts AS MATERIALIZED (
+           SELECT facet_name, facet_value, scoped_count
+           FROM (
+             SELECT 'entity_type' AS facet_name,
+                    f.facet_value,
+                    CASE
+                      WHEN f.facet_value = ANY($1::text[])
+                        THEN rb_cardinality(f.entity_bitmap)
+                      ELSE 0
+                    END AS scoped_count
+             FROM ${schema}.facet_entity_bitmap f
+             WHERE f.facet_name = 'entity_type'
+               AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'
+           ) entity_type_facets
+           WHERE scoped_count > 0
+           UNION ALL
+           SELECT facet_name, facet_value, scoped_count
+           FROM (
+             SELECT 'source' AS facet_name,
+                    f.facet_value,
+                    rb_cardinality(rb_and(f.entity_bitmap, type_filter_bitmap.bitmap)) AS scoped_count
+             FROM ${schema}.facet_entity_bitmap f
+             CROSS JOIN type_filter_bitmap
+             WHERE f.facet_name = 'source'
+           ) source_facets
+           WHERE scoped_count > 0
+           UNION ALL
+           SELECT facet_name, facet_value, scoped_count
+           FROM (
+             SELECT 'taxonomy_id' AS facet_name,
+                    f.facet_value,
+                    rb_cardinality(rb_and(f.entity_bitmap, type_filter_bitmap.bitmap)) AS scoped_count
+             FROM ${schema}.facet_entity_bitmap f
+             CROSS JOIN type_filter_bitmap
+             WHERE f.facet_name = 'taxonomy_id'
+           ) taxonomy_facets
+           WHERE scoped_count > 0
+         ),
+         ranked_facet_counts AS (
+           SELECT *, ROW_NUMBER() OVER (PARTITION BY facet_name ORDER BY scoped_count DESC, facet_value ASC) AS facet_rank
+           FROM facet_counts
+         )
+         SELECT facet_name, facet_value, scoped_count
+         FROM ranked_facet_counts
+         WHERE facet_rank <= $2::integer
+         ORDER BY facet_name, scoped_count DESC`,
+        [normalizedEntityTypes, normalizedFacetLimit],
+      );
+      return result.rows.map((row) => ({
+        facetName: row.facet_name,
+        facetValue: row.facet_value,
+        scopedCount: Number(row.scoped_count || 0),
+      }));
+    }
+
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -597,7 +675,7 @@ export async function getScopedEntityFacetCounts({
     if (normalizedEntityTypes.length > 0) {
       const typeParam = pushParam(normalizedEntityTypes);
       ctes.push(`type_filter_bitmap AS MATERIALIZED (
-        SELECT COALESCE(rb_and_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
         FROM ${schema}.facet_entity_bitmap
         WHERE facet_name = 'entity_type' AND facet_value = ANY(${typeParam}::text[])
       )`);
@@ -606,7 +684,7 @@ export async function getScopedEntityFacetCounts({
     if (normalizedSources.length > 0) {
       const sourceParam = pushParam(normalizedSources);
       ctes.push(`source_filter_bitmap AS MATERIALIZED (
-        SELECT COALESCE(rb_and_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
         FROM ${schema}.facet_entity_bitmap
         WHERE facet_name = 'source' AND facet_value = ANY(${sourceParam}::text[])
       )`);
@@ -615,7 +693,7 @@ export async function getScopedEntityFacetCounts({
     if (normalizedTaxonomyIds.length > 0) {
       const taxonomyParam = pushParam(normalizedTaxonomyIds);
       ctes.push(`taxonomy_filter_bitmap AS MATERIALIZED (
-        SELECT COALESCE(rb_and_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
         FROM ${schema}.facet_entity_bitmap
         WHERE facet_name = 'taxonomy_id' AND facet_value = ANY(${taxonomyParam}::text[])
       )`);
@@ -632,16 +710,24 @@ export async function getScopedEntityFacetCounts({
     const sourceScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
     const taxonomyScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : [])]);
 
+    const facetCountSubquery = (
+      facetName: string,
+      scope: string,
+      extraWhere = "",
+    ) => `SELECT facet_name, facet_value, scoped_count
+       FROM (
+         SELECT '${facetName}' AS facet_name,
+                f.facet_value,
+                rb_cardinality(rb_and(f.entity_bitmap, ${scope})) AS scoped_count
+         FROM ${schema}.facet_entity_bitmap f ${joins.join("\n")}
+         WHERE f.facet_name = '${facetName}' ${extraWhere}
+       ) scoped_${facetName}_facets
+       WHERE scoped_count > 0`;
+
     const subqueries = [
-      `SELECT 'entity_type' AS facet_name, f.facet_value, rb_cardinality(rb_and(f.entity_bitmap, ${typeScope})) AS scoped_count
-       FROM ${schema}.facet_entity_bitmap f ${joins.join("\n")}
-       WHERE f.facet_name = 'entity_type' AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}' AND rb_cardinality(rb_and(f.entity_bitmap, ${typeScope})) > 0`,
-      `SELECT 'source' AS facet_name, f.facet_value, rb_cardinality(rb_and(f.entity_bitmap, ${sourceScope})) AS scoped_count
-       FROM ${schema}.facet_entity_bitmap f ${joins.join("\n")}
-       WHERE f.facet_name = 'source' AND rb_cardinality(rb_and(f.entity_bitmap, ${sourceScope})) > 0`,
-      `SELECT 'taxonomy_id' AS facet_name, f.facet_value, rb_cardinality(rb_and(f.entity_bitmap, ${taxonomyScope})) AS scoped_count
-       FROM ${schema}.facet_entity_bitmap f ${joins.join("\n")}
-       WHERE f.facet_name = 'taxonomy_id' AND rb_cardinality(rb_and(f.entity_bitmap, ${taxonomyScope})) > 0`,
+      facetCountSubquery("entity_type", typeScope, `AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'`),
+      facetCountSubquery("source", sourceScope),
+      facetCountSubquery("taxonomy_id", taxonomyScope),
     ];
 
     const facetLimitParam = pushParam(normalizedFacetLimit);

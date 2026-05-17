@@ -197,16 +197,28 @@ def _entity_filter_sql(filters: dict[str, Any], params: list[Any], alias: str = 
             AND terms.term_id = ANY({push(annotation_terms)}::text[])
         )""")
     if entity_types:
-        where.append(f"{_entity_type_sql(alias)} = ANY({push(entity_types)}::text[])")
+        where.append(f"""EXISTS (
+          SELECT 1
+          FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+          WHERE f.facet_name = 'entity_type'
+            AND f.facet_value = ANY({push(entity_types)}::text[])
+            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
+        )""")
     if taxonomy_ids:
-        where.append(f"{alias}.taxonomy_id = ANY({push(taxonomy_ids)}::text[])")
+        where.append(f"""EXISTS (
+          SELECT 1
+          FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+          WHERE f.facet_name = 'taxonomy_id'
+            AND f.facet_value = ANY({push(taxonomy_ids)}::text[])
+            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
+        )""")
     if sources:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
           WHERE f.facet_name = 'source'
             AND f.facet_value = ANY({push(sources)}::text[])
-            AND rb_cardinality(rb_and(f.entity_bitmap, rb_build(ARRAY[{alias}.entity_id::integer]))) > 0
+            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
         )""")
 
     return where
@@ -539,10 +551,11 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
             WHERE association.relation_category = 'association'
           ),
           directly_annotated_relation_ids AS (
-            SELECT DISTINCT rea.relation_id
-            FROM {SEARCH_SCHEMA}.relation_evidence_annotation rea
-            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_id = rea.annotation_id
-            JOIN term_entities term_entity ON term_entity.term_entity_id = a.entity_id
+            SELECT DISTINCT ra.relation_id
+            FROM {SEARCH_SCHEMA}.relation_annotation ra
+            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = ra.annotation_key
+            JOIN term_entities term_entity
+              ON term_entity.term_id IN (a.term, a.value)
           )
           SELECT relation_id FROM directly_annotated_relation_ids
           UNION
@@ -623,25 +636,29 @@ def relation_evidence(relation_id: int) -> dict[str, Any]:
           re.relation_evidence_id,
           rer.relation_id,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', a.scope) ORDER BY a.annotation_id)
-            FROM {SEARCH_SCHEMA}.annotation a
-            WHERE a.relation_evidence_id = re.relation_evidence_id AND a.scope IN ('record', 'relation')
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', rea.scope) ORDER BY a.annotation_key)
+            FROM {SEARCH_SCHEMA}.relation_evidence_annotation rea
+            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = rea.annotation_key
+            WHERE rea.relation_evidence_id = re.relation_evidence_id AND rea.scope IN ('record', 'relation')
           ), '[]'::jsonb) AS record_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', a.scope) ORDER BY a.annotation_id)
-            FROM {SEARCH_SCHEMA}.annotation a
-            WHERE a.entity_evidence_id = re.subject_entity_evidence_id
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', eea.scope) ORDER BY a.annotation_key)
+            FROM {SEARCH_SCHEMA}.entity_evidence_annotation eea
+            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = eea.annotation_key
+            WHERE eea.entity_evidence_id = re.subject_entity_evidence_id
           ), '[]'::jsonb) AS subject_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', a.scope) ORDER BY a.annotation_id)
-            FROM {SEARCH_SCHEMA}.annotation a
-            WHERE a.entity_evidence_id = re.object_entity_evidence_id
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', eea.scope) ORDER BY a.annotation_key)
+            FROM {SEARCH_SCHEMA}.entity_evidence_annotation eea
+            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = eea.annotation_key
+            WHERE eea.entity_evidence_id = re.object_entity_evidence_id
           ), '[]'::jsonb) AS object_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', a.scope) ORDER BY a.annotation_id)
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', rea.scope) ORDER BY a.annotation_key)
             FROM {SEARCH_SCHEMA}.relation_evidence_annotation rea
-            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_id = rea.annotation_id
+            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = rea.annotation_key
             WHERE rea.relation_evidence_id = re.relation_evidence_id
+              AND rea.scope NOT IN ('record', 'relation')
           ), '[]'::jsonb) AS evidence
         FROM {SEARCH_SCHEMA}.relation_evidence_relation rer
         JOIN {SEARCH_SCHEMA}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id

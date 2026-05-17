@@ -3,18 +3,18 @@ import type { EntityRelationEvidence } from "$lib/drizzle";
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
-function annotationArraySql(schema: string, whereSql: string): string {
+function annotationArraySql(fromSql: string, whereSql: string): string {
   return `COALESCE((
     SELECT jsonb_agg(
       jsonb_build_object(
         'term', a.term,
         'value', a.value,
         'unit', a.unit,
-        'scope', a.scope
+        'scope', ann.scope
       )
-      ORDER BY a.annotation_id
+      ORDER BY a.annotation_key
     )
-    FROM ${schema}.annotation a
+    FROM ${fromSql}
     WHERE ${whereSql}
   ), '[]'::jsonb)`;
 }
@@ -39,23 +39,22 @@ async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<
          re.source,
          re.relation_evidence_id,
          rer.relation_id,
-         ${annotationArraySql(schema, "a.relation_evidence_id = re.relation_evidence_id AND a.scope IN ('record', 'relation')")} AS record_attributes,
-         ${annotationArraySql(schema, "a.entity_evidence_id = re.subject_entity_evidence_id")} AS subject_attributes,
-         ${annotationArraySql(schema, "a.entity_evidence_id = re.object_entity_evidence_id")} AS object_attributes,
-         COALESCE((
-           SELECT jsonb_agg(
-             jsonb_build_object(
-               'term', a.term,
-               'value', a.value,
-               'unit', a.unit,
-               'scope', a.scope
-             )
-             ORDER BY a.annotation_id
-           )
-           FROM ${schema}.relation_evidence_annotation rea
-           JOIN ${schema}.annotation a ON a.annotation_id = rea.annotation_id
-           WHERE rea.relation_evidence_id = re.relation_evidence_id
-         ), ${annotationArraySql(schema, "a.relation_evidence_id = re.relation_evidence_id AND a.scope NOT IN ('record', 'relation')")}) AS evidence
+         ${annotationArraySql(
+           `${schema}.relation_evidence_annotation ann JOIN ${schema}.annotation a ON a.annotation_key = ann.annotation_key`,
+           "ann.relation_evidence_id = re.relation_evidence_id AND ann.scope IN ('record', 'relation')",
+         )} AS record_attributes,
+         ${annotationArraySql(
+           `${schema}.entity_evidence_annotation ann JOIN ${schema}.annotation a ON a.annotation_key = ann.annotation_key`,
+           "ann.entity_evidence_id = re.subject_entity_evidence_id",
+         )} AS subject_attributes,
+         ${annotationArraySql(
+           `${schema}.entity_evidence_annotation ann JOIN ${schema}.annotation a ON a.annotation_key = ann.annotation_key`,
+           "ann.entity_evidence_id = re.object_entity_evidence_id",
+         )} AS object_attributes,
+         ${annotationArraySql(
+           `${schema}.relation_evidence_annotation ann JOIN ${schema}.annotation a ON a.annotation_key = ann.annotation_key`,
+           "ann.relation_evidence_id = re.relation_evidence_id AND ann.scope NOT IN ('record', 'relation')",
+         )} AS evidence
        FROM ${schema}.relation_evidence_relation rer
        JOIN ${schema}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
        WHERE rer.relation_id = ANY($1::bigint[])

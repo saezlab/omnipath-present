@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal } from "./schema";
+import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal, entityEvidenceAnnotationInMinimal, entityAnnotationInMinimal, relationAnnotationInMinimal } from "./schema";
 
 export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinimal, ({one, many}) => ({
 	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
@@ -10,7 +10,7 @@ export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinima
 	entityEvidenceInMinimals: many(entityEvidenceInMinimal, {
 		relationName: "entityEvidenceInMinimal_parentEntityEvidenceId_entityEvidenceInMinimal_entityEvidenceId"
 	}),
-	annotationInMinimals: many(annotationInMinimal),
+	entityEvidenceAnnotationInMinimals: many(entityEvidenceAnnotationInMinimal),
 	relationEvidenceInMinimals_subjectEntityEvidenceId: many(relationEvidenceInMinimal, {
 		relationName: "relationEvidenceInMinimal_subjectEntityEvidenceId_entityEvidenceInMinimal_entityEvidenceId"
 	}),
@@ -21,24 +21,14 @@ export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinima
 	entityEvidenceIdentifierInMinimals: many(entityEvidenceIdentifierInMinimal),
 }));
 
-export const annotationInMinimalRelations = relations(annotationInMinimal, ({one, many}) => ({
-	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
-		fields: [annotationInMinimal.entityEvidenceId],
-		references: [entityEvidenceInMinimal.entityEvidenceId]
-	}),
-	relationEvidenceInMinimal: one(relationEvidenceInMinimal, {
-		fields: [annotationInMinimal.relationEvidenceId],
-		references: [relationEvidenceInMinimal.relationEvidenceId]
-	}),
-	entityInMinimal: one(entityInMinimal, {
-		fields: [annotationInMinimal.entityId],
-		references: [entityInMinimal.entityId]
-	}),
+export const annotationInMinimalRelations = relations(annotationInMinimal, ({many}) => ({
 	relationEvidenceAnnotationInMinimals: many(relationEvidenceAnnotationInMinimal),
+	entityEvidenceAnnotationInMinimals: many(entityEvidenceAnnotationInMinimal),
+	entityAnnotationInMinimals: many(entityAnnotationInMinimal),
+	relationAnnotationInMinimals: many(relationAnnotationInMinimal),
 }));
 
 export const relationEvidenceInMinimalRelations = relations(relationEvidenceInMinimal, ({one, many}) => ({
-	annotationInMinimals: many(annotationInMinimal),
 	entityEvidenceInMinimal_subjectEntityEvidenceId: one(entityEvidenceInMinimal, {
 		fields: [relationEvidenceInMinimal.subjectEntityEvidenceId],
 		references: [entityEvidenceInMinimal.entityEvidenceId],
@@ -64,7 +54,7 @@ export const relationEvidenceInMinimalRelations = relations(relationEvidenceInMi
 }));
 
 export const entityInMinimalRelations = relations(entityInMinimal, ({many}) => ({
-	annotationInMinimals: many(annotationInMinimal),
+	entityAnnotationInMinimals: many(entityAnnotationInMinimal),
 	relationEvidenceInMinimals_subjectEntityId: many(relationEvidenceInMinimal, {
 		relationName: "relationEvidenceInMinimal_subjectEntityId_entityInMinimal_entityId"
 	}),
@@ -114,7 +104,7 @@ export const relationInMinimalRelations = relations(relationInMinimal, ({one, ma
 		relationName: "relationInMinimal_objectEntityId_entityInMinimal_entityId"
 	}),
 	relationEvidenceRelationInMinimals: many(relationEvidenceRelationInMinimal),
-	relationEvidenceAnnotationInMinimals: many(relationEvidenceAnnotationInMinimal),
+	relationAnnotationInMinimals: many(relationAnnotationInMinimal),
 }));
 
 export const ontologyTermsInMinimalRelations = relations(ontologyTermsInMinimal, ({one}) => ({
@@ -165,16 +155,45 @@ export const relationEvidenceRelationInMinimalRelations = relations(relationEvid
 }));
 
 export const relationEvidenceAnnotationInMinimalRelations = relations(relationEvidenceAnnotationInMinimal, ({one}) => ({
-	relationInMinimal: one(relationInMinimal, {
-		fields: [relationEvidenceAnnotationInMinimal.relationId],
-		references: [relationInMinimal.relationId]
-	}),
 	relationEvidenceInMinimal: one(relationEvidenceInMinimal, {
 		fields: [relationEvidenceAnnotationInMinimal.relationEvidenceId],
 		references: [relationEvidenceInMinimal.relationEvidenceId]
 	}),
 	annotationInMinimal: one(annotationInMinimal, {
-		fields: [relationEvidenceAnnotationInMinimal.annotationId],
-		references: [annotationInMinimal.annotationId]
+		fields: [relationEvidenceAnnotationInMinimal.annotationKey],
+		references: [annotationInMinimal.annotationKey]
+	}),
+}));
+
+export const entityEvidenceAnnotationInMinimalRelations = relations(entityEvidenceAnnotationInMinimal, ({one}) => ({
+	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
+		fields: [entityEvidenceAnnotationInMinimal.entityEvidenceId],
+		references: [entityEvidenceInMinimal.entityEvidenceId]
+	}),
+	annotationInMinimal: one(annotationInMinimal, {
+		fields: [entityEvidenceAnnotationInMinimal.annotationKey],
+		references: [annotationInMinimal.annotationKey]
+	}),
+}));
+
+export const entityAnnotationInMinimalRelations = relations(entityAnnotationInMinimal, ({one}) => ({
+	entityInMinimal: one(entityInMinimal, {
+		fields: [entityAnnotationInMinimal.entityId],
+		references: [entityInMinimal.entityId]
+	}),
+	annotationInMinimal: one(annotationInMinimal, {
+		fields: [entityAnnotationInMinimal.annotationKey],
+		references: [annotationInMinimal.annotationKey]
+	}),
+}));
+
+export const relationAnnotationInMinimalRelations = relations(relationAnnotationInMinimal, ({one}) => ({
+	relationInMinimal: one(relationInMinimal, {
+		fields: [relationAnnotationInMinimal.relationId],
+		references: [relationInMinimal.relationId]
+	}),
+	annotationInMinimal: one(annotationInMinimal, {
+		fields: [relationAnnotationInMinimal.annotationKey],
+		references: [annotationInMinimal.annotationKey]
 	}),
 }));

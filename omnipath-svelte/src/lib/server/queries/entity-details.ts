@@ -35,12 +35,23 @@ export async function getEntityDetails(publicId: string) {
       [entity.entityPk],
     );
     const attributeResult = await client.query<EntityAnnotationRow>(
-      `SELECT DISTINCT a.term, a.value, a.unit, a.scope, ee.source
-       FROM ${schema}.annotation a
-       LEFT JOIN ${schema}.entity_evidence_resolution eer ON eer.entity_evidence_id = a.entity_evidence_id
-       LEFT JOIN ${schema}.entity_evidence ee ON ee.entity_evidence_id = a.entity_evidence_id
-       WHERE a.entity_id = $1 OR eer.entity_id = $1
-       ORDER BY a.term, a.value NULLS LAST, ee.source NULLS LAST
+      `SELECT DISTINCT term, value, unit, scope, source
+       FROM (
+         SELECT a.term, a.value, a.unit, ea.scope, NULL::text AS source
+         FROM ${schema}.entity_annotation ea
+         JOIN ${schema}.annotation a ON a.annotation_key = ea.annotation_key
+         WHERE ea.entity_id = $1
+         UNION ALL
+         SELECT a.term, a.value, a.unit, eea.scope, ee.source
+         FROM ${schema}.entity_evidence_resolution eer
+         JOIN ${schema}.entity_evidence_annotation eea
+           ON eea.entity_evidence_id = eer.entity_evidence_id
+         JOIN ${schema}.annotation a ON a.annotation_key = eea.annotation_key
+         LEFT JOIN ${schema}.entity_evidence ee
+           ON ee.entity_evidence_id = eer.entity_evidence_id
+         WHERE eer.entity_id = $1
+       ) annotations
+       ORDER BY term, value NULLS LAST, source NULLS LAST
        LIMIT 500`,
       [entity.entityPk],
     );

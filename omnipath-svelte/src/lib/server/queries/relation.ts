@@ -279,10 +279,10 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
           JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
           WHERE association.relation_category = 'association'
         )
-        SELECT DISTINCT rea.relation_id
-        FROM ${schema}.relation_evidence_annotation rea
-        JOIN ${schema}.annotation a ON a.annotation_id = rea.annotation_id
-        JOIN term_entities term_entity ON term_entity.term_entity_id = a.entity_id
+        SELECT DISTINCT ra.relation_id
+        FROM ${schema}.relation_annotation ra
+        JOIN ${schema}.annotation a ON a.annotation_key = ra.annotation_key
+        JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
         UNION
         SELECT subject_relation.relation_id
         FROM ${schema}.relation subject_relation
@@ -320,10 +320,10 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
           JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
           WHERE association.relation_category = 'association'
         )
-        SELECT DISTINCT rea.relation_id
-        FROM ${schema}.relation_evidence_annotation rea
-        JOIN ${schema}.annotation a ON a.annotation_id = rea.annotation_id
-        JOIN term_entities term_entity ON term_entity.term_entity_id = a.entity_id
+        SELECT DISTINCT ra.relation_id
+        FROM ${schema}.relation_annotation ra
+        JOIN ${schema}.annotation a ON a.annotation_key = ra.annotation_key
+        JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
         UNION
         SELECT subject_relation.relation_id
         FROM ${schema}.relation subject_relation

@@ -1,4 +1,4 @@
-import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType, jsonb, smallint } from "drizzle-orm/pg-core"
+import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType, jsonb, smallint, uuid } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -111,36 +111,12 @@ export const identifierInMinimal = pgTable("identifier_evidence", {
 ]);
 
 export const annotationInMinimal = pgTable("annotation", {
-	annotationId: bigserial("annotation_id", { mode: "bigint" }).primaryKey().notNull(),
+	annotationKey: uuid("annotation_key").primaryKey().notNull(),
 	term: text().notNull(),
 	value: text(),
 	unit: text(),
-	scope: text().notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	relationEvidenceId: bigint("relation_evidence_id", { mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	entityId: bigint("entity_id", { mode: "number" }),
 }, (table) => [
-	index("annotation_entity_evidence_term_idx").using("btree", table.entityEvidenceId.asc().nullsLast().op("int8_ops"), table.term.asc().nullsLast().op("int8_ops"), table.unit.asc().nullsLast().op("text_ops")),
-	index("annotation_entity_idx").using("btree", table.entityId.asc().nullsLast().op("int8_ops")),
-	foreignKey({
-			columns: [table.entityEvidenceId],
-			foreignColumns: [entityEvidenceInMinimal.entityEvidenceId],
-			name: "annotation_entity_evidence_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.relationEvidenceId],
-			foreignColumns: [relationEvidenceInMinimal.relationEvidenceId],
-			name: "annotation_relation_evidence_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.entityId],
-			foreignColumns: [entityInMinimal.entityId],
-			name: "annotation_entity_id_fkey"
-		}).onDelete("cascade"),
-	check("annotation_target_check", sql`((((entity_evidence_id IS NOT NULL))::integer + ((relation_evidence_id IS NOT NULL))::integer) + ((entity_id IS NOT NULL))::integer) = 1`),
+	uniqueIndex("annotation_value_idx").using("btree", table.term.asc().nullsLast().op("text_ops"), table.value.asc().nullsLast().op("text_ops"), table.unit.asc().nullsLast().op("text_ops")),
 ]);
 
 export const relationEvidenceInMinimal = pgTable("relation_evidence", {
@@ -408,31 +384,83 @@ export const relationEvidenceRelationInMinimal = pgTable("relation_evidence_rela
 
 export const relationEvidenceAnnotationInMinimal = pgTable("relation_evidence_annotation", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	relationId: bigint("relation_id", { mode: "number" }).notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	relationEvidenceId: bigint("relation_evidence_id", { mode: "number" }).notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	annotationId: bigint("annotation_id", { mode: "number" }).notNull(),
+	annotationKey: uuid("annotation_key").notNull(),
+	scope: text().notNull(),
 }, (table) => [
-	index("relation_evidence_annotation_annotation_idx").using("btree", table.annotationId.asc().nullsLast().op("int8_ops")),
+	index("relation_evidence_annotation_annotation_key_idx").using("btree", table.annotationKey.asc().nullsLast().op("uuid_ops")),
 	index("relation_evidence_annotation_relation_evidence_idx").using("btree", table.relationEvidenceId.asc().nullsLast().op("int8_ops")),
-	foreignKey({
-			columns: [table.relationId],
-			foreignColumns: [relationInMinimal.relationId],
-			name: "relation_evidence_annotation_relation_id_fkey"
-		}).onDelete("cascade"),
 	foreignKey({
 			columns: [table.relationEvidenceId],
 			foreignColumns: [relationEvidenceInMinimal.relationEvidenceId],
 			name: "relation_evidence_annotation_relation_evidence_id_fkey"
 		}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.annotationId],
-			foreignColumns: [annotationInMinimal.annotationId],
-			name: "relation_evidence_annotation_annotation_id_fkey"
+			columns: [table.annotationKey],
+			foreignColumns: [annotationInMinimal.annotationKey],
+			name: "relation_evidence_annotation_annotation_key_fkey"
 		}).onDelete("cascade"),
-	primaryKey({ columns: [table.annotationId, table.relationEvidenceId, table.relationId], name: "relation_evidence_annotation_pkey"}),
-	unique("relation_evidence_annotation_annotation_id_key").on(table.annotationId),
+	primaryKey({ columns: [table.relationEvidenceId, table.annotationKey, table.scope], name: "relation_evidence_annotation_pkey"}),
+]);
+
+export const entityEvidenceAnnotationInMinimal = pgTable("entity_evidence_annotation", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	entityEvidenceId: bigint("entity_evidence_id", { mode: "number" }).notNull(),
+	annotationKey: uuid("annotation_key").notNull(),
+	scope: text().notNull(),
+}, (table) => [
+	index("entity_evidence_annotation_annotation_key_idx").using("btree", table.annotationKey.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.entityEvidenceId],
+			foreignColumns: [entityEvidenceInMinimal.entityEvidenceId],
+			name: "entity_evidence_annotation_entity_evidence_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.annotationKey],
+			foreignColumns: [annotationInMinimal.annotationKey],
+			name: "entity_evidence_annotation_annotation_key_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.entityEvidenceId, table.annotationKey, table.scope], name: "entity_evidence_annotation_pkey"}),
+]);
+
+export const entityAnnotationInMinimal = pgTable("entity_annotation", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	entityId: bigint("entity_id", { mode: "number" }).notNull(),
+	annotationKey: uuid("annotation_key").notNull(),
+	scope: text().notNull(),
+}, (table) => [
+	index("entity_annotation_annotation_key_idx").using("btree", table.annotationKey.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.entityId],
+			foreignColumns: [entityInMinimal.entityId],
+			name: "entity_annotation_entity_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.annotationKey],
+			foreignColumns: [annotationInMinimal.annotationKey],
+			name: "entity_annotation_annotation_key_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.entityId, table.annotationKey, table.scope], name: "entity_annotation_pkey"}),
+]);
+
+export const relationAnnotationInMinimal = pgTable("relation_annotation", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	relationId: bigint("relation_id", { mode: "number" }).notNull(),
+	annotationKey: uuid("annotation_key").notNull(),
+	scope: text().notNull(),
+}, (table) => [
+	index("relation_annotation_annotation_key_idx").using("btree", table.annotationKey.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.relationId],
+			foreignColumns: [relationInMinimal.relationId],
+			name: "relation_annotation_relation_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.annotationKey],
+			foreignColumns: [annotationInMinimal.annotationKey],
+			name: "relation_annotation_annotation_key_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.relationId, table.annotationKey, table.scope], name: "relation_annotation_pkey"}),
 ]);
 
 export const facetEntityBitmapInMinimal = pgTable("facet_entity_bitmap", {
