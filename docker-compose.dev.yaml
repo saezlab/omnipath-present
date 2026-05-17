@@ -6,6 +6,9 @@
 # local OBO files from a sibling omnipath-build checkout for ontology lookup:
 #   ONTOLOGY_DIR=../omnipath-build/data/obo
 # DATA_DIR and GOLD_ROOT_DIR are still mounted for legacy/archive code paths.
+#
+# PostgreSQL tuning defaults assume a 12GB host with SSD storage. Override
+# POSTGRES_* values in .env or the shell for other host sizes.
 
 services:
     omnipathv2-postgres:
@@ -18,6 +21,26 @@ services:
             POSTGRES_PASSWORD: omnipath
         ports:
             - "55432:5432"
+        command:
+            - postgres
+            - -c
+            - shared_buffers=${POSTGRES_SHARED_BUFFERS:-3GB}
+            - -c
+            - work_mem=${POSTGRES_WORK_MEM:-32MB}
+            - -c
+            - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-1GB}
+            - -c
+            - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-9GB}
+            - -c
+            - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-12GB}
+            - -c
+            - min_wal_size=${POSTGRES_MIN_WAL_SIZE:-2GB}
+            - -c
+            - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}
+            - -c
+            - checkpoint_completion_target=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
+            - -c
+            - random_page_cost=${POSTGRES_RANDOM_PAGE_COST:-1.1}
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U omnipath -d omnipath"]
             interval: 5s
