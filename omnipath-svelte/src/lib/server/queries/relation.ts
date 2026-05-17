@@ -1,6 +1,14 @@
 import { getPool } from "$lib/server/db/client";
 import type { Entity, EntityRelation } from "$lib/drizzle";
 import { toPublicEntityId } from "$lib/entity-public-id";
+import {
+  canonicalIdentifierTypeNameSql,
+  entityTypeNameSql,
+  relationCategoryAnySql,
+  relationCategoryEqualsSql,
+  relationCategoryNameSql,
+  relationPredicateNameSql,
+} from "$lib/server/queries/sql-fragments";
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
@@ -50,19 +58,19 @@ function toEntityRow(row: {
 }
 
 function entityTypeSql(schema: string, alias: string): string {
-  return `(SELECT et.name FROM ${schema}.entity_type et WHERE et.entity_type_id = ${alias}.entity_type_id)`;
+  return entityTypeNameSql(schema, alias);
 }
 
 function canonicalTypeSql(schema: string, alias: string): string {
-  return `(SELECT it.name FROM ${schema}.identifier_type it WHERE it.identifier_type_id = ${alias}.canonical_identifier_type_id)`;
+  return canonicalIdentifierTypeNameSql(schema, alias);
 }
 
 function relationSelect(schema: string, alias = "r"): string {
   return `${alias}.relation_id,
     ${alias}.subject_entity_id,
-    ${alias}.predicate,
+    ${relationPredicateNameSql(schema, alias)} AS predicate,
     ${alias}.object_entity_id,
-    ${alias}.relation_category,
+    ${relationCategoryNameSql(schema, alias)} AS relation_category,
     ARRAY(
       SELECT DISTINCT entity_type
       FROM (
@@ -83,13 +91,16 @@ function relationSelect(schema: string, alias = "r"): string {
       WHERE rer.relation_id = ${alias}.relation_id
     ) AS evidence_count,
     ARRAY(
-      SELECT DISTINCT re.source
+      SELECT DISTINCT ds.name
       FROM ${schema}.relation_evidence_relation rer
-      JOIN ${schema}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
+      JOIN ${schema}.relation_evidence re
+        ON re.source_id = rer.source_id
+       AND re.relation_evidence_id = rer.relation_evidence_id
+      JOIN ${schema}.data_source ds ON ds.source_id = re.source_id
       WHERE rer.relation_id = ${alias}.relation_id
-        AND re.source IS NOT NULL
-        AND re.source <> ''
-      ORDER BY re.source
+        AND ds.name IS NOT NULL
+        AND ds.name <> ''
+      ORDER BY ds.name
     ) AS sources`;
 }
 
@@ -229,7 +240,7 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
     const param = pushParam(relationCategories, "text[]");
     bitmapParts.push(`SELECT COALESCE(rb_build_agg(r.relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
-      WHERE r.relation_category = ANY(${param})`);
+      WHERE ${relationCategoryAnySql(schema, "r", param)}`);
   }
 
   addFacetBitmap("predicate", normalizeStringValues(filters.predicates));
@@ -277,11 +288,14 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
           SELECT DISTINCT association.subject_entity_id AS entity_id
           FROM ${schema}.relation association
           JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
-          WHERE association.relation_category = 'association'
+          WHERE ${relationCategoryEqualsSql(schema, "association", "association")}
         )
-        SELECT DISTINCT ra.relation_id
-        FROM ${schema}.relation_annotation ra
-        JOIN ${schema}.annotation a ON a.annotation_key = ra.annotation_key
+        SELECT DISTINCT rer.relation_id
+        FROM ${schema}.relation_evidence_annotation rea
+        JOIN ${schema}.relation_evidence_relation rer
+          ON rer.source_id = rea.source_id
+         AND rer.relation_evidence_id = rea.relation_evidence_id
+        JOIN ${schema}.annotation a ON a.annotation_key = rea.annotation_key
         JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
         UNION
         SELECT subject_relation.relation_id
@@ -318,11 +332,14 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
           SELECT DISTINCT association.subject_entity_id AS entity_id
           FROM ${schema}.relation association
           JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
-          WHERE association.relation_category = 'association'
+          WHERE ${relationCategoryEqualsSql(schema, "association", "association")}
         )
-        SELECT DISTINCT ra.relation_id
-        FROM ${schema}.relation_annotation ra
-        JOIN ${schema}.annotation a ON a.annotation_key = ra.annotation_key
+        SELECT DISTINCT rer.relation_id
+        FROM ${schema}.relation_evidence_annotation rea
+        JOIN ${schema}.relation_evidence_relation rer
+          ON rer.source_id = rea.source_id
+         AND rer.relation_evidence_id = rea.relation_evidence_id
+        JOIN ${schema}.annotation a ON a.annotation_key = rea.annotation_key
         JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
         UNION
         SELECT subject_relation.relation_id
@@ -431,27 +448,25 @@ export async function getRelationFilterOptions(): Promise<RelationFilterOptions>
     const schema = SEARCH_SCHEMA();
     const client = await getPool().connect();
     try {
-      const [predicateResult, sourceResult, interactionTypeResult] = await Promise.all([
-        client.query<{ category: string; predicates: string[] | null }>(
-          `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
-           FROM (
-             SELECT DISTINCT r.relation_category AS category, r.predicate AS predicate
-             FROM ${schema}.relation r
-           ) t
-           GROUP BY category
-           ORDER BY category`,
-        ),
-        client.query<{ values: string[] | null }>(
-          `SELECT array_agg(facet_value ORDER BY facet_value) AS values
-           FROM ${schema}.facet_relation_bitmap
-           WHERE facet_name = 'source'`,
-        ),
-        client.query<{ values: string[] | null }>(
-          `SELECT array_agg(facet_value ORDER BY facet_value) AS values
-           FROM ${schema}.facet_relation_bitmap
-           WHERE facet_name = 'participant_type'`,
-        ),
-      ]);
+      const predicateResult = await client.query<{ category: string; predicates: string[] | null }>(
+        `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
+         FROM (
+           SELECT DISTINCT ${relationCategoryNameSql(schema, "r")} AS category, ${relationPredicateNameSql(schema, "r")} AS predicate
+           FROM ${schema}.relation r
+         ) t
+         GROUP BY category
+         ORDER BY category`,
+      );
+      const sourceResult = await client.query<{ values: string[] | null }>(
+        `SELECT array_agg(facet_value ORDER BY facet_value) AS values
+         FROM ${schema}.facet_relation_bitmap
+         WHERE facet_name = 'source'`,
+      );
+      const interactionTypeResult = await client.query<{ values: string[] | null }>(
+        `SELECT array_agg(facet_value ORDER BY facet_value) AS values
+         FROM ${schema}.facet_relation_bitmap
+         WHERE facet_name = 'participant_type'`,
+      );
 
       const value = {
         predicatesByCategory: Object.fromEntries(
@@ -485,7 +500,7 @@ export async function getAssociatedEntityIds(entityPks: number[]): Promise<strin
          ${canonicalTypeSql(schema, "e")} AS id_type
        FROM ${schema}.relation r
        JOIN ${schema}.entity e ON e.entity_id = r.subject_entity_id
-       WHERE r.relation_category = 'association'
+       WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
          AND r.object_entity_id = ANY($1::bigint[])
        ORDER BY id_type, id`,
       [normalized],

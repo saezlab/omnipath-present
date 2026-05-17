@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg";
 import { getPool } from "$lib/server/db/client";
 import { toPublicEntityId } from "$lib/entity-public-id";
+import {
+  canonicalIdentifierTypeNameSql,
+  relationCategoryEqualsSql,
+} from "$lib/server/queries/sql-fragments";
 
 export type OntologyTerm = {
   termId: string;
@@ -248,7 +252,7 @@ async function searchScopedOntologyTermsRelational({
     cteParts.push(`scope_entity_pks AS MATERIALIZED (
       SELECT DISTINCT er.subject_entity_id AS entity_id
       FROM ${schema}.relation er
-      WHERE er.relation_category = 'association'
+      WHERE ${relationCategoryEqualsSql(schema, "er", "association")}
         AND er.object_entity_id IN (
           SELECT terms.term_entity_id FROM ${ontologyTermsTable(schema)} WHERE terms.term_id = ANY(${termParam}::text[])
         )
@@ -256,12 +260,12 @@ async function searchScopedOntologyTermsRelational({
   }
 
   let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
-    : `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
+    ? `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
+    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.relation er WHERE er.relation_category = 'association' AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::bigint[]))`;
+    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::bigint[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
@@ -892,10 +896,10 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
     const result = await client.query(
       `SELECT DISTINCT
          es.canonical_identifier,
-         (SELECT it.name FROM ${SEARCH_SCHEMA}.identifier_type it WHERE it.identifier_type_id = es.canonical_identifier_type_id) AS canonical_identifier_type
+         ${canonicalIdentifierTypeNameSql(SEARCH_SCHEMA, "es")} AS canonical_identifier_type
        FROM ${SEARCH_SCHEMA}.relation er
        JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.subject_entity_id
-       WHERE er.relation_category = 'association'
+       WHERE ${relationCategoryEqualsSql(SEARCH_SCHEMA, "er", "association")}
          AND er.object_entity_id IN (
            SELECT terms.term_entity_id FROM ${ontologyTermsTable(SEARCH_SCHEMA)} WHERE terms.term_id = ANY($1::text[])
          )`,

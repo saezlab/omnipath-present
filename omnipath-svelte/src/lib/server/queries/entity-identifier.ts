@@ -1,6 +1,10 @@
 import { getPool } from "$lib/server/db/client";
 import type { Entity, EntityIdentifier } from "$lib/drizzle";
 import { normalizeStringValues, toPublicEntityId } from "$lib/entity-public-id";
+import {
+  canonicalIdentifierTypeNameSql,
+  entityTypeNameSql,
+} from "$lib/server/queries/sql-fragments";
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
@@ -81,8 +85,8 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
          requested.query_identifier AS lookup_identifier,
          e.entity_id,
          e.canonical_identifier AS id,
-         (SELECT it.name FROM ${schema}.identifier_type it WHERE it.identifier_type_id = e.canonical_identifier_type_id) AS id_type,
-         (SELECT et.name FROM ${schema}.entity_type et WHERE et.entity_type_id = e.entity_type_id) AS entity_type,
+         ${canonicalIdentifierTypeNameSql(schema, "e")} AS id_type,
+         ${entityTypeNameSql(schema, "e")} AS entity_type,
          e.taxonomy_id
        FROM requested
        JOIN ${schema}.entity e ON LOWER(e.canonical_identifier) = requested.query_identifier
@@ -91,8 +95,8 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
          requested.query_identifier AS lookup_identifier,
          e.entity_id,
          e.canonical_identifier AS id,
-         (SELECT it.name FROM ${schema}.identifier_type it WHERE it.identifier_type_id = e.canonical_identifier_type_id) AS id_type,
-         (SELECT et.name FROM ${schema}.entity_type et WHERE et.entity_type_id = e.entity_type_id) AS entity_type,
+         ${canonicalIdentifierTypeNameSql(schema, "e")} AS id_type,
+         ${entityTypeNameSql(schema, "e")} AS entity_type,
          e.taxonomy_id
        FROM requested
        JOIN ${schema}.entity e ON TRUE

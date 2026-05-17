@@ -2,6 +2,11 @@ import { getPool } from "$lib/server/db/client";
 import type { Entity, EntityIdentifier } from "$lib/drizzle";
 import { normalizeStringValues } from "$lib/entity-public-id";
 import { parsePublicEntityIds } from "$lib/server/entity-public-id";
+import {
+  canonicalIdentifierTypeNameSql,
+  entityTypeNameSql,
+  relationCategoryEqualsSql,
+} from "$lib/server/queries/sql-fragments";
 
 export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; relationCount?: number };
 
@@ -38,15 +43,23 @@ function entitySourcesSql(schema: string, entityAlias = "e"): string {
   return `ARRAY(
     SELECT DISTINCT source_value
     FROM (
-      SELECT ee.source AS source_value
+      SELECT ds.name AS source_value
       FROM ${schema}.entity_evidence_resolution eer
-      JOIN ${schema}.entity_evidence ee ON ee.entity_evidence_id = eer.entity_evidence_id
+      JOIN ${schema}.entity_evidence ee
+        ON ee.source_id = eer.source_id
+       AND ee.entity_evidence_id = eer.entity_evidence_id
+      JOIN ${schema}.data_source ds ON ds.source_id = ee.source_id
       WHERE eer.entity_id = ${entityAlias}.entity_id
       UNION
-      SELECT re.source AS source_value
-      FROM ${schema}.relation_evidence re
-      WHERE re.subject_entity_id = ${entityAlias}.entity_id
-         OR re.object_entity_id = ${entityAlias}.entity_id
+      SELECT ds.name AS source_value
+      FROM ${schema}.relation r
+      JOIN ${schema}.relation_evidence_relation rer ON rer.relation_id = r.relation_id
+      JOIN ${schema}.relation_evidence re
+        ON re.source_id = rer.source_id
+       AND re.relation_evidence_id = rer.relation_evidence_id
+      JOIN ${schema}.data_source ds ON ds.source_id = re.source_id
+      WHERE r.subject_entity_id = ${entityAlias}.entity_id
+         OR r.object_entity_id = ${entityAlias}.entity_id
     ) entity_sources
     WHERE source_value IS NOT NULL AND source_value <> ''
     ORDER BY source_value
@@ -54,11 +67,11 @@ function entitySourcesSql(schema: string, entityAlias = "e"): string {
 }
 
 function entityTypeSql(schema: string, alias = "e"): string {
-  return `(SELECT et.name FROM ${schema}.entity_type et WHERE et.entity_type_id = ${alias}.entity_type_id)`;
+  return entityTypeNameSql(schema, alias);
 }
 
 function canonicalTypeSql(schema: string, alias = "e"): string {
-  return `(SELECT it.name FROM ${schema}.identifier_type it WHERE it.identifier_type_id = ${alias}.canonical_identifier_type_id)`;
+  return canonicalIdentifierTypeNameSql(schema, alias);
 }
 
 function entityIdentifiersJsonSql(alias = "e"): string {
@@ -80,7 +93,7 @@ function ontologyTermEntityPredicate(schema: string, placeholder: string, entity
     SELECT 1
     FROM ${schema}.relation r
     JOIN ${schema}.ontology_terms terms ON terms.term_entity_id = r.object_entity_id
-    WHERE r.relation_category = 'association'
+    WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
       AND r.subject_entity_id = ${entityAlias}.entity_id
       AND terms.term_id = ANY(${placeholder}::text[])
   )`;
@@ -432,8 +445,8 @@ async function searchEntitiesByRelationCount({
          rc.relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
-       JOIN ${schema}.entity_type et ON et.entity_type_id = e.entity_type_id
-       LEFT JOIN ${schema}.identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
+       JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
+       LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
        ORDER BY rc.relation_count DESC, rc.entity_id ASC

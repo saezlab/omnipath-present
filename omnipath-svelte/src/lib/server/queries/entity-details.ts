@@ -1,5 +1,9 @@
 import { getPool } from "$lib/server/db/client";
 import { getEntityByPublicId } from "$lib/server/queries/entity";
+import {
+  relationCategoryEqualsSql,
+  relationPredicateNameSql,
+} from "$lib/server/queries/sql-fragments";
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
@@ -21,14 +25,14 @@ export async function getEntityDetails(publicId: string) {
     const interactionCountResult = await client.query<{ count: string }>(
       `SELECT count(*) AS count
        FROM ${schema}.relation r
-       WHERE r.relation_category = 'interaction'
+       WHERE ${relationCategoryEqualsSql(schema, "r", "interaction")}
          AND r.subject_entity_id = $1`,
       [entity.entityPk],
     );
     const annotationResult = await client.query<{ relation_pk: string | number; predicate: string }>(
-      `SELECT r.relation_id AS relation_pk, r.predicate
+      `SELECT r.relation_id AS relation_pk, ${relationPredicateNameSql(schema, "r")} AS predicate
        FROM ${schema}.relation r
-       WHERE r.relation_category = 'association'
+       WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
          AND r.subject_entity_id = $1
        ORDER BY r.relation_id
        LIMIT 100`,
@@ -37,18 +41,16 @@ export async function getEntityDetails(publicId: string) {
     const attributeResult = await client.query<EntityAnnotationRow>(
       `SELECT DISTINCT term, value, unit, scope, source
        FROM (
-         SELECT a.term, a.value, a.unit, ea.scope, NULL::text AS source
-         FROM ${schema}.entity_annotation ea
-         JOIN ${schema}.annotation a ON a.annotation_key = ea.annotation_key
-         WHERE ea.entity_id = $1
-         UNION ALL
-         SELECT a.term, a.value, a.unit, eea.scope, ee.source
+         SELECT a.term, a.value, a.unit, 'entity'::text AS scope, ds.name AS source
          FROM ${schema}.entity_evidence_resolution eer
          JOIN ${schema}.entity_evidence_annotation eea
-           ON eea.entity_evidence_id = eer.entity_evidence_id
+           ON eea.source_id = eer.source_id
+          AND eea.entity_evidence_id = eer.entity_evidence_id
          JOIN ${schema}.annotation a ON a.annotation_key = eea.annotation_key
-         LEFT JOIN ${schema}.entity_evidence ee
-           ON ee.entity_evidence_id = eer.entity_evidence_id
+         JOIN ${schema}.entity_evidence ee
+           ON ee.source_id = eer.source_id
+          AND ee.entity_evidence_id = eer.entity_evidence_id
+         JOIN ${schema}.data_source ds ON ds.source_id = ee.source_id
          WHERE eer.entity_id = $1
        ) annotations
        ORDER BY term, value NULLS LAST, source NULLS LAST

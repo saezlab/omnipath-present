@@ -33,7 +33,7 @@ export type EntityRelation = {
 
 export type EntityRelationEvidence = {
   source: string;
-  relationEvidencePk: number;
+  relationEvidencePk: string;
   relationPk: number;
   recordAttributes: unknown;
   subjectAttributes: unknown;
