@@ -20,7 +20,7 @@ import {
 export interface SelectedEntity {
   id: string;
   entityId?: string | number;
-  entityPk?: number;
+  entityPk?: string | number;
   name: string;
   type?: string;
   cv_terms?: string[];
@@ -232,6 +232,15 @@ let annotationCache = $state<SelectionAnnotationCache>(readSelectionAnnotationCa
 let fallbackEntityIds = $state<string[]>(readSelectionIds());
 let fallbackAnnotationIds = $state<string[]>(readSelectionAnnotationIds());
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function entityPrimaryKeyFromSelection(entity: SelectedEntity): string | number | null {
+  if (entity.entityPk != null) return entity.entityPk;
+  if (typeof entity.entityId === "number") return entity.entityId;
+  if (typeof entity.entityId === "string" && UUID_PATTERN.test(entity.entityId.trim())) return entity.entityId;
+  return null;
+}
+
 export function getSelectionStore() {
   const urlEntityIds = $derived(parseEntityIdsParam(currentUrl?.searchParams.get("entities") ?? null));
   const urlAnnotationIds = $derived(parseEntityIdsParam(currentUrl?.searchParams.get("annotations") ?? null));
@@ -358,8 +367,9 @@ export function getSelectionStore() {
 
   const selectedEntityPks = $derived(
     selectedEntities
-      .map((e) => (typeof e.entityPk === "number" ? e.entityPk : typeof e.entityId === "number" ? e.entityId : null))
-      .filter((pk): pk is number => pk !== null)
+      .map(entityPrimaryKeyFromSelection)
+      .map((pk) => (pk == null ? "" : String(pk).trim()))
+      .filter(Boolean)
   );
 
   return {

@@ -7,7 +7,7 @@ export interface SearchFilters {
   member_a_id?: string | number;
   member_b_id?: string | number;
   entity_ids?: Array<string | number>;
-  entity_pks?: number[];
+  entity_pks?: Array<string | number>;
   annotation_term_ids?: string[];
   interaction_types?: string[];
   predicates?: string[];

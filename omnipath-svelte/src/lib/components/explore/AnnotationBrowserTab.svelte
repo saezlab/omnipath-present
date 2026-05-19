@@ -18,7 +18,7 @@
     filters: SearchFilters;
     onFiltersChange: (filters: SearchFilters) => void;
     selectedEntityIds?: string[];
-    selectedEntityPks?: number[];
+    selectedEntityPks?: Array<string | number>;
     selectedAnnotationIds?: string[];
   }
 

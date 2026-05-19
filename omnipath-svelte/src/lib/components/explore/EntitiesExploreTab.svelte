@@ -28,7 +28,7 @@
 		filters: SearchFilters;
 		onFiltersChange: (filters: SearchFilters) => void;
 		selectedEntityIds?: string[];
-		selectedEntityPks?: number[];
+		selectedEntityPks?: Array<string | number>;
 		selectedAnnotationIds?: string[];
 	}
 
@@ -191,18 +191,13 @@
 	}
 
 	function handleClearFilters() {
-		onFiltersChange({
-			...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
-			...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
-		});
+		onFiltersChange({});
 	}
 
 	function handleFilterChange(next: { entity_types?: string[]; sources?: string[]; ncbi_tax_id?: string[] }) {
 		onFiltersChange({
 			...filters,
 			...next,
-			...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
-			...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
 		});
 	}
 
