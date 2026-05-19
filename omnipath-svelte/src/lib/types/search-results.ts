@@ -36,7 +36,7 @@ export interface SearchResult {
   finished_at?: string;
   sources?: string[];
 
-  entityPk?: number;
+  entityPk?: string;
   canonicalIdentifier?: string;
   canonicalIdentifierType?: string;
   entityType?: string | null;

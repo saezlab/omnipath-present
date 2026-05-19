@@ -5,7 +5,7 @@ import { jsonBigIntSafe } from "$lib/server/api-utils";
 export const GET: RequestHandler = async ({ url }) => {
   const query = url.searchParams.get("q") || "";
   const entityPksParam = url.searchParams.get("entityPks");
-  const entityPks = entityPksParam ? entityPksParam.split(",").map(Number).filter(Number.isFinite) : [];
+  const entityPks = entityPksParam ? entityPksParam.split(",").map((value) => value.trim()).filter(Boolean) : [];
   const termIdsParam = url.searchParams.get("termIds");
   const termIds = termIdsParam ? termIdsParam.split(",") : [];
   const prefixesParam = url.searchParams.get("prefixes");
@@ -30,7 +30,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
-    entityPks?: number[];
+    entityPks?: Array<string | number>;
     termIds?: string[];
     query?: string;
     prefixes?: string[];

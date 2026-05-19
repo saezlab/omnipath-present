@@ -1,7 +1,7 @@
 import type { SearchFilters } from "$lib/types/search";
 import type { InteractionDetailsData, InteractionListRow } from "$lib/types/interactions";
 
-export type EntitySearchCursor = { relationCount: number; entityPk: number };
+export type EntitySearchCursor = { relationCount: number; entityPk: string };
 
 export async function fetchEntitiesSearch(params: {
   query?: string;
@@ -28,7 +28,7 @@ export async function fetchEntitiesSearch(params: {
     if (!res.ok) throw new Error("Failed to fetch entities");
     return res.json() as Promise<{
       entities: Array<{
-        entityPk: number;
+        entityPk: string;
         canonicalIdentifier: string;
         canonicalIdentifierType: string;
         entityType: string | null;
@@ -37,8 +37,8 @@ export async function fetchEntitiesSearch(params: {
         sources: string[];
         relationCount?: number;
         identifiers: Array<{
-          id: number;
-          entityPk: number;
+          id?: string;
+          entityPk: string;
           identifier: string;
           identifierType: string;
         }>;
@@ -59,7 +59,7 @@ export async function fetchEntitiesSearch(params: {
   if (!res.ok) throw new Error("Failed to fetch entities");
   return res.json() as Promise<{
     entities: Array<{
-      entityPk: number;
+      entityPk: string;
       canonicalIdentifier: string;
       canonicalIdentifierType: string;
       entityType: string | null;
@@ -68,8 +68,8 @@ export async function fetchEntitiesSearch(params: {
       sources: string[];
       relationCount?: number;
       identifiers: Array<{
-        id: number;
-        entityPk: number;
+        id?: string;
+        entityPk: string;
         identifier: string;
         identifierType: string;
       }>;
@@ -101,10 +101,10 @@ export async function fetchRelationsSearch(params: {
   if (!res.ok) throw new Error("Failed to fetch relations");
   return res.json() as Promise<{
     relations: Array<{
-      relationPk: number;
-      subjectEntityPk: number;
+      relationPk: string;
+      subjectEntityPk: string;
       predicate: string;
-      objectEntityPk: number;
+      objectEntityPk: string;
       relationCategory: string;
       participantTypes: string[];
       evidenceCount: number;
@@ -124,7 +124,7 @@ export async function fetchRelationFilterOptions() {
   }>;
 }
 
-export async function fetchRelationEvidence(relationPk: number) {
+export async function fetchRelationEvidence(relationPk: string | number) {
   const res = await fetch(`/app-api/relations/${relationPk}/evidence`);
   if (!res.ok) throw new Error("Failed to fetch relation evidence");
   return res.json() as Promise<{ evidence: InteractionDetailsData["evidence"] }>;
@@ -139,7 +139,7 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
   if (!res.ok) throw new Error("Failed to fetch entities by public ids");
   return res.json() as Promise<{
     entities: Array<{
-      entityPk: number;
+      entityPk: string;
       canonicalIdentifier: string;
       canonicalIdentifierType: string;
       entityType: string | null;
@@ -147,8 +147,8 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
       entityAttributes: unknown;
       sources: string[];
       identifiers: Array<{
-        id: number;
-        entityPk: number;
+        id?: string;
+        entityPk: string;
         identifier: string;
         identifierType: string;
       }>;
@@ -156,7 +156,7 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
   }>;
 }
 
-export async function fetchEntitiesByPks(pks: number[]) {
+export async function fetchEntitiesByPks(pks: Array<string | number>) {
   const res = await fetch("/app-api/entities/by-pks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -164,14 +164,14 @@ export async function fetchEntitiesByPks(pks: number[]) {
   });
   if (!res.ok) throw new Error("Failed to fetch entities by pks");
   const data = await res.json() as { entities: Array<{
-    entityPk: number;
+    entityPk: string;
     canonicalIdentifier: string;
     canonicalIdentifierType: string;
     entityType: string | null;
     taxonomyId: string | null;
     entityAttributes: unknown;
     sources: string[];
-    identifiers: Array<{ id: number; entityPk: number; identifier: string; identifierType: string }>;
+    identifiers: Array<{ id?: string; entityPk: string; identifier: string; identifierType: string }>;
   }> };
   return data;
 }
@@ -209,7 +209,7 @@ export async function fetchOntologySearch(params: {
 }
 
 export async function fetchScopedOntologySearch(params: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   termIds?: string[];
   query?: string;
   prefixes?: string[];
@@ -253,7 +253,7 @@ export async function fetchOntologyPrefixes() {
 }
 
 export async function fetchScopedOntologyPrefixCounts(params: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   query?: string;
 }) {
@@ -267,7 +267,7 @@ export async function fetchScopedOntologyPrefixCounts(params: {
 }
 
 export async function fetchScopedOntologyIdCounts(params: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   query?: string;
 }) {

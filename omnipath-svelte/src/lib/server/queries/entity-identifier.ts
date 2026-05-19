@@ -18,12 +18,16 @@ function entityIdentifiersJsonSql(alias = "e"): string {
   END`;
 }
 
-export async function getIdentifiersByEntityPk(entityPk: number): Promise<EntityIdentifier[]> {
+export async function getIdentifiersByEntityPk(entityPk: string | number): Promise<EntityIdentifier[]> {
   return getIdentifiersByEntityPks([entityPk]);
 }
 
-export async function getIdentifiersByEntityPks(entityPks: number[]): Promise<EntityIdentifier[]> {
-  const normalized = Array.from(new Set(entityPks.filter(Number.isFinite)));
+function normalizeIdValues(values: Array<string | number>): string[] {
+  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean)));
+}
+
+export async function getIdentifiersByEntityPks(entityPks: Array<string | number>): Promise<EntityIdentifier[]> {
+  const normalized = normalizeIdValues(entityPks);
   if (normalized.length === 0) return [];
 
   const schema = SEARCH_SCHEMA();
@@ -37,20 +41,20 @@ export async function getIdentifiersByEntityPks(entityPks: number[]): Promise<En
     }>(
       `SELECT DISTINCT
          e.entity_id,
-         NULL::bigint AS identifier_id,
+         NULL::uuid AS identifier_id,
          item.identifier_type,
          item.identifier
 	       FROM ${schema}.entity e
 	       CROSS JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text, identifier_type text)
-       WHERE e.entity_id = ANY($1::bigint[])
+       WHERE e.entity_id = ANY($1::uuid[])
          AND COALESCE(item.identifier, '') <> ''
        ORDER BY e.entity_id, item.identifier_type, item.identifier`,
       [normalized],
     );
 
     return result.rows.map((row) => ({
-      id: Number(row.identifier_id),
-      entityPk: Number(row.entity_id),
+      ...(row.identifier_id == null ? {} : { id: String(row.identifier_id) }),
+      entityPk: String(row.entity_id),
       identifier: row.identifier,
       identifierType: row.identifier_type,
     }));
@@ -106,9 +110,9 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
     );
 
     const matchMap = new Map<string, string[]>();
-    const entityMap = new Map<number, Entity>();
+    const entityMap = new Map<string, Entity>();
     for (const row of result.rows) {
-      const entityPk = Number(row.entity_id);
+      const entityPk = String(row.entity_id);
       const entityRow: Entity = {
         entityPk,
         canonicalIdentifier: row.id,

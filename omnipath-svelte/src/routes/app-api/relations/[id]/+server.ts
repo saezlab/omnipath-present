@@ -5,9 +5,9 @@ import { getEntitiesByPks } from "$lib/server/queries/entity";
 import { jsonBigIntSafe } from "$lib/server/api-utils";
 
 export const GET: RequestHandler = async ({ params }) => {
-  const relationPk = Number(params.id);
+  const relationPk = String(params.id || "").trim();
 
-  if (!Number.isFinite(relationPk)) {
+  if (!relationPk) {
     error(400, "Invalid relation ID");
   }
 

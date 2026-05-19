@@ -2,12 +2,12 @@ import type { RequestHandler } from "./$types";
 import { searchEntities } from "$lib/server/queries/entity";
 import { jsonBigIntSafe } from "$lib/server/api-utils";
 
-function normalizeEntityCursor(value: string | null): { relationCount: number; entityPk: number } | undefined {
+function normalizeEntityCursor(value: string | null): { relationCount: number; entityPk: string } | undefined {
   if (!value) return undefined;
   const parsed = JSON.parse(value) as { relationCount?: unknown; entityPk?: unknown };
   const relationCount = Number(parsed.relationCount);
-  const entityPk = Number(parsed.entityPk);
-  if (!Number.isFinite(relationCount) || !Number.isFinite(entityPk)) {
+  const entityPk = String(parsed.entityPk || "").trim();
+  if (!Number.isFinite(relationCount) || !entityPk) {
     throw new Error("Invalid entity search cursor");
   }
   return { relationCount, entityPk };
@@ -17,7 +17,7 @@ function normalizeEntityFilters(filters: Record<string, unknown>): Record<string
   const result: Record<string, unknown> = { ...filters };
   if (result.entity_pks != null) {
     result.entity_pks = Array.isArray(result.entity_pks)
-      ? result.entity_pks.map(Number).filter(Number.isFinite)
+      ? result.entity_pks.map((value) => String(value).trim()).filter(Boolean)
       : undefined;
   }
   return result;
@@ -44,7 +44,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
     query?: string;
     limit?: number;
-    cursor?: { relationCount: number; entityPk: number } | null;
+    cursor?: { relationCount: number; entityPk: string } | null;
     filters?: Record<string, unknown>;
   };
 

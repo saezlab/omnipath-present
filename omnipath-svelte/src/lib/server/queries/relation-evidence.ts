@@ -19,8 +19,12 @@ function annotationArraySql(fromSql: string, whereSql: string, scopeSql: string)
   ), '[]'::jsonb)`;
 }
 
-async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<EntityRelationEvidence[]> {
-  const normalized = Array.from(new Set(relationPks.filter(Number.isFinite)));
+function normalizeIdValues(values: Array<string | number>): string[] {
+  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean)));
+}
+
+async function getEvidenceByRelationPksInternal(relationPks: Array<string | number>): Promise<EntityRelationEvidence[]> {
+  const normalized = normalizeIdValues(relationPks);
   if (normalized.length === 0) return [];
 
   const schema = SEARCH_SCHEMA();
@@ -64,7 +68,7 @@ async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<
          ON re.source_id = rer.source_id
         AND re.relation_evidence_id = rer.relation_evidence_id
        JOIN ${schema}.data_source ds ON ds.source_id = re.source_id
-       WHERE rer.relation_id = ANY($1::bigint[])
+       WHERE rer.relation_id = ANY($1::uuid[])
        ORDER BY rer.relation_id, ds.name, re.relation_evidence_id`,
       [normalized],
     );
@@ -72,7 +76,7 @@ async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<
     return result.rows.map((row) => ({
       source: row.source,
       relationEvidencePk: row.relation_evidence_id,
-      relationPk: Number(row.relation_id),
+      relationPk: String(row.relation_id),
       recordAttributes: row.record_attributes,
       subjectAttributes: row.subject_attributes,
       objectAttributes: row.object_attributes,
@@ -83,10 +87,10 @@ async function getEvidenceByRelationPksInternal(relationPks: number[]): Promise<
   }
 }
 
-export async function getEvidenceByRelationPk(relationPk: number): Promise<EntityRelationEvidence[]> {
+export async function getEvidenceByRelationPk(relationPk: string | number): Promise<EntityRelationEvidence[]> {
   return getEvidenceByRelationPksInternal([relationPk]);
 }
 
-export async function getEvidenceByRelationPks(relationPks: number[]): Promise<EntityRelationEvidence[]> {
+export async function getEvidenceByRelationPks(relationPks: Array<string | number>): Promise<EntityRelationEvidence[]> {
   return getEvidenceByRelationPksInternal(relationPks);
 }

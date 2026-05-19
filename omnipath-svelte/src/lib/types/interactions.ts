@@ -8,7 +8,7 @@ export type InteractionListRow = {
 
 export type InteractionDetailsData = InteractionListRow & {
   evidence: Array<{
-    relationPk: number;
+    relationPk: string;
     source: string;
     subjectAttributes: unknown;
     recordAttributes: unknown;

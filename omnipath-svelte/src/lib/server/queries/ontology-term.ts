@@ -54,6 +54,10 @@ function toOntologyTerm(row: OntologyTermRow): OntologyTerm {
   };
 }
 
+function normalizeIdValues(values: Array<string | number> | undefined): string[] {
+  return Array.from(new Set((values || []).map((value) => String(value).trim()).filter(Boolean)));
+}
+
 export type OntologyTermWithAnnotationCounts = OntologyTerm & {
   annotatedEntityCount: number;
   annotatedRelationCount: number;
@@ -224,7 +228,7 @@ async function searchScopedOntologyTermsRelational({
   client,
   schema,
 }: {
-  entityPks: number[];
+  entityPks: string[];
   termIds: string[];
   query: string;
   prefixes: string[];
@@ -261,11 +265,11 @@ async function searchScopedOntologyTermsRelational({
 
   let scopeTermPksFrom: string = hasTermIds
     ? `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
-    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::bigint[])`;
+    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::uuid[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::bigint[]))`;
+    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::uuid[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
@@ -348,7 +352,7 @@ async function searchScopedOntologyTermsBitmap({
   client,
   schema,
 }: {
-  entityPks: number[];
+  entityPks: string[];
   termIds: string[];
   query: string;
   prefixes: string[];
@@ -368,17 +372,7 @@ async function searchScopedOntologyTermsBitmap({
   const hasTermIds = termIds.length > 0;
   const hasEntityPks = entityPks.length > 0;
 
-  // pg_roaringbitmap stores 32-bit integers. PostgreSQL's integer type is
-  // signed 32-bit, so entity_id::integer will overflow above 2_147_483_647.
-  // If entity PKs exceed this range we must fall back to the relational path.
-  if (hasEntityPks) {
-    const maxPk = Math.max(...entityPks);
-    if (maxPk > 2147483647) {
-      throw new Error("Entity PK exceeds 32-bit range; bitmap path requires ordinal mapping");
-    }
-  }
-
-  // Build scope bitmap by ORing bitmaps of selected terms and selected entity PKs.
+  // Build scope bitmap by ORing bitmaps of selected terms and selected entity IDs.
   const scopeParts: string[] = [];
 
   if (hasTermIds) {
@@ -391,7 +385,9 @@ async function searchScopedOntologyTermsBitmap({
 
   if (hasEntityPks) {
     const ePkParam = pushParam(entityPks);
-    scopeParts.push(`SELECT rb_build(${ePkParam}::integer[]) AS bitmap`);
+    scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.entity_bitmap_id bitmap
+      WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
   }
 
   const scopeBitmapSql = `scope_bitmap AS MATERIALIZED (
@@ -479,7 +475,7 @@ export async function searchScopedOntologyTerms({
   limit = 24,
   offset = 0,
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   termIds?: string[];
   query?: string;
   prefixes?: string[];
@@ -487,7 +483,7 @@ export async function searchScopedOntologyTerms({
   limit?: number;
   offset?: number;
 }): Promise<ScopedOntologyTerm[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(termIds.map((id) => id.trim()).filter(Boolean)));
   if (normalizedEntityPks.length === 0 && normalizedTermIds.length === 0) return [];
 
@@ -562,11 +558,11 @@ export async function getScopedOntologyPrefixCounts({
   annotationTermIds = [],
   query = "",
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   query?: string;
 }): Promise<OntologyPrefixCount[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
   const hasScope = normalizedEntityPks.length > 0 || normalizedTermIds.length > 0;
@@ -619,12 +615,10 @@ export async function getScopedOntologyPrefixCounts({
         WHERE terms.term_id = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
-      const maxPk = Math.max(...normalizedEntityPks);
-      if (maxPk > 2147483647) {
-        throw new Error("Entity PK exceeds 32-bit range; bitmap path requires ordinal mapping");
-      }
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build(${ePkParam}::integer[]) AS bitmap`);
+      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${S}.entity_bitmap_id bitmap
+        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
     ctes.push(`scope_base AS MATERIALIZED (
@@ -677,11 +671,11 @@ export async function getScopedOntologyIdCounts({
   annotationTermIds = [],
   query = "",
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   query?: string;
 }): Promise<OntologyIdCount[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
   const hasScope = normalizedEntityPks.length > 0 || normalizedTermIds.length > 0;
@@ -735,12 +729,10 @@ export async function getScopedOntologyIdCounts({
         WHERE terms.term_id = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
-      const maxPk = Math.max(...normalizedEntityPks);
-      if (maxPk > 2147483647) {
-        throw new Error("Entity PK exceeds 32-bit range; bitmap path requires ordinal mapping");
-      }
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build(${ePkParam}::integer[]) AS bitmap`);
+      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${S}.entity_bitmap_id bitmap
+        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
     const whereClause = queryWhereParts.length > 0 ? `AND ${queryWhereParts.join(" AND ")}` : "";
@@ -775,11 +767,11 @@ export async function getScopedOntologySourceCounts({
   annotationTermIds = [],
   query = "",
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   query?: string;
 }): Promise<OntologySourceCount[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
   const hasScope = normalizedEntityPks.length > 0 || normalizedTermIds.length > 0;
@@ -833,12 +825,10 @@ export async function getScopedOntologySourceCounts({
         WHERE terms.term_id = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
-      const maxPk = Math.max(...normalizedEntityPks);
-      if (maxPk > 2147483647) {
-        throw new Error("Entity PK exceeds 32-bit range; bitmap path requires ordinal mapping");
-      }
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build(${ePkParam}::integer[]) AS bitmap`);
+      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${S}.entity_bitmap_id bitmap
+        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
     const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";

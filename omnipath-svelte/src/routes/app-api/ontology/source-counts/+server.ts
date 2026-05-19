@@ -4,7 +4,7 @@ import { json } from "@sveltejs/kit";
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
-    entityPks?: number[];
+    entityPks?: Array<string | number>;
     annotationTermIds?: string[];
     query?: string;
   };

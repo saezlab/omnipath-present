@@ -1,7 +1,7 @@
 export * from "./schema";
 
 export type Entity = {
-  entityPk: number;
+  entityPk: string;
   canonicalIdentifier: string;
   canonicalIdentifierType: string;
   entityType: string | null;
@@ -14,17 +14,17 @@ export type Entity = {
 export type EntityInsert = Entity;
 
 export type EntityIdentifier = {
-  id?: number | bigint;
-  entityPk: number;
+  id?: string;
+  entityPk: string;
   identifier: string;
   identifierType: string;
 };
 
 export type EntityRelation = {
-  relationPk: number;
-  subjectEntityPk: number;
+  relationPk: string;
+  subjectEntityPk: string;
   predicate: string;
-  objectEntityPk: number;
+  objectEntityPk: string;
   relationCategory: string | null;
   participantTypes: string[];
   evidenceCount: number;
@@ -34,7 +34,7 @@ export type EntityRelation = {
 export type EntityRelationEvidence = {
   source: string;
   relationEvidencePk: string;
-  relationPk: number;
+  relationPk: string;
   recordAttributes: unknown;
   subjectAttributes: unknown;
   objectAttributes: unknown;

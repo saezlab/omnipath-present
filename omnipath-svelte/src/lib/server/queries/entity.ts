@@ -15,8 +15,12 @@ const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 export type EntitySearchCursor = {
   relationCount: number;
-  entityPk: number;
+  entityPk: string;
 };
+
+function normalizeIdValues(values: Array<string | number> | undefined): string[] {
+  return Array.from(new Set((values || []).map((value) => String(value).trim()).filter(Boolean)));
+}
 
 function toEntityRow(row: {
   entity_id: string | number;
@@ -28,7 +32,7 @@ function toEntityRow(row: {
   relation_count?: string | number | null;
 }): Entity & { relationCount?: number } {
   return {
-    entityPk: Number(row.entity_id),
+    entityPk: String(row.entity_id),
     canonicalIdentifier: row.id,
     canonicalIdentifierType: row.id_type,
     entityType: row.entity_type,
@@ -99,7 +103,7 @@ function ontologyTermEntityPredicate(schema: string, placeholder: string, entity
   )`;
 }
 
-async function getIdentifiersForEntityPks(schema: string, entityPks: number[]): Promise<Map<number, EntityIdentifier[]>> {
+async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): Promise<Map<string, EntityIdentifier[]>> {
   if (entityPks.length === 0) return new Map();
   const client = await getPool().connect();
   try {
@@ -111,34 +115,33 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: number[]): 
     }>(
       `SELECT DISTINCT
          e.entity_id,
-         NULL::bigint AS identifier_id,
+         NULL::uuid AS identifier_id,
          item.identifier_type,
          item.identifier
 	       FROM ${schema}.entity e
 	       CROSS JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text, identifier_type text)
-       WHERE e.entity_id = ANY($1::bigint[])
+       WHERE e.entity_id = ANY($1::uuid[])
          AND COALESCE(item.identifier, '') <> ''
        UNION
        SELECT DISTINCT
          terms.term_entity_id AS entity_id,
-         NULL::bigint AS identifier_id,
+         NULL::uuid AS identifier_id,
          'Name:OM:0200' AS identifier_type,
          terms.label AS identifier
        FROM ${schema}.ontology_terms terms
-       WHERE terms.term_entity_id = ANY($1::bigint[])
+       WHERE terms.term_entity_id = ANY($1::uuid[])
          AND terms.label IS NOT NULL
          AND terms.label <> ''
        ORDER BY entity_id, identifier_type, identifier`,
       [entityPks],
     );
 
-    const map = new Map<number, EntityIdentifier[]>();
+    const map = new Map<string, EntityIdentifier[]>();
     for (const row of result.rows) {
-      const entityPk = Number(row.entity_id);
+      const entityPk = String(row.entity_id);
       const identifiers = map.get(entityPk) ?? [];
-      const identifierId = row.identifier_id === null ? NaN : Number(row.identifier_id);
       identifiers.push({
-        ...(Number.isFinite(identifierId) ? { id: identifierId } : {}),
+        ...(row.identifier_id === null ? {} : { id: String(row.identifier_id) }),
         entityPk,
         identifier: row.identifier,
         identifierType: row.identifier_type,
@@ -201,8 +204,8 @@ export async function getEntitiesByPublicIds(publicIds: string[]): Promise<Entit
   }
 }
 
-export async function getEntitiesByPks(pks: number[]): Promise<EntityWithIdentifiers[]> {
-  const normalized = Array.from(new Set(pks.filter(Number.isFinite)));
+export async function getEntitiesByPks(pks: Array<string | number>): Promise<EntityWithIdentifiers[]> {
+  const normalized = normalizeIdValues(pks);
   if (normalized.length === 0) return [];
 
   const schema = SEARCH_SCHEMA();
@@ -220,7 +223,7 @@ export async function getEntitiesByPks(pks: number[]): Promise<EntityWithIdentif
       `SELECT ${entityBaseSelect(schema)}, COALESCE(rc.relation_count, 0)::bigint AS relation_count
        FROM ${schema}.entity e
        LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
-       WHERE e.entity_id = ANY($1::bigint[])
+       WHERE e.entity_id = ANY($1::uuid[])
        ORDER BY e.entity_id`,
       [normalized],
     );
@@ -238,7 +241,7 @@ export async function searchEntities({
 }: {
   query?: string;
   filters?: {
-    entity_pks?: number[];
+    entity_pks?: Array<string | number>;
     annotation_term_ids?: string[];
     entity_types?: string[];
     sources?: string[];
@@ -293,15 +296,15 @@ export async function searchEntities({
       )`);
     }
 
-    const entityPks = filters.entity_pks?.filter(Number.isFinite) ?? [];
+    const entityPks = normalizeIdValues(filters.entity_pks);
     const annotationTerms = normalizeStringValues(filters.annotation_term_ids || []);
     if (entityPks.length > 0 && annotationTerms.length > 0) {
       const ePkParam = pushParam(entityPks.map(String));
       const termParam = pushParam(annotationTerms);
-      whereParts.push(`(e.entity_id = ANY(${ePkParam}::bigint[]) OR ${ontologyTermEntityPredicate(schema, termParam)})`);
+      whereParts.push(`(e.entity_id = ANY(${ePkParam}::uuid[]) OR ${ontologyTermEntityPredicate(schema, termParam)})`);
     } else if (entityPks.length > 0) {
       const ePkParam = pushParam(entityPks.map(String));
-      whereParts.push(`e.entity_id = ANY(${ePkParam}::bigint[])`);
+      whereParts.push(`e.entity_id = ANY(${ePkParam}::uuid[])`);
     } else if (annotationTerms.length > 0) {
       const termParam = pushParam(annotationTerms);
       whereParts.push(ontologyTermEntityPredicate(schema, termParam));
@@ -323,7 +326,7 @@ export async function searchEntities({
     addFacetFilter("source_filter_bitmap", "source", sources);
 
     if (filterBitmaps.length > 0) {
-      whereParts.push(`rb_contains(${bitmapIntersection(filterBitmaps)}, e.entity_id::integer)`);
+      whereParts.push(`rb_contains(${bitmapIntersection(filterBitmaps)}, entity_bitmap.bitmap_id)`);
     }
 
     const normalizedCursor = normalizeEntitySearchCursor(cursor);
@@ -332,7 +335,7 @@ export async function searchEntities({
     if (normalizedCursor) {
       const countParam = pushPageParam(pageParams, normalizedCursor.relationCount);
       const pkParam = pushPageParam(pageParams, normalizedCursor.entityPk);
-      pageCursorWhere = `WHERE (m.relation_count < ${countParam} OR (m.relation_count = ${countParam} AND m.entity_id > ${pkParam}))`;
+      pageCursorWhere = `WHERE (m.relation_count < ${countParam} OR (m.relation_count = ${countParam} AND m.entity_id > ${pkParam}::uuid))`;
     }
     pageParams.push(limit);
     const limitParam = `$${pageParams.length}`;
@@ -350,6 +353,7 @@ export async function searchEntities({
        matched_entities AS MATERIALIZED (
          SELECT e.*
          FROM ${schema}.entity e
+         ${filterBitmaps.length > 0 ? `JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = e.entity_id` : ""}
          ${filterJoins.join("\n")}
          WHERE ${whereParts.join(" AND ")}
        ),
@@ -387,7 +391,7 @@ export async function searchEntities({
 function isUnfilteredEntitySearch(
   query: string,
   filters: {
-    entity_pks?: number[];
+    entity_pks?: Array<string | number>;
     annotation_term_ids?: string[];
     entity_types?: string[];
     sources?: string[];
@@ -396,7 +400,7 @@ function isUnfilteredEntitySearch(
   },
 ): boolean {
   if (query.trim()) return false;
-  if ((filters.entity_pks?.filter(Number.isFinite) ?? []).length > 0) return false;
+  if (normalizeIdValues(filters.entity_pks).length > 0) return false;
   if (normalizeStringValues(filters.annotation_term_ids || []).length > 0) return false;
   if (normalizeStringValues(filters.entity_types || []).length > 0) return false;
   if (normalizeStringValues(filters.sources || []).length > 0) return false;
@@ -419,7 +423,7 @@ async function searchEntitiesByRelationCount({
   let cursorWhere = "";
   if (normalizedCursor) {
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::bigint))";
+    cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::uuid))";
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
@@ -473,8 +477,8 @@ function pushPageParam(params: unknown[], value: unknown): string {
 function normalizeEntitySearchCursor(cursor: EntitySearchCursor | null | undefined): EntitySearchCursor | null {
   if (!cursor) return null;
   const relationCount = Number(cursor.relationCount);
-  const entityPk = Number(cursor.entityPk);
-  if (!Number.isFinite(relationCount) || !Number.isFinite(entityPk)) {
+  const entityPk = String(cursor.entityPk || "").trim();
+  if (!Number.isFinite(relationCount) || !entityPk) {
     throw new Error("Invalid entity search cursor");
   }
   return { relationCount, entityPk };
@@ -546,7 +550,7 @@ export async function getScopedEntityFacetCounts({
   query = "",
   facetLimit = 10,
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   entityTypes?: string[];
   sources?: string[];
@@ -554,7 +558,7 @@ export async function getScopedEntityFacetCounts({
   query?: string;
   facetLimit?: number;
 }): Promise<EntityFacetCount[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const normalizedEntityTypes = Array.from(new Set(entityTypes.map((v) => v.trim()).filter(Boolean)));
   const normalizedSources = Array.from(new Set(sources.map((v) => v.trim()).filter(Boolean)));
@@ -658,10 +662,10 @@ export async function getScopedEntityFacetCounts({
         WHERE terms.term_id = ANY(${termParam}::text[])`);
     }
     if (normalizedEntityPks.length > 0) {
-      const maxPk = Math.max(...normalizedEntityPks);
-      if (maxPk > 2147483647) throw new Error("Entity PK exceeds 32-bit range; bitmap path requires ordinal mapping");
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build(${ePkParam}::integer[]) AS bitmap`);
+      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${schema}.entity_bitmap_id bitmap
+        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
     ctes.push(scopeParts.length > 0
@@ -674,8 +678,9 @@ export async function getScopedEntityFacetCounts({
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
       ctes.push(`query_bitmap AS MATERIALIZED (
-        SELECT rb_build_agg(e.entity_id::integer) AS bitmap
+        SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
         FROM ${schema}.entity e
+        JOIN ${schema}.entity_bitmap_id bitmap ON bitmap.entity_id = e.entity_id
         WHERE LOWER(e.canonical_identifier) = ${queryParam}
            OR e.entity_id IN (
              SELECT e.entity_id

@@ -28,10 +28,10 @@ function toRelationRow(row: {
   sources: string[] | null;
 }): EntityRelation {
   return {
-    relationPk: Number(row.relation_id),
-    subjectEntityPk: Number(row.subject_entity_id),
+    relationPk: String(row.relation_id),
+    subjectEntityPk: String(row.subject_entity_id),
     predicate: row.predicate,
-    objectEntityPk: Number(row.object_entity_id),
+    objectEntityPk: String(row.object_entity_id),
     relationCategory: row.relation_category,
     participantTypes: (row.participant_types || []).filter(Boolean),
     evidenceCount: Number(row.evidence_count || 0),
@@ -47,7 +47,7 @@ function toEntityRow(row: {
   taxonomy_id: string | null;
 }): Entity {
   return {
-    entityPk: Number(row.entity_id),
+    entityPk: String(row.entity_id),
     canonicalIdentifier: row.id,
     canonicalIdentifierType: row.id_type,
     entityType: row.entity_type,
@@ -104,7 +104,7 @@ function relationSelect(schema: string, alias = "r"): string {
     ) AS sources`;
 }
 
-export async function getRelationByPk(pk: number): Promise<RelationWithEntities | null> {
+export async function getRelationByPk(pk: string | number): Promise<RelationWithEntities | null> {
   const schema = SEARCH_SCHEMA();
   const client = await getPool().connect();
   try {
@@ -139,9 +139,9 @@ export async function getRelationByPk(pk: number): Promise<RelationWithEntities 
        FROM ${schema}.relation r
        JOIN ${schema}.entity subject ON subject.entity_id = r.subject_entity_id
        JOIN ${schema}.entity object ON object.entity_id = r.object_entity_id
-       WHERE r.relation_id = $1
+       WHERE r.relation_id = $1::uuid
        LIMIT 1`,
-      [pk],
+      [String(pk)],
     );
 
     const row = result.rows[0];
@@ -168,8 +168,8 @@ export async function getRelationByPk(pk: number): Promise<RelationWithEntities 
   }
 }
 
-export async function getRelationsByPks(pks: number[]): Promise<EntityRelation[]> {
-  const normalized = Array.from(new Set(pks.filter(Number.isFinite)));
+export async function getRelationsByPks(pks: Array<string | number>): Promise<EntityRelation[]> {
+  const normalized = normalizeIdValues(pks);
   if (normalized.length === 0) return [];
   const schema = SEARCH_SCHEMA();
   const client = await getPool().connect();
@@ -186,7 +186,7 @@ export async function getRelationsByPks(pks: number[]): Promise<EntityRelation[]
     }>(
       `SELECT ${relationSelect(schema, "r")}
        FROM ${schema}.relation r
-       WHERE r.relation_id = ANY($1::bigint[])
+       WHERE r.relation_id = ANY($1::uuid[])
        ORDER BY r.relation_id`,
       [normalized],
     );
@@ -200,18 +200,18 @@ export interface RelationFilters {
   relationCategories?: string[];
   predicates?: string[];
   interactionTypes?: string[];
-  subjectEntityPks?: number[];
-  objectEntityPks?: number[];
-  entityPks?: number[];
+  subjectEntityPks?: Array<string | number>;
+  objectEntityPks?: Array<string | number>;
+  entityPks?: Array<string | number>;
   sources?: string[];
   taxonomyIds?: string[];
   annotationTerms?: string[];
-  scopeEntityPks?: number[];
+  scopeEntityPks?: Array<string | number>;
   scopeAnnotationTerms?: string[];
 }
 
-function normalizeNumberValues(values: number[] | undefined): number[] {
-  return Array.from(new Set((values || []).filter(Number.isFinite)));
+function normalizeIdValues(values: Array<string | number> | undefined): string[] {
+  return Array.from(new Set((values || []).map((value) => String(value).trim()).filter(Boolean)));
 }
 
 function normalizeStringValues(values: string[] | undefined): string[] {
@@ -238,35 +238,39 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const relationCategories = normalizeStringValues(filters.relationCategories);
   if (relationCategories.length) {
     const param = pushParam(relationCategories, "text[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(r.relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
       WHERE ${relationCategoryAnySql(schema, "r", param)}`);
   }
 
   addFacetBitmap("predicate", normalizeStringValues(filters.predicates));
   addFacetBitmap("participant_type", normalizeStringValues(filters.interactionTypes));
 
-  const subjectEntityPks = normalizeNumberValues(filters.subjectEntityPks);
+  const subjectEntityPks = normalizeIdValues(filters.subjectEntityPks);
   if (subjectEntityPks.length) {
-    const param = pushParam(subjectEntityPks, "bigint[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(r.relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
+    const param = pushParam(subjectEntityPks, "uuid[]");
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
       WHERE r.subject_entity_id = ANY(${param})`);
   }
 
-  const objectEntityPks = normalizeNumberValues(filters.objectEntityPks);
+  const objectEntityPks = normalizeIdValues(filters.objectEntityPks);
   if (objectEntityPks.length) {
-    const param = pushParam(objectEntityPks, "bigint[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(r.relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
+    const param = pushParam(objectEntityPks, "uuid[]");
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
       WHERE r.object_entity_id = ANY(${param})`);
   }
 
-  const entityPks = normalizeNumberValues(filters.entityPks);
+  const entityPks = normalizeIdValues(filters.entityPks);
   if (entityPks.length) {
-    const param = pushParam(entityPks, "bigint[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(r.relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
+    const param = pushParam(entityPks, "uuid[]");
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
       WHERE r.subject_entity_id = ANY(${param})
          OR r.object_entity_id = ANY(${param})`);
   }
@@ -277,10 +281,10 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const annotationTerms = normalizeStringValues(filters.annotationTerms);
   if (annotationTerms.length) {
     const param = pushParam(annotationTerms, "text[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM (
         WITH term_entities AS (
-          SELECT terms.term_entity_id
+          SELECT terms.term_entity_id, terms.term_id
           FROM ${schema}.ontology_terms terms
           WHERE terms.term_id = ANY(${param})
         ),
@@ -305,13 +309,14 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
         SELECT object_relation.relation_id
         FROM ${schema}.relation object_relation
         JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = object_relation.object_entity_id
-      ) matched_relation_ids`);
+      ) matched_relation_ids
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = matched_relation_ids.relation_id`);
   }
 
   const scopeParts: string[] = [];
-  const scopeEntityPks = normalizeNumberValues(filters.scopeEntityPks);
+  const scopeEntityPks = normalizeIdValues(filters.scopeEntityPks);
   if (scopeEntityPks.length) {
-    const param = pushParam(scopeEntityPks, "bigint[]");
+    const param = pushParam(scopeEntityPks, "uuid[]");
     scopeParts.push(`SELECT r.relation_id
       FROM ${schema}.relation r
       WHERE r.subject_entity_id = ANY(${param})
@@ -324,7 +329,7 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
     scopeParts.push(`SELECT relation_id
       FROM (
         WITH term_entities AS (
-          SELECT terms.term_entity_id
+          SELECT terms.term_entity_id, terms.term_id
           FROM ${schema}.ontology_terms terms
           WHERE terms.term_id = ANY(${param})
         ),
@@ -353,8 +358,9 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   }
 
   if (scopeParts.length) {
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(relation_id::integer), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM (${scopeParts.join("\nUNION\n")}) scope_relation_ids`);
+    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM (${scopeParts.join("\nUNION\n")}) scope_relation_ids
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = scope_relation_ids.relation_id`);
   }
 
   const cte = bitmapParts.length
@@ -397,8 +403,11 @@ export async function searchRelations({
     }>(
       `WITH ${cte},
        page_ids AS MATERIALIZED (
-         SELECT relation_id::bigint AS relation_id
-         FROM filter_bitmap, rb_iterate(rb_select(bitmap, $${pageParams.length - 1}, $${pageParams.length})) AS relation_id
+         SELECT relation_bitmap.relation_id
+         FROM filter_bitmap,
+              rb_iterate(rb_select(bitmap, $${pageParams.length - 1}, $${pageParams.length})) AS selected(bitmap_id)
+         JOIN ${schema}.relation_bitmap_id relation_bitmap
+           ON relation_bitmap.bitmap_id = selected.bitmap_id
        )
        SELECT ${relationSelect(schema, "r")}
        FROM page_ids page
@@ -487,8 +496,8 @@ export async function getRelationFilterOptions(): Promise<RelationFilterOptions>
   return relationFilterOptionsInFlight;
 }
 
-export async function getAssociatedEntityIds(entityPks: number[]): Promise<string[]> {
-  const normalized = Array.from(new Set(entityPks.filter(Number.isFinite)));
+export async function getAssociatedEntityIds(entityPks: Array<string | number>): Promise<string[]> {
+  const normalized = normalizeIdValues(entityPks);
   if (normalized.length === 0) return [];
 
   const schema = SEARCH_SCHEMA();
@@ -501,7 +510,7 @@ export async function getAssociatedEntityIds(entityPks: number[]): Promise<strin
        FROM ${schema}.relation r
        JOIN ${schema}.entity e ON e.entity_id = r.subject_entity_id
        WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
-         AND r.object_entity_id = ANY($1::bigint[])
+         AND r.object_entity_id = ANY($1::uuid[])
        ORDER BY id_type, id`,
       [normalized],
     );
@@ -527,14 +536,14 @@ export async function getScopedRelationFacetCounts({
   sources = [],
   taxonomyIds = [],
 }: {
-  entityPks?: number[];
+  entityPks?: Array<string | number>;
   annotationTermIds?: string[];
   predicates?: string[];
   interactionTypes?: string[];
   sources?: string[];
   taxonomyIds?: string[];
 }): Promise<RelationFacetCount[]> {
-  const normalizedEntityPks = Array.from(new Set(entityPks.filter(Number.isFinite)));
+  const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const normalizedPredicates = Array.from(new Set(predicates.map((v) => v.trim()).filter(Boolean)));
   const normalizedInteractionTypes = Array.from(new Set(interactionTypes.map((v) => v.trim()).filter(Boolean)));
@@ -561,10 +570,11 @@ export async function getScopedRelationFacetCounts({
     }
     if (normalizedEntityPks.length > 0) {
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT rb_build_agg(r.relation_id::integer) AS bitmap
+      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
         FROM ${schema}.relation r
-        WHERE r.subject_entity_id = ANY(${ePkParam}::bigint[])
-           OR r.object_entity_id = ANY(${ePkParam}::bigint[])`);
+        JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
+        WHERE r.subject_entity_id = ANY(${ePkParam}::uuid[])
+           OR r.object_entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
     ctes.push(scopeParts.length > 0

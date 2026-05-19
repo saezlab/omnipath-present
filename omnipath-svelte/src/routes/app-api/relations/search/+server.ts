@@ -3,39 +3,39 @@ import { searchRelations, countRelations } from "$lib/server/queries/relation";
 import { getEntitiesByPublicIds } from "$lib/server/queries/entity";
 import { jsonBigIntSafe } from "$lib/server/api-utils";
 
-function parseNumericIds(values: Array<string | number> | undefined): { numeric: number[]; nonNumeric: string[] } {
-  const numeric: number[] = [];
-  const nonNumeric: string[] = [];
-  const seenNumeric = new Set<number>();
-  const seenNonNumeric = new Set<string>();
+function splitEntityIds(values: Array<string | number> | undefined): { ids: string[]; publicIds: string[] } {
+  const ids: string[] = [];
+  const publicIds: string[] = [];
+  const seenIds = new Set<string>();
+  const seenPublicIds = new Set<string>();
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   for (const value of values || []) {
     const text = String(value).trim();
     if (!text) continue;
-    const parsed = Number(text);
-    if (Number.isInteger(parsed)) {
-      if (!seenNumeric.has(parsed)) {
-        seenNumeric.add(parsed);
-        numeric.push(parsed);
+    if (uuidPattern.test(text)) {
+      if (!seenIds.has(text)) {
+        seenIds.add(text);
+        ids.push(text);
       }
-    } else if (!seenNonNumeric.has(text)) {
-      seenNonNumeric.add(text);
-      nonNumeric.push(text);
+    } else if (!seenPublicIds.has(text)) {
+      seenPublicIds.add(text);
+      publicIds.push(text);
     }
   }
 
-  return { numeric, nonNumeric };
+  return { ids, publicIds };
 }
 
-async function resolveEntityIds(entityIds?: Array<string | number>): Promise<number[] | undefined> {
+async function resolveEntityIds(entityIds?: Array<string | number>): Promise<string[] | undefined> {
   if (!entityIds?.length) return undefined;
-  const { numeric, nonNumeric } = parseNumericIds(entityIds);
-  if (nonNumeric.length > 0) {
-    const resolved = await getEntitiesByPublicIds(nonNumeric);
+  const { ids, publicIds } = splitEntityIds(entityIds);
+  if (publicIds.length > 0) {
+    const resolved = await getEntitiesByPublicIds(publicIds);
     const resolvedPks = resolved.map((e) => e.entityPk);
-    return Array.from(new Set([...numeric, ...resolvedPks]));
+    return Array.from(new Set([...ids, ...resolvedPks]));
   }
-  return numeric.length > 0 ? numeric : undefined;
+  return ids.length > 0 ? ids : undefined;
 }
 
 function mapRelationCategories(categories: unknown): string[] | undefined {

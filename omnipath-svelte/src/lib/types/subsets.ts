@@ -3,11 +3,11 @@ export type SubsetResource = "entities" | "relations" | "ontology";
 export interface AnnotationSubsetFilters {
   prefixes?: string[];
   ontology_ids?: string[];
-  entity_pks?: number[];
+  entity_pks?: string[];
 }
 
 export interface EntitySubsetFilters {
-  entity_pks?: number[];
+  entity_pks?: string[];
   entity_ids?: Array<string | number>;
   entity_types?: string[];
   sources?: string[];
@@ -16,10 +16,10 @@ export interface EntitySubsetFilters {
 }
 
 export interface RelationSubsetFilters {
-  relation_pks?: number[];
-  subject_entity_pks?: number[];
-  object_entity_pks?: number[];
-  entity_pks?: number[];
+  relation_pks?: string[];
+  subject_entity_pks?: string[];
+  object_entity_pks?: string[];
+  entity_pks?: string[];
   entity_ids?: Array<string | number>;
   predicates?: string[];
   interaction_types?: string[];

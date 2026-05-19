@@ -26,14 +26,14 @@ export async function getEntityDetails(publicId: string) {
       `SELECT count(*) AS count
        FROM ${schema}.relation r
        WHERE ${relationCategoryEqualsSql(schema, "r", "interaction")}
-         AND r.subject_entity_id = $1`,
+         AND r.subject_entity_id = $1::uuid`,
       [entity.entityPk],
     );
     const annotationResult = await client.query<{ relation_pk: string | number; predicate: string }>(
       `SELECT r.relation_id AS relation_pk, ${relationPredicateNameSql(schema, "r")} AS predicate
        FROM ${schema}.relation r
-       WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
-         AND r.subject_entity_id = $1
+         WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
+         AND r.subject_entity_id = $1::uuid
        ORDER BY r.relation_id
        LIMIT 100`,
       [entity.entityPk],
@@ -51,7 +51,7 @@ export async function getEntityDetails(publicId: string) {
            ON ee.source_id = eer.source_id
           AND ee.entity_evidence_id = eer.entity_evidence_id
          JOIN ${schema}.data_source ds ON ds.source_id = ee.source_id
-         WHERE eer.entity_id = $1
+         WHERE eer.entity_id = $1::uuid
        ) annotations
        ORDER BY term, value NULLS LAST, source NULLS LAST
        LIMIT 500`,
@@ -78,7 +78,7 @@ export async function getEntityDetails(publicId: string) {
         interactionCount: Number(interactionCountResult.rows[0]?.count || 0),
       },
       annotations: annotationResult.rows.map((row) => ({
-        relationPk: Number(row.relation_pk),
+        relationPk: String(row.relation_pk),
         predicate: row.predicate,
       })),
     };
