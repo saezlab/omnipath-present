@@ -358,22 +358,27 @@ export async function searchEntities({
          WHERE ${whereParts.join(" AND ")}
        ),
        matched AS (
-         SELECT me.*, ${entitySourcesSql(schema, "me")} AS sources, COALESCE(rc.relation_count, 0)::bigint AS relation_count
+         SELECT me.*, COALESCE(rc.relation_count, 0)::bigint AS relation_count
          FROM matched_entities me
          LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = me.entity_id
+       ),
+       page_entities AS MATERIALIZED (
+         SELECT m.*
+         FROM matched m
+         ${pageCursorWhere}
+         ORDER BY m.relation_count DESC, m.entity_id ASC
+         LIMIT ${limitParam}
        )
 	       SELECT
-	         m.entity_id,
-	         m.canonical_identifier AS id,
-	         ${canonicalTypeSql(schema, "m")} AS id_type,
-	         ${entityTypeSql(schema, "m")} AS entity_type,
-	         m.taxonomy_id,
-	         m.sources,
-	         m.relation_count
-	       FROM matched m
-       ${pageCursorWhere}
-       ORDER BY m.relation_count DESC, m.entity_id ASC
-       LIMIT ${limitParam}`,
+	         page.entity_id,
+	         page.canonical_identifier AS id,
+	         ${canonicalTypeSql(schema, "page")} AS id_type,
+	         ${entityTypeSql(schema, "page")} AS entity_type,
+	         page.taxonomy_id,
+	         ${entitySourcesSql(schema, "page")} AS sources,
+	         page.relation_count
+	       FROM page_entities page
+       ORDER BY page.relation_count DESC, page.entity_id ASC`,
       pageParams,
     );
 

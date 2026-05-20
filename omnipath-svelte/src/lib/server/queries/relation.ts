@@ -4,7 +4,6 @@ import { toPublicEntityId } from "$lib/entity-public-id";
 import {
   canonicalIdentifierTypeNameSql,
   entityTypeNameSql,
-  relationCategoryAnySql,
   relationCategoryEqualsSql,
   relationCategoryNameSql,
   relationPredicateNameSql,
@@ -238,10 +237,9 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const relationCategories = normalizeStringValues(filters.relationCategories);
   if (relationCategories.length) {
     const param = pushParam(relationCategories, "text[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.relation r
-      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
-      WHERE ${relationCategoryAnySql(schema, "r", param)}`);
+    bitmapParts.push(`SELECT COALESCE(rb_or_agg(relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.facet_relation_bitmap
+      WHERE facet_name = 'predicate' AND facet_category = ANY(${param})`);
   }
 
   addFacetBitmap("predicate", normalizeStringValues(filters.predicates));
