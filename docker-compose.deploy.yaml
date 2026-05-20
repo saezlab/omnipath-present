@@ -10,7 +10,7 @@
 #
 # Required env vars (typically in <instance>.env):
 #   SVELTE_PORT, API_PORT, POSTGRES_PORT  - host port bindings (per-instance)
-#   DATA_DIR, ONTOLOGY_DIR, GOLD_ROOT_DIR - parquet/ontology paths (read-only mounts)
+#   DATA_DIR, ONTOLOGY_DIR                - parquet/ontology paths (read-only mounts)
 #   POSTGRES_DATA_VOLUME_NAME             - per-instance Postgres volume name
 #   ONTOLOGY_CACHE_VOLUME_NAME            - per-instance ontology cache volume name
 #
@@ -60,14 +60,12 @@ services:
       ONTOLOGY_DATA_DIR: /data/obo
       OMNIPATH_PARQUET_DIR: /data/parquet
       ONTOLOGY_CACHE_DIR: /app/cache
-      OMNIPATH_GOLD_ROOT: /gold
       DATABASE_URL: postgresql://omnipath:omnipath@postgres:5432/omnipath
     ports:
       - "127.0.0.1:${API_PORT:?API_PORT must be set}:8081"
     volumes:
       - ${DATA_DIR:?DATA_DIR must be set}:/data/parquet:ro
       - ${ONTOLOGY_DIR:?ONTOLOGY_DIR must be set}:/data/obo:ro
-      - ${GOLD_ROOT_DIR:?GOLD_ROOT_DIR must be set}:/gold:ro
       - ontology_cache:/app/cache
     depends_on:
       postgres:

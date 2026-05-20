@@ -10,7 +10,7 @@
 #   ~/instances/<name>/
 #     src/    # git clone of omnipath-present
 #     .env    # SVELTE_PORT, API_PORT, POSTGRES_PORT, DATA_DIR, ONTOLOGY_DIR,
-#             # GOLD_ROOT_DIR, POSTGRES_DATA_VOLUME_NAME, ONTOLOGY_CACHE_VOLUME_NAME
+#             # POSTGRES_DATA_VOLUME_NAME, ONTOLOGY_CACHE_VOLUME_NAME
 #
 # The unit drives `docker compose` against docker-compose.deploy.yaml with a
 # per-instance project name so containers, networks, and volumes are isolated
