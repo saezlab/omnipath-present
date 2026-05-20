@@ -217,6 +217,23 @@ function normalizeStringValues(values: string[] | undefined): string[] {
   return Array.from(new Set((values || []).map((value) => value.trim()).filter(Boolean)));
 }
 
+function hasOnlyPredicateCategoryFilters(filters: RelationFilters): boolean {
+  return normalizeIdValues(filters.subjectEntityPks).length === 0
+    && normalizeIdValues(filters.objectEntityPks).length === 0
+    && normalizeIdValues(filters.entityPks).length === 0
+    && normalizeIdValues(filters.scopeEntityPks).length === 0
+    && normalizeStringValues(filters.interactionTypes).length === 0
+    && normalizeStringValues(filters.sources).length === 0
+    && normalizeStringValues(filters.taxonomyIds).length === 0
+    && normalizeStringValues(filters.annotationTerms).length === 0
+    && normalizeStringValues(filters.scopeAnnotationTerms).length === 0;
+}
+
+function shouldUseIndexedTermSearch(filters: RelationFilters): boolean {
+  if (!hasOnlyPredicateCategoryFilters(filters)) return false;
+  return !normalizeStringValues(filters.predicates).includes("associated_with");
+}
+
 function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const params: unknown[] = [];
   const pushParam = (value: unknown, cast?: string): string => {
@@ -385,6 +402,10 @@ export async function searchRelations({
   offset?: number;
 } = {}): Promise<{ relations: EntityRelation[] }> {
   const schema = SEARCH_SCHEMA();
+  if (shouldUseIndexedTermSearch(filters)) {
+    return searchRelationsByIndexedTerms({ schema, filters, limit, offset });
+  }
+
   const client = await getPool().connect();
   try {
     const { cte, params } = buildRelationBitmapQuery(filters, schema);
@@ -422,6 +443,10 @@ export async function searchRelations({
 
 export async function countRelations(filters: RelationFilters = {}): Promise<number> {
   const schema = SEARCH_SCHEMA();
+  if (hasOnlyPredicateCategoryFilters(filters)) {
+    return countRelationsByFacetCounts(schema, filters);
+  }
+
   const client = await getPool().connect();
   try {
     const { cte, params } = buildRelationBitmapQuery(filters, schema);
@@ -429,6 +454,94 @@ export async function countRelations(filters: RelationFilters = {}): Promise<num
       `WITH ${cte}
        SELECT COALESCE(rb_cardinality(bitmap), 0)::bigint AS count
        FROM filter_bitmap`,
+      params,
+    );
+    return Number(result.rows[0]?.count || 0);
+  } finally {
+    client.release();
+  }
+}
+
+async function searchRelationsByIndexedTerms({
+  schema,
+  filters,
+  limit,
+  offset,
+}: {
+  schema: string;
+  filters: RelationFilters;
+  limit: number;
+  offset: number;
+}): Promise<{ relations: EntityRelation[] }> {
+  const relationCategories = normalizeStringValues(filters.relationCategories);
+  const predicates = normalizeStringValues(filters.predicates);
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  if (predicates.length > 0) {
+    params.push(predicates);
+    where.push(`predicate_filter.name = ANY($${params.length}::text[])`);
+  }
+  if (relationCategories.length > 0) {
+    params.push(relationCategories);
+    where.push(`category_filter.name = ANY($${params.length}::text[])`);
+  }
+
+  params.push(limit, offset);
+  const limitParam = `$${params.length - 1}`;
+  const offsetParam = `$${params.length}`;
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      relation_id: string | number;
+      subject_entity_id: string | number;
+      predicate: string;
+      object_entity_id: string | number;
+      relation_category: string | null;
+      participant_types: string[] | null;
+      evidence_count: string | number | null;
+      sources: string[] | null;
+    }>(
+      `SELECT ${relationSelect(schema, "r")}
+       FROM ${schema}.relation r
+       JOIN ${schema}.vocab_relation_predicate predicate_filter
+         ON predicate_filter.relation_predicate_id = r.predicate_id
+       LEFT JOIN ${schema}.vocab_relation_category category_filter
+         ON category_filter.relation_category_id = r.relation_category_id
+       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY r.relation_id
+       LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params,
+    );
+
+    return { relations: result.rows.map(toRelationRow) };
+  } finally {
+    client.release();
+  }
+}
+
+async function countRelationsByFacetCounts(schema: string, filters: RelationFilters): Promise<number> {
+  const relationCategories = normalizeStringValues(filters.relationCategories);
+  const predicates = normalizeStringValues(filters.predicates);
+  const params: unknown[] = [];
+  const where = ["facet_name = 'predicate'"];
+
+  if (predicates.length > 0) {
+    params.push(predicates);
+    where.push(`facet_value = ANY($${params.length}::text[])`);
+  }
+  if (relationCategories.length > 0) {
+    params.push(relationCategories);
+    where.push(`facet_category = ANY($${params.length}::text[])`);
+  }
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{ count: string }>(
+      `SELECT COALESCE(SUM(relation_count), 0)::bigint AS count
+       FROM ${schema}.facet_relation_bitmap
+       WHERE ${where.join(" AND ")}`,
       params,
     );
     return Number(result.rows[0]?.count || 0);

@@ -43,30 +43,15 @@ function toEntityRow(row: {
   };
 }
 
-function entitySourcesSql(schema: string, entityAlias = "e"): string {
+function entityFacetSourcesSql(schema: string, entityAlias = "e"): string {
   return `ARRAY(
-    SELECT DISTINCT source_value
-    FROM (
-      SELECT ds.name AS source_value
-      FROM ${schema}.entity_evidence_resolution eer
-      JOIN ${schema}.entity_evidence ee
-        ON ee.source_id = eer.source_id
-       AND ee.entity_evidence_id = eer.entity_evidence_id
-      JOIN ${schema}.data_source ds ON ds.source_id = ee.source_id
-      WHERE eer.entity_id = ${entityAlias}.entity_id
-      UNION
-      SELECT ds.name AS source_value
-      FROM ${schema}.relation r
-      JOIN ${schema}.relation_evidence_relation rer ON rer.relation_id = r.relation_id
-      JOIN ${schema}.relation_evidence re
-        ON re.source_id = rer.source_id
-       AND re.relation_evidence_id = rer.relation_evidence_id
-      JOIN ${schema}.data_source ds ON ds.source_id = re.source_id
-      WHERE r.subject_entity_id = ${entityAlias}.entity_id
-         OR r.object_entity_id = ${entityAlias}.entity_id
-    ) entity_sources
-    WHERE source_value IS NOT NULL AND source_value <> ''
-    ORDER BY source_value
+    SELECT f.facet_value
+    FROM ${schema}.entity_bitmap_id bitmap
+    JOIN ${schema}.facet_entity_bitmap f
+      ON f.facet_name = 'source'
+     AND rb_contains(f.entity_bitmap, bitmap.bitmap_id)
+    WHERE bitmap.entity_id = ${entityAlias}.entity_id
+    ORDER BY f.facet_value
   )`;
 }
 
@@ -255,6 +240,14 @@ export async function searchEntities({
   if (isUnfilteredEntitySearch(query, filters)) {
     return searchEntitiesByRelationCount({ schema, limit, cursor });
   }
+  if (isEntityTypeOnlySearch(query, filters) && (!cursor || Number(cursor.relationCount) > 0)) {
+    return searchEntitiesByRelationCountAndEntityType({
+      schema,
+      entityTypes: normalizeStringValues(filters.entity_types || []),
+      limit,
+      cursor,
+    });
+  }
 
   const client = await getPool().connect();
 
@@ -375,7 +368,7 @@ export async function searchEntities({
 	         ${canonicalTypeSql(schema, "page")} AS id_type,
 	         ${entityTypeSql(schema, "page")} AS entity_type,
 	         page.taxonomy_id,
-	         ${entitySourcesSql(schema, "page")} AS sources,
+	         ${entityFacetSourcesSql(schema, "page")} AS sources,
 	         page.relation_count
 	       FROM page_entities page
        ORDER BY page.relation_count DESC, page.entity_id ASC`,
@@ -408,6 +401,27 @@ function isUnfilteredEntitySearch(
   if (normalizeIdValues(filters.entity_pks).length > 0) return false;
   if (normalizeStringValues(filters.annotation_term_ids || []).length > 0) return false;
   if (normalizeStringValues(filters.entity_types || []).length > 0) return false;
+  if (normalizeStringValues(filters.sources || []).length > 0) return false;
+  if (normalizeStringValues(filters.ncbi_tax_id || []).length > 0) return false;
+  if (normalizeStringValues(filters.ontology_terms || []).length > 0) return false;
+  return true;
+}
+
+function isEntityTypeOnlySearch(
+  query: string,
+  filters: {
+    entity_pks?: Array<string | number>;
+    annotation_term_ids?: string[];
+    entity_types?: string[];
+    sources?: string[];
+    ncbi_tax_id?: string[];
+    ontology_terms?: string[];
+  },
+): boolean {
+  if (query.trim()) return false;
+  if (normalizeStringValues(filters.entity_types || []).length === 0) return false;
+  if (normalizeIdValues(filters.entity_pks).length > 0) return false;
+  if (normalizeStringValues(filters.annotation_term_ids || []).length > 0) return false;
   if (normalizeStringValues(filters.sources || []).length > 0) return false;
   if (normalizeStringValues(filters.ncbi_tax_id || []).length > 0) return false;
   if (normalizeStringValues(filters.ontology_terms || []).length > 0) return false;
@@ -457,6 +471,69 @@ async function searchEntitiesByRelationCount({
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
+         ${cursorWhere}
+       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       LIMIT ${limitParam}`,
+      params,
+    );
+
+    const rows = result.rows.map(toEntityRow);
+    const nextCursor = rows.length === limit
+      ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
+      : null;
+
+    return { entities: await hydrateEntities(schema, rows), nextCursor };
+  } finally {
+    client.release();
+  }
+}
+
+async function searchEntitiesByRelationCountAndEntityType({
+  schema,
+  entityTypes,
+  limit,
+  cursor,
+}: {
+  schema: string;
+  entityTypes: string[];
+  limit: number;
+  cursor?: EntitySearchCursor | null;
+}): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
+  const normalizedCursor = normalizeEntitySearchCursor(cursor);
+  const params: unknown[] = [entityTypes];
+  let cursorWhere = "";
+  if (normalizedCursor) {
+    params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
+    cursorWhere = "AND (rc.relation_count < $2::bigint OR (rc.relation_count = $2::bigint AND rc.entity_id > $3::uuid))";
+  }
+  params.push(limit);
+  const limitParam = `$${params.length}`;
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      id: string;
+      id_type: string;
+      entity_type: string | null;
+      taxonomy_id: string | null;
+      sources: string[] | null;
+      relation_count: string | number | null;
+    }>(
+      `SELECT
+         e.entity_id,
+         e.canonical_identifier AS id,
+         it.name AS id_type,
+         et.name AS entity_type,
+         e.taxonomy_id,
+         ${entityFacetSourcesSql(schema, "e")} AS sources,
+         rc.relation_count
+       FROM ${schema}.entity_relation_counts rc
+       JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
+       JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
+       LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
+       WHERE et.name = ANY($1::text[])
+         AND et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
        ORDER BY rc.relation_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
