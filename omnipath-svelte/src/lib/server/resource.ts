@@ -8,6 +8,9 @@ export interface ResourceRecord {
 	homepage_url: string | null;
 	license: string | null;
 	pubmed_id: string | null;
+	input_module: string | null;
+	input_module_commit: string | null;
+	input_module_dirty: boolean;
 	categories: string[];
 	annotation_ontologies: string[];
 	entity_count: number;
@@ -62,6 +65,9 @@ export async function listResources(): Promise<ResourceRecord[]> {
 			   license,
 			   pubmed_id,
 			   resource_kind,
+			   input_module,
+			   input_module_commit,
+			   input_module_dirty,
 			   categories,
 			   annotation_ontologies,
 			   entity_count,
@@ -86,6 +92,10 @@ export async function listResources(): Promise<ResourceRecord[]> {
 				homepage_url: typeof row.homepage_url === 'string' ? row.homepage_url : null,
 				license: typeof row.license === 'string' ? row.license : null,
 				pubmed_id: typeof row.pubmed_id === 'string' ? row.pubmed_id : null,
+				input_module: typeof row.input_module === 'string' ? row.input_module : null,
+				input_module_commit:
+					typeof row.input_module_commit === 'string' ? row.input_module_commit : null,
+				input_module_dirty: row.input_module_dirty === true,
 				categories: normalizeTextArray(row.categories),
 				annotation_ontologies: normalizeTextArray(row.annotation_ontologies),
 				entity_count: normalizeNumber(row.entity_count),

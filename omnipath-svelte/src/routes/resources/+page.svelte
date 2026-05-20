@@ -31,6 +31,8 @@
 				resource.resource_id,
 				resource.description,
 				resource.resource_kind,
+				resource.input_module,
+				resource.input_module_commit,
 				...(resource.categories || []),
 				...(resource.annotation_ontologies || [])
 			]
@@ -90,6 +92,11 @@
 			month: 'short',
 			day: 'numeric'
 		}).format(date);
+	}
+
+	function shortCommit(value: string | null | undefined): string {
+		if (!value) return '—';
+		return value.length > 12 ? value.slice(0, 12) : value;
 	}
 
 	function iconForResource(resource: ResourceRecord) {
@@ -237,6 +244,8 @@
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Last Downloaded</dt><dd class="text-right text-foreground/90">{formatDate(resource.last_downloaded_at)}</dd></div>
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Last Built</dt><dd class="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd></div>
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Snapshot Size</dt><dd class="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd></div>
+												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Input Module</dt><dd class="max-w-[65%] text-right font-mono text-xs break-words text-foreground/90">{resource.input_module || '—'}</dd></div>
+												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Input Commit</dt><dd class="max-w-[65%] text-right font-mono text-xs break-words text-foreground/90">{shortCommit(resource.input_module_commit)}{resource.input_module_dirty ? ' · dirty' : ''}</dd></div>
 											</dl>
 
 											<div class="flex flex-wrap items-center gap-1">
