@@ -15,7 +15,12 @@ DATABASE_SCHEMA ?= public
 DB_REQUIRED_TABLES ?= entity relation resources ontology_terms facet_entity_bitmap facet_relation_bitmap
 WARN_ONLY ?=
 
-.PHONY: setup check-tools validate-data dev stop restart
+DEPLOY_INSTANCE ?=
+INSTANCE_ROOT ?= $(HOME)/instances/$(DEPLOY_INSTANCE)
+DEPLOY_ENV_FILE ?= $(INSTANCE_ROOT)/.env
+DEPLOY_COMPOSE_PROJECT ?= omnipath-present-$(DEPLOY_INSTANCE)
+
+.PHONY: setup check-tools validate-data dev stop restart deploy-rebuild-frontend
 
 setup: check-tools
 	@test -f .env || cp .env.example .env
@@ -89,3 +94,15 @@ restart:
 	@echo "Backend services rebuilt and restarted"
 	@echo "  - API Service:      http://localhost:8081"
 	@echo "  - Data dir:         $(DATA_DIR)"
+
+# Rebuild the deploy frontend image for one instance and restart its stack
+# Example: make deploy-rebuild-frontend DEPLOY_INSTANCE=dev2
+# Run this from an omnipath-present checkout after SvelteKit SSR/app-api or
+# schema-coupled frontend query changes.
+deploy-rebuild-frontend:
+	@test -n "$(DEPLOY_INSTANCE)" || { echo "Set DEPLOY_INSTANCE=<name> (for example DEPLOY_INSTANCE=dev2)."; exit 1; }
+	@test -f "$(DEPLOY_ENV_FILE)" || { echo "Missing deploy env file: $(DEPLOY_ENV_FILE)"; exit 1; }
+	docker compose -p "$(DEPLOY_COMPOSE_PROJECT)" -f docker-compose.deploy.yaml --env-file "$(DEPLOY_ENV_FILE)" build omnipath-svelte
+	systemctl --user restart omnipath-present@$(DEPLOY_INSTANCE).service
+	@echo ""
+	@echo "Frontend image rebuilt and stack restarted for $(DEPLOY_INSTANCE)"
