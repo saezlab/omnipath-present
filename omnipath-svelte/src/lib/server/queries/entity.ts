@@ -438,6 +438,15 @@ async function searchEntitiesByRelationCount({
   cursor?: EntitySearchCursor | null;
 }): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const normalizedCursor = normalizeEntitySearchCursor(cursor);
+  // First-page landing (no cursor, no query, no filters): stratify across
+  // entity types so the user sees a mix of small molecules, proteins,
+  // complexes, etc. Without this, the highest relation_count rows happen to
+  // cluster within a single entity_type and the landing card view ends up
+  // looking like e.g. all meat products.
+  // Once the user paginates ("load more"), we fall back to the deterministic
+  // relation_count ordering with the cursor that already existed.
+  const stratified = !normalizedCursor;
+
   const params: unknown[] = [];
   let cursorWhere = "";
   if (normalizedCursor) {
@@ -446,6 +455,15 @@ async function searchEntitiesByRelationCount({
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
+
+  const orderBy = stratified
+    ? // round-robin: the top-by-relation_count of every entity_type, then the
+      // second of every type, etc. random() tiebreaker so the visual ordering
+      // of the types shuffles per request.
+      `ROW_NUMBER() OVER (PARTITION BY et.name ORDER BY rc.relation_count DESC NULLS LAST, rc.entity_id) ASC,
+       random() ASC,
+       rc.entity_id ASC`
+    : "rc.relation_count DESC, rc.entity_id ASC";
 
   const client = await getPool().connect();
   try {
@@ -472,12 +490,20 @@ async function searchEntitiesByRelationCount({
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
-       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       ORDER BY ${orderBy}
        LIMIT ${limitParam}`,
       params,
     );
 
     const rows = result.rows.map(toEntityRow);
+    // Stratified mode: hand the user a sample rather than a paginated stream.
+    // The cursor schema is `(relationCount, entityPk)` and doesn't generalise
+    // to the round-robin ordering; surfacing a cursor would just mix the two
+    // orderings on "load more" and produce duplicates. Returning null disables
+    // the load-more button — apply a filter or search to drill in.
+    if (stratified) {
+      return { entities: await hydrateEntities(schema, rows), nextCursor: null };
+    }
     const nextCursor = rows.length === limit
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
