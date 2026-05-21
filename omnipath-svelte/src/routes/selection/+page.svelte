@@ -131,7 +131,7 @@
 					selectedAnnotationIds={scope.selectedAnnotationIds}
 				/>
 			{:else if tab === 'relations'}
-				<RelationsExploreTab {filters} onFilterChange={(f) => (filters = f)} scopedEntityIds={selection.entityIds} scopedAnnotationIds={scope.selectedAnnotationIds} />
+				<RelationsExploreTab {query} {filters} onFilterChange={(f) => (filters = f)} scopedEntityIds={selection.entityIds} scopedAnnotationIds={scope.selectedAnnotationIds} />
 			{:else}
 				<AnnotationBrowserTab {query} {filters} onFiltersChange={(f) => (filters = f)} selectedEntityPks={selection.selectedEntityPks} selectedAnnotationIds={scope.selectedAnnotationIds} />
 			{/if}

@@ -10,7 +10,6 @@ import {
 
 export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; relationCount?: number };
 
-const CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012";
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
 export type EntitySearchCursor = {
@@ -252,7 +251,7 @@ export async function searchEntities({
   const client = await getPool().connect();
 
   try {
-    const whereParts: string[] = [`${entityTypeSql(schema)} IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
+    const whereParts: string[] = [];
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -283,7 +282,7 @@ export async function searchEntities({
         LOWER(e.canonical_identifier) = ${queryParam}
         OR EXISTS (
           SELECT 1
-	          FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
+          FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
           WHERE LOWER(item.identifier) = ${queryParam}
         )
       )`);
@@ -348,7 +347,7 @@ export async function searchEntities({
          FROM ${schema}.entity e
          ${filterBitmaps.length > 0 ? `JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = e.entity_id` : ""}
          ${filterJoins.join("\n")}
-         WHERE ${whereParts.join(" AND ")}
+         ${whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : ""}
        ),
        matched AS (
          SELECT me.*, COALESCE(rc.relation_count, 0)::bigint AS relation_count
@@ -362,8 +361,8 @@ export async function searchEntities({
          ORDER BY m.relation_count DESC, m.entity_id ASC
          LIMIT ${limitParam}
        )
-	       SELECT
-	         page.entity_id,
+       SELECT
+         page.entity_id,
 	         page.canonical_identifier AS id,
 	         ${canonicalTypeSql(schema, "page")} AS id_type,
 	         ${entityTypeSql(schema, "page")} AS entity_type,
@@ -442,7 +441,7 @@ async function searchEntitiesByRelationCount({
   let cursorWhere = "";
   if (normalizedCursor) {
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::uuid))";
+    cursorWhere = "WHERE (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::uuid))";
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
@@ -470,8 +469,7 @@ async function searchEntitiesByRelationCount({
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
-       WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
-         ${cursorWhere}
+       ${cursorWhere}
        ORDER BY rc.relation_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
       params,
@@ -533,7 +531,6 @@ async function searchEntitiesByRelationCountAndEntityType({
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name = ANY($1::text[])
-         AND et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
        ORDER BY rc.relation_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
@@ -580,15 +577,14 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
     const schema = SEARCH_SCHEMA();
     const client = await getPool().connect();
     try {
-	      const typeResult = await client.query<{ values: string[] | null }>(
-	        `SELECT array_agg(value ORDER BY value) AS values
+      const typeResult = await client.query<{ values: string[] | null }>(
+        `SELECT array_agg(value ORDER BY value) AS values
 	         FROM (
 	           SELECT DISTINCT ${entityTypeSql(schema)} AS value
 	           FROM ${schema}.entity e
 	           WHERE ${entityTypeSql(schema)} IS NOT NULL
-	             AND ${entityTypeSql(schema)} <> '${CV_TERM_ENTITY_TYPE}'
 	         ) t`,
-	      );
+      );
       const sourceResult = await client.query<{ values: string[] | null }>(
         `SELECT array_agg(facet_value ORDER BY facet_value) AS values
          FROM ${schema}.facet_entity_bitmap
@@ -678,7 +674,6 @@ export async function getScopedEntityFacetCounts({
                     END AS scoped_count
              FROM ${schema}.facet_entity_bitmap f
              WHERE f.facet_name = 'entity_type'
-               AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'
            ) entity_type_facets
            WHERE scoped_count > 0
            UNION ALL
@@ -728,11 +723,10 @@ export async function getScopedEntityFacetCounts({
     };
 
     const ctes: string[] = [];
-    ctes.push(`non_cv_entity_bitmap AS MATERIALIZED (
+    ctes.push(`all_entity_bitmap AS MATERIALIZED (
       SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.facet_entity_bitmap
       WHERE facet_name = 'entity_type'
-        AND facet_value <> '${CV_TERM_ENTITY_TYPE}'
     )`);
 
     const scopeParts: string[] = [];
@@ -755,7 +749,7 @@ export async function getScopedEntityFacetCounts({
           SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
           FROM (${scopeParts.join("\nUNION ALL\n")}) scope_parts
         )`
-      : `scope_base AS MATERIALIZED (SELECT bitmap FROM non_cv_entity_bitmap)`);
+      : `scope_base AS MATERIALIZED (SELECT bitmap FROM all_entity_bitmap)`);
 
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
@@ -766,7 +760,7 @@ export async function getScopedEntityFacetCounts({
         WHERE LOWER(e.canonical_identifier) = ${queryParam}
            OR e.entity_id IN (
              SELECT e.entity_id
-	             FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
+             FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
              WHERE LOWER(item.identifier) = ${queryParam}
            )
       )`);
@@ -800,15 +794,15 @@ export async function getScopedEntityFacetCounts({
     }
 
     const chain = (parts: string[]): string => parts.slice(1).reduce((expr, part) => `rb_and(${expr}, ${part})`, parts[0]);
-    const joins: string[] = ["CROSS JOIN scope_base", "CROSS JOIN non_cv_entity_bitmap"];
+    const joins: string[] = ["CROSS JOIN scope_base", "CROSS JOIN all_entity_bitmap"];
     if (trimmedQuery) joins.push("CROSS JOIN query_bitmap");
     if (normalizedEntityTypes.length > 0) joins.push("CROSS JOIN type_filter_bitmap");
     if (normalizedSources.length > 0) joins.push("CROSS JOIN source_filter_bitmap");
     if (normalizedTaxonomyIds.length > 0) joins.push("CROSS JOIN taxonomy_filter_bitmap");
 
-    const typeScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
-    const sourceScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
-    const taxonomyScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : [])]);
+    const typeScope = chain(["scope_base.bitmap", "all_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
+    const sourceScope = chain(["scope_base.bitmap", "all_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
+    const taxonomyScope = chain(["scope_base.bitmap", "all_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : [])]);
 
     const facetCountSubquery = (
       facetName: string,
@@ -825,7 +819,7 @@ export async function getScopedEntityFacetCounts({
        WHERE scoped_count > 0`;
 
     const subqueries = [
-      facetCountSubquery("entity_type", typeScope, `AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'`),
+      facetCountSubquery("entity_type", typeScope),
       facetCountSubquery("source", sourceScope),
       facetCountSubquery("taxonomy_id", taxonomyScope),
     ];

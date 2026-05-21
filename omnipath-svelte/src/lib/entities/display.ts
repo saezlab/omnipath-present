@@ -24,8 +24,12 @@ export function getEntityTypeLabel(entity: EntityLike): string {
   return entityType ? getIdentifierTypeLabel(entityType) : "Entity";
 }
 
+function isFallbackIdentifierType(identifierType: string | null | undefined): boolean {
+  return getIdentifierTypeLabel(identifierType || "").toLowerCase() === "fallback";
+}
+
 function isFallbackEntity(entity: EntityLike): boolean {
-  return getIdentifierTypeLabel(entity.canonicalIdentifierType || "").toLowerCase() === "fallback";
+  return isFallbackIdentifierType(entity.canonicalIdentifierType);
 }
 
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
@@ -71,9 +75,28 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
     .filter((identifier): identifier is EntityIdentifierLike => Boolean(identifier));
 }
 
+function getShortestAvailableIdentifier(entity: EntityLike): EntityIdentifierLike | undefined {
+  const identifiers = getEntityIdentifiers(entity)
+    .map((identifier) => ({
+      key: identifier.key.trim(),
+      value: identifier.value.trim(),
+    }))
+    .filter((identifier) => identifier.key && identifier.value);
+  const nonFallbackIdentifiers = identifiers.filter((identifier) => !isFallbackIdentifierType(identifier.key));
+  const candidates = nonFallbackIdentifiers.length > 0 ? nonFallbackIdentifiers : identifiers;
+
+  return candidates.sort((a, b) =>
+    a.value.length - b.value.length
+    || a.value.localeCompare(b.value)
+    || a.key.localeCompare(b.key)
+  )[0];
+}
+
 export function getEntityPrimaryIdentifierBadge(entity: EntityLike): EntityIdentifierLike {
-  const fallbackIdentifier = isFallbackEntity(entity) ? getEntityIdentifiers(entity)[0] : undefined;
-  return fallbackIdentifier ?? { key: entity.canonicalIdentifierType, value: entity.canonicalIdentifier };
+  const fallbackIdentifier = isFallbackEntity(entity) ? getShortestAvailableIdentifier(entity) : undefined;
+  if (fallbackIdentifier) return fallbackIdentifier;
+  if (isFallbackEntity(entity)) return { key: "Identifier", value: "Unavailable" };
+  return { key: entity.canonicalIdentifierType, value: entity.canonicalIdentifier };
 }
 
 export function getIdentifierTypeLabel(identifierType: string | null | undefined): string {
@@ -264,7 +287,7 @@ export function getEntityDisplayName(entity: EntityLike): string {
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
   if (isFallbackEntity(entity)) {
-    return geneSymbols[0] || names[0] || getEntityIdentifiers(entity)[0]?.value || publicId;
+    return getShortestAvailableIdentifier(entity)?.value || geneSymbols[0] || names[0] || "Entity";
   }
 
   if (isSmallMoleculeEntity(entity)) {
@@ -295,7 +318,7 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
   if (isFallbackEntity(entity)) {
-    return undefined;
+    return getShortestAvailableIdentifier(entity)?.value || "Entity";
   }
 
   if (isCvTermEntity(entity)) {
