@@ -1,26 +1,93 @@
 name: Deploy frontend to dev2 + dev3
 
+# Auto-deploys on every push to `main`. To push a change to `main` without
+# deploying — e.g., a refactor that needs a coordinated build elsewhere first —
+# include `[no-deploy]` (or `[skip-deploy]`) anywhere in the commit message.
+#
+# `workflow_dispatch` lets you redeploy any ref manually (or rerun a deploy
+# that was skipped).
+#
+# The `deploy` branch is auto-managed: after a successful dev2 + dev3 deploy
+# the workflow fast-forwards `deploy` to the just-deployed SHA. The invariant
+# is `deploy ≤ main` — humans never push to `deploy` directly. If `deploy`
+# diverges (e.g. a force-push to main rewrote history), the next successful
+# deploy resets it.
+
 on:
   push:
-    branches: [deploy]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch or commit to deploy (defaults to the workflow trigger ref)
+        description: Branch or commit SHA to deploy (defaults to main)
         required: false
 
 permissions:
-  contents: read
+  contents: write   # for fast-forwarding the `deploy` branch
 
 jobs:
+  decide:
+    name: Decide whether to deploy
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+      ref: ${{ steps.check.outputs.ref }}
+      sha: ${{ steps.check.outputs.sha }}
+      short: ${{ steps.check.outputs.short }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - name: Check trigger + commit message
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          MSG: ${{ github.event.head_commit.message }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            REF="${INPUT_REF:-main}"
+            REASON="manual workflow_dispatch"
+            DEPLOY=true
+          else
+            REF="main"
+            if printf '%s' "$MSG" | grep -qE '\[(no|skip)[-_ ]?deploy\]'; then
+              DEPLOY=false
+              REASON="commit message opts out (contains [no-deploy] / [skip-deploy])"
+            else
+              DEPLOY=true
+              REASON="push to main"
+            fi
+          fi
+          # Use the default SHA for push events; for workflow_dispatch fetch
+          # the ref and resolve it.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SHA=$(git ls-remote https://github.com/${{ github.repository }} "$REF" | awk '{print $1}' | head -1)
+            [ -z "$SHA" ] && SHA="$REF"
+          else
+            SHA="$DEFAULT_SHA"
+          fi
+          SHORT=$(printf '%s' "$SHA" | cut -c1-7)
+          echo "should_deploy=$DEPLOY" >> $GITHUB_OUTPUT
+          echo "ref=$REF"             >> $GITHUB_OUTPUT
+          echo "sha=$SHA"             >> $GITHUB_OUTPUT
+          echo "short=$SHORT"         >> $GITHUB_OUTPUT
+          echo "reason=$REASON"       >> $GITHUB_OUTPUT
+          if [ "$DEPLOY" = "false" ]; then
+            echo "::notice::skipping deploy for $REF @ $SHORT — $REASON"
+          else
+            echo "::notice::deploying $REF @ $SHORT — $REASON"
+          fi
+
   deploy:
     name: Deploy ${{ matrix.instance }}
+    needs: decide
+    if: needs.decide.outputs.should_deploy == 'true'
     strategy:
       matrix:
         instance: [dev2, dev3]
       fail-fast: false
     runs-on: ubuntu-latest
-    # Serialise per-instance deploys; don't cancel an in-flight rebuild.
     concurrency:
       group: deploy-${{ matrix.instance }}
       cancel-in-progress: false
@@ -39,13 +106,11 @@ jobs:
       - name: Deploy ${{ matrix.instance }}
         env:
           INST: ${{ matrix.instance }}
-          REF:  ${{ github.event.inputs.ref || github.ref_name }}
-          SHA:  ${{ github.sha }}
+          REF:  ${{ needs.decide.outputs.ref }}
+          SHA:  ${{ needs.decide.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          # 'EOF' is single-quoted so the local shell does NOT expand $vars —
-          # they're evaluated remotely after the positional args are bound.
           ssh -p 2323 -o BatchMode=yes omnipath@omnipathdb.org \
               bash -s -- "$INST" "$REF" "$SHA" "$RUN_URL" <<'EOF'
           set -euo pipefail
@@ -55,7 +120,6 @@ jobs:
 
           short() { printf '%s' "${1:0:7}"; }
 
-          # Read current claim; defer to humans, but reclaim from a stale CI hold.
           status_line=$("$LC" status "$INST" | head -1)
           if printf '%s' "$status_line" | grep -q 'claimed'; then
             holder=$(printf '%s' "$status_line" | sed -n 's/.*holder=\([^ ]*\).*/\1/p')
@@ -73,15 +137,38 @@ jobs:
 
           cd "/home/omnipath/instances/$INST/src"
           git fetch origin --quiet
-          git checkout --quiet "$REF" 2>/dev/null || git checkout --quiet "origin/$REF"
-          git reset --hard "origin/$REF"
+          git checkout --quiet "$SHA"
           echo "HEAD: $(git log -1 --oneline)"
 
-          # Build the omnipath-svelte image with the per-instance .env, then
-          # restart the systemd unit which runs `docker compose up -d --wait`.
-          # The make target's `systemctl --user restart …` runs without TTY,
-          # which is fine since linger is enabled.
           make deploy-rebuild-frontend DEPLOY_INSTANCE="$INST"
 
           "$LC" mark-build "$INST" partial -n "frontend auto-deploy: $REF @ $(short "$SHA")"
           EOF
+
+  advance-deploy-branch:
+    name: Fast-forward deploy branch to deployed SHA
+    needs: [decide, deploy]
+    # Run only when at least one deploy job actually executed and didn't fail.
+    # `deploy.result == 'success'` here is the matrix's *aggregate* result —
+    # if both dev2 and dev3 succeeded (or skipped via lockctl), we promote.
+    if: needs.decide.outputs.should_deploy == 'true' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          fetch-depth: 1
+      - name: Push to deploy
+        env:
+          SHA: ${{ needs.decide.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # `--force-with-lease` would be ideal but the actions/checkout
+          # token doesn't fetch deploy, so we don't know its prior tip.
+          # The deploy branch is auto-managed by this workflow — humans
+          # don't push to it — so an unconditional fast-forward (or reset)
+          # to the just-deployed SHA is safe by construction.
+          git push origin "${SHA}:refs/heads/deploy" --force
+          echo "::notice::deploy branch fast-forwarded to $SHA"
