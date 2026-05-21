@@ -32,6 +32,11 @@ function isFallbackEntity(entity: EntityLike): boolean {
   return isFallbackIdentifierType(entity.canonicalIdentifierType);
 }
 
+function isHashLikeIdentifier(value: string | null | undefined): boolean {
+  const text = value?.trim() || "";
+  return /^[a-f0-9-]{24,}$/i.test(text) && /[a-f]/i.test(text);
+}
+
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
   const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
   return typeLabel === "smallmolecule"
@@ -351,6 +356,18 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   }
 
   return undefined;
+}
+
+export function getEntityBadgeIdentifier(entity: EntityLike): string {
+  const secondaryName = getEntitySecondaryName(entity);
+  if (secondaryName) return secondaryName;
+
+  const canonicalIdentifier = entity.canonicalIdentifier?.trim() || "";
+  if (isFallbackEntity(entity) || isHashLikeIdentifier(canonicalIdentifier)) {
+    return getShortestAvailableIdentifier(entity)?.value || getEntityDisplayName(entity);
+  }
+
+  return canonicalIdentifier || getEntityDisplayName(entity);
 }
 
 export function getEntitySmiles(entity: EntityLike): string | null {
