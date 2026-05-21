@@ -12,9 +12,9 @@
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
   import { fetchRelationsSearch, fetchEntitiesByPks, fetchEntitiesSearch } from '$lib/api/client';
   import {
+    getEntityBadgeIdentifier,
     getEntityDisplayName,
     getEntityPublicId,
-    getEntitySecondaryName,
     getEntityTypeLabel,
     type EntityLike,
   } from '$lib/entities/display';
@@ -300,7 +300,7 @@
                     >
                       <EntityBadge
                         displayName={getEntityDisplayName(sourceEntity)}
-                        canonicalIdentifier={getEntitySecondaryName(sourceEntity) || sourceEntity.canonicalIdentifier}
+                        canonicalIdentifier={getEntityBadgeIdentifier(sourceEntity)}
                         entityType={getEntityTypeLabel(sourceEntity)}
                       />
                     </button>
@@ -325,7 +325,7 @@
                     >
                       <EntityBadge
                         displayName={getEntityDisplayName(targetEntity)}
-                        canonicalIdentifier={getEntitySecondaryName(targetEntity) || targetEntity.canonicalIdentifier}
+                        canonicalIdentifier={getEntityBadgeIdentifier(targetEntity)}
                         entityType={getEntityTypeLabel(targetEntity)}
                       />
                     </button>

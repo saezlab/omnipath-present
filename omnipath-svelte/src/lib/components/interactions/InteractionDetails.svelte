@@ -3,9 +3,9 @@
   import { Badge } from '$lib/components/ui/badge/index.js';
   import EntityBadge from '$lib/components/entity/EntityBadge.svelte';
   import {
+    getEntityBadgeIdentifier,
     getEntityDisplayName,
     getEntityPublicId,
-    getEntitySecondaryName,
     getEntityTypeLabel,
     getIdentifierTypeLabel,
   } from '$lib/entities/display';
@@ -260,7 +260,7 @@
         <div class="min-w-0">
           <EntityBadge
             displayName={getEntityDisplayName(subjectEntity)}
-            canonicalIdentifier={getEntitySecondaryName(subjectEntity) || subjectEntity.canonicalIdentifier}
+            canonicalIdentifier={getEntityBadgeIdentifier(subjectEntity)}
             entityType={getEntityTypeLabel(subjectEntity)}
           />
         </div>
@@ -274,7 +274,7 @@
         <div class="min-w-0">
           <EntityBadge
             displayName={getEntityDisplayName(objectEntity)}
-            canonicalIdentifier={getEntitySecondaryName(objectEntity) || objectEntity.canonicalIdentifier}
+            canonicalIdentifier={getEntityBadgeIdentifier(objectEntity)}
             entityType={getEntityTypeLabel(objectEntity)}
           />
         </div>
