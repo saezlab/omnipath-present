@@ -1,0 +1,87 @@
+name: Deploy frontend to dev2 + dev3
+
+on:
+  push:
+    branches: [deploy]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to deploy (defaults to the workflow trigger ref)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ matrix.instance }}
+    strategy:
+      matrix:
+        instance: [dev2, dev3]
+      fail-fast: false
+    runs-on: ubuntu-latest
+    # Serialise per-instance deploys; don't cancel an in-flight rebuild.
+    concurrency:
+      group: deploy-${{ matrix.instance }}
+      cancel-in-progress: false
+    steps:
+      - name: Prepare SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.BEAUTY_OMNIPATH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.BEAUTY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY"  > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Deploy ${{ matrix.instance }}
+        env:
+          INST: ${{ matrix.instance }}
+          REF:  ${{ github.event.inputs.ref || github.ref_name }}
+          SHA:  ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # 'EOF' is single-quoted so the local shell does NOT expand $vars —
+          # they're evaluated remotely after the positional args are bound.
+          ssh -p 2323 -o BatchMode=yes omnipath@omnipathdb.org \
+              bash -s -- "$INST" "$REF" "$SHA" "$RUN_URL" <<'EOF'
+          set -euo pipefail
+          INST=$1; REF=$2; SHA=$3; RUN_URL=$4
+          LC=/home/omnipath/instances/lockctl
+          export LOCKCTL_USER=github-ci
+
+          short() { printf '%s' "${1:0:7}"; }
+
+          # Read current claim; defer to humans, but reclaim from a stale CI hold.
+          status_line=$("$LC" status "$INST" | head -1)
+          if printf '%s' "$status_line" | grep -q 'claimed'; then
+            holder=$(printf '%s' "$status_line" | sed -n 's/.*holder=\([^ ]*\).*/\1/p')
+            if [ "$holder" = "github-ci" ]; then
+              echo "::warning::previous CI run on $INST didn't release — overriding"
+              "$LC" release "$INST" --force
+            else
+              echo "::warning::$INST is claimed by $holder — skipping auto-deploy"
+              "$LC" status "$INST"
+              exit 0
+            fi
+          fi
+          "$LC" claim "$INST" -r "auto-deploy: $REF @ $(short "$SHA") ($RUN_URL)"
+          trap '"$LC" release "$INST" --force || true' EXIT
+
+          cd "/home/omnipath/instances/$INST/src"
+          git fetch origin --quiet
+          git checkout --quiet "$REF" 2>/dev/null || git checkout --quiet "origin/$REF"
+          git reset --hard "origin/$REF"
+          echo "HEAD: $(git log -1 --oneline)"
+
+          # Build the omnipath-svelte image with the per-instance .env, then
+          # restart the systemd unit which runs `docker compose up -d --wait`.
+          # The make target's `systemctl --user restart …` runs without TTY,
+          # which is fine since linger is enabled.
+          make deploy-rebuild-frontend DEPLOY_INSTANCE="$INST"
+
+          "$LC" mark-build "$INST" partial -n "frontend auto-deploy: $REF @ $(short "$SHA")"
+          EOF
