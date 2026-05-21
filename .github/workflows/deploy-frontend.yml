@@ -51,9 +51,12 @@ jobs:
             DEPLOY=true
           else
             REF="main"
-            if printf '%s' "$MSG" | grep -qE '\[(no|skip)[-_ ]?deploy\]'; then
+            # Opt-out marker must be alone on a line (whitespace allowed
+            # around it) — so prose mentioning the marker in the body of
+            # a commit message doesn't accidentally trigger the skip.
+            if printf '%s\n' "$MSG" | grep -qE '^[[:space:]]*\[(no|skip)[-_ ]?deploy\][[:space:]]*$'; then
               DEPLOY=false
-              REASON="commit message opts out (contains [no-deploy] / [skip-deploy])"
+              REASON="commit message opts out (contains a [no-deploy] line)"
             else
               DEPLOY=true
               REASON="push to main"
