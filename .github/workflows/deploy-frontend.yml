@@ -88,7 +88,7 @@ jobs:
     if: needs.decide.outputs.should_deploy == 'true'
     strategy:
       matrix:
-        instance: [dev2, dev3]
+        instance: [dev2, dev3, dev4, dev5]
       fail-fast: false
     runs-on: ubuntu-latest
     concurrency:
