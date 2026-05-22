@@ -241,9 +241,11 @@ export async function searchEntities({
     return searchEntitiesByRelationCount({ schema, limit, cursor });
   }
   if (isEntityTypeOnlySearch(query, filters) && (!cursor || Number(cursor.relationCount) > 0)) {
-    return searchEntitiesByRelationCountAndEntityType({
+    return searchEntitiesByRelationCountAndFacetFilters({
       schema,
       entityTypes: normalizeStringValues(filters.entity_types || []),
+      sources: [],
+      taxonomyIds: [],
       limit,
       cursor,
     });
@@ -652,7 +654,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
   addFacetFilter("taxonomy_filter_bitmap", "taxonomy_id", taxonomyIds);
 
   const normalizedCursor = normalizeEntitySearchCursor(cursor);
-  const useBitmapDrivenSearch = filterBitmaps.length > 1 || taxonomyIds.length > 0;
+  const useBitmapDrivenSearch = filterBitmaps.length > 0;
   let cursorWhere = "";
   let positiveCursorWhere = "";
   let zeroCursorWhere = "";
