@@ -624,6 +624,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
 }): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const params: unknown[] = [];
   const filterCtes: string[] = [];
+  const filterCteNames: string[] = [];
   const filterJoins: string[] = [];
   const filterBitmaps: string[] = [];
   const pushParam = (value: unknown): string => {
@@ -639,6 +640,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
       WHERE facet_name = '${facetName}'
         AND facet_value = ANY(${param}::text[])
     )`);
+    filterCteNames.push(cteName);
     filterJoins.push(`CROSS JOIN ${cteName}`);
     filterBitmaps.push(`${cteName}.bitmap`);
   };
@@ -650,17 +652,112 @@ async function searchEntitiesByRelationCountAndFacetFilters({
   addFacetFilter("taxonomy_filter_bitmap", "taxonomy_id", taxonomyIds);
 
   const normalizedCursor = normalizeEntitySearchCursor(cursor);
+  const useBitmapDrivenSearch = filterBitmaps.length > 1 || taxonomyIds.length > 0;
   let cursorWhere = "";
+  let positiveCursorWhere = "";
+  let zeroCursorWhere = "";
   if (normalizedCursor) {
     const countParam = pushParam(normalizedCursor.relationCount);
     const pkParam = pushParam(normalizedCursor.entityPk);
-    cursorWhere = `AND (rc.relation_count < ${countParam}::bigint OR (rc.relation_count = ${countParam}::bigint AND rc.entity_id > ${pkParam}::uuid))`;
+    const relationCountSql = useBitmapDrivenSearch ? "COALESCE(rc.relation_count, 0)" : "rc.relation_count";
+    const entityIdSql = useBitmapDrivenSearch ? "e.entity_id" : "rc.entity_id";
+    cursorWhere = `AND (${relationCountSql} < ${countParam}::bigint OR (${relationCountSql} = ${countParam}::bigint AND ${entityIdSql} > ${pkParam}::uuid))`;
+    positiveCursorWhere = `WHERE (rc.relation_count < ${countParam}::bigint OR (rc.relation_count = ${countParam}::bigint AND entity_bitmap.entity_id > ${pkParam}::uuid))`;
+    if (normalizedCursor.relationCount === 0) {
+      zeroCursorWhere = `WHERE entity_bitmap.entity_id > ${pkParam}::uuid`;
+    }
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
+  const filterCteSql = filterCtes.join(",\n");
 
   const client = await getPool().connect();
   try {
+    if (useBitmapDrivenSearch) {
+      const result = await client.query<{
+        entity_id: string | number;
+        id: string;
+        id_type: string;
+        entity_type: string | null;
+        taxonomy_id: string | null;
+        sources: string[] | null;
+        relation_count: string | number | null;
+      }>(
+        `WITH ${filterCteSql},
+         non_cv_entity_bitmap AS MATERIALIZED (
+           SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+           FROM ${schema}.facet_entity_bitmap
+           WHERE facet_name = 'entity_type'
+             AND facet_value <> '${CV_TERM_ENTITY_TYPE}'
+         ),
+         combined_filter_bitmap AS MATERIALIZED (
+           SELECT rb_and(${bitmapIntersection(filterBitmaps)}, non_cv_entity_bitmap.bitmap) AS bitmap
+           FROM ${filterCteNames.join("\nCROSS JOIN ")}
+           CROSS JOIN non_cv_entity_bitmap
+         ),
+         relation_count_bitmap AS MATERIALIZED (
+           SELECT rb_build_agg(entity_bitmap.bitmap_id) AS bitmap
+           FROM ${schema}.entity_relation_counts rc
+           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
+         ),
+         positive_filter_bitmap AS MATERIALIZED (
+           SELECT rb_and(combined_filter_bitmap.bitmap, relation_count_bitmap.bitmap) AS bitmap
+           FROM combined_filter_bitmap
+           CROSS JOIN relation_count_bitmap
+         ),
+         zero_filter_bitmap AS MATERIALIZED (
+           SELECT rb_andnot(combined_filter_bitmap.bitmap, relation_count_bitmap.bitmap) AS bitmap
+           FROM combined_filter_bitmap
+           CROSS JOIN relation_count_bitmap
+         ),
+         positive_page AS MATERIALIZED (
+           SELECT entity_bitmap.entity_id, rc.relation_count
+           FROM positive_filter_bitmap
+           CROSS JOIN LATERAL rb_iterate(positive_filter_bitmap.bitmap) matched(bitmap_id)
+           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.bitmap_id = matched.bitmap_id
+           JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = entity_bitmap.entity_id
+           ${positiveCursorWhere}
+           ORDER BY rc.relation_count DESC, entity_bitmap.entity_id ASC
+           LIMIT ${limitParam}
+         ),
+         zero_page AS MATERIALIZED (
+           SELECT entity_bitmap.entity_id, 0::bigint AS relation_count
+           FROM zero_filter_bitmap
+           CROSS JOIN LATERAL rb_iterate(zero_filter_bitmap.bitmap) matched(bitmap_id)
+           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.bitmap_id = matched.bitmap_id
+           ${zeroCursorWhere}
+           ORDER BY matched.bitmap_id ASC
+           LIMIT ${limitParam}
+         ),
+         candidate_page AS MATERIALIZED (
+           SELECT entity_id, relation_count FROM positive_page
+           UNION ALL
+           SELECT entity_id, relation_count FROM zero_page
+           ORDER BY relation_count DESC, entity_id ASC
+           LIMIT ${limitParam}
+         )
+         SELECT
+           e.entity_id,
+           e.canonical_identifier AS id,
+           ${canonicalTypeSql(schema, "e")} AS id_type,
+           ${entityTypeSql(schema, "e")} AS entity_type,
+           e.taxonomy_id,
+           ${entityFacetSourcesSql(schema, "e")} AS sources,
+           page.relation_count
+         FROM candidate_page page
+         JOIN ${schema}.entity e ON e.entity_id = page.entity_id
+         ORDER BY page.relation_count DESC, e.entity_id ASC`,
+        params,
+      );
+
+      const rows = result.rows.map(toEntityRow);
+      const nextCursor = rows.length === limit
+        ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
+        : null;
+
+      return { entities: await hydrateEntities(schema, rows), nextCursor };
+    }
+
     const result = await client.query<{
       entity_id: string | number;
       id: string;
@@ -670,7 +767,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
       sources: string[] | null;
       relation_count: string | number | null;
     }>(
-      `WITH ${filterCtes.join(",\n")}
+      `WITH ${filterCteSql}
        SELECT
          e.entity_id,
          e.canonical_identifier AS id,
