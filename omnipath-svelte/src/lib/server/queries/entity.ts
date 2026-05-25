@@ -12,6 +12,8 @@ export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; 
 
 const CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012";
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
+const INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES = 1000;
+const INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES = 5000;
 
 export type EntitySearchCursor = {
   relationCount: number;
@@ -475,9 +477,20 @@ async function searchEntitiesByRelationCount({
   // complexes, etc. Without this, the highest relation_count rows happen to
   // cluster within a single entity_type and the landing card view ends up
   // looking like e.g. all meat products.
-  // Once the user paginates ("load more"), we fall back to the deterministic
-  // relation_count ordering with the cursor that already existed.
+  // Keep the database work index-friendly: pull a bounded high-relation-count
+  // candidate pool, then do the round-robin sampling in process. Ordering by a
+  // partitioned row_number plus random() here forces Postgres to rank/sort the
+  // full relation-count table before it can return the first page.
   const stratified = !normalizedCursor;
+  const queryLimit = stratified
+    ? Math.max(
+        limit,
+        Math.min(
+          Math.max(limit * 250, INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES),
+          INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES,
+        ),
+      )
+    : limit;
 
   const params: unknown[] = [];
   let cursorWhere = "";
@@ -485,17 +498,8 @@ async function searchEntitiesByRelationCount({
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
     cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::uuid))";
   }
-  params.push(limit);
+  params.push(queryLimit);
   const limitParam = `$${params.length}`;
-
-  const orderBy = stratified
-    ? // round-robin: the top-by-relation_count of every entity_type, then the
-      // second of every type, etc. random() tiebreaker so the visual ordering
-      // of the types shuffles per request.
-      `ROW_NUMBER() OVER (PARTITION BY et.name ORDER BY rc.relation_count DESC NULLS LAST, rc.entity_id) ASC,
-       random() ASC,
-       rc.entity_id ASC`
-    : "rc.relation_count DESC, rc.entity_id ASC";
 
   const client = await getPool().connect();
   try {
@@ -522,19 +526,15 @@ async function searchEntitiesByRelationCount({
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
-       ORDER BY ${orderBy}
+       ORDER BY rc.relation_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
       params,
     );
 
     const rows = result.rows.map(toEntityRow);
-    // Stratified mode: hand the user a sample rather than a paginated stream.
-    // The cursor schema is `(relationCount, entityPk)` and doesn't generalise
-    // to the round-robin ordering; surfacing a cursor would just mix the two
-    // orderings on "load more" and produce duplicates. Returning null disables
-    // the load-more button — apply a filter or search to drill in.
     if (stratified) {
-      return { entities: await hydrateEntities(schema, rows), nextCursor: null };
+      const sampledRows = selectStratifiedEntitySample(rows, limit);
+      return { entities: await hydrateEntities(schema, sampledRows), nextCursor: null };
     }
     const nextCursor = rows.length === limit
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
@@ -544,6 +544,48 @@ async function searchEntitiesByRelationCount({
   } finally {
     client.release();
   }
+}
+
+function selectStratifiedEntitySample(
+  rows: Array<Entity & { relationCount?: number }>,
+  limit: number,
+): Array<Entity & { relationCount?: number }> {
+  const groups = new Map<string, Array<Entity & { relationCount?: number }>>();
+  for (const row of rows) {
+    const key = row.entityType || "";
+    const group = groups.get(key);
+    if (group) {
+      group.push(row);
+    } else {
+      groups.set(key, [row]);
+    }
+  }
+
+  const selected: Array<Entity & { relationCount?: number }> = [];
+  const offsets = new Map<string, number>();
+  let availableTypes = Array.from(groups.keys());
+  while (selected.length < limit && availableTypes.length > 0) {
+    for (const type of shuffleCopy(availableTypes)) {
+      const offset = offsets.get(type) ?? 0;
+      const row = groups.get(type)?.[offset];
+      if (!row) continue;
+      selected.push(row);
+      offsets.set(type, offset + 1);
+      if (selected.length >= limit) break;
+    }
+    availableTypes = availableTypes.filter((type) => (offsets.get(type) ?? 0) < (groups.get(type)?.length ?? 0));
+  }
+
+  return selected;
+}
+
+function shuffleCopy<T>(values: T[]): T[] {
+  const shuffled = [...values];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
 }
 
 async function searchEntitiesByRelationCountAndEntityType({
