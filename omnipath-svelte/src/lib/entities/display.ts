@@ -25,7 +25,10 @@ export function getEntityTypeLabel(entity: EntityLike): string {
 }
 
 function isFallbackIdentifierType(identifierType: string | null | undefined): boolean {
-  return getIdentifierTypeLabel(identifierType || "").toLowerCase() === "fallback";
+  const rawType = identifierType?.trim().toLowerCase() || "";
+  const label = getIdentifierTypeLabel(identifierType || "").toLowerCase();
+  const normalized = [rawType, label].join(" ").replace(/[_-]/g, " ");
+  return label === "fallback" || normalized.includes("unresolved entity key");
 }
 
 function isFallbackEntity(entity: EntityLike): boolean {
@@ -80,13 +83,14 @@ export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[]
     .filter((identifier): identifier is EntityIdentifierLike => Boolean(identifier));
 }
 
-function getShortestAvailableIdentifier(entity: EntityLike): EntityIdentifierLike | undefined {
+function getShortestAvailableIdentifier(entity: EntityLike, excludedValues: string[] = []): EntityIdentifierLike | undefined {
+  const excluded = new Set(excludedValues.map((value) => value.trim()).filter(Boolean));
   const identifiers = getEntityIdentifiers(entity)
     .map((identifier) => ({
       key: identifier.key.trim(),
       value: identifier.value.trim(),
     }))
-    .filter((identifier) => identifier.key && identifier.value);
+    .filter((identifier) => identifier.key && identifier.value && !excluded.has(identifier.value));
   const nonFallbackIdentifiers = identifiers.filter((identifier) => !isFallbackIdentifierType(identifier.key));
   const candidates = nonFallbackIdentifiers.length > 0 ? nonFallbackIdentifiers : identifiers;
 
@@ -286,13 +290,17 @@ function getIdentifierByType(entity: EntityLike, types: string[]): string | unde
   return getIdentifiersByType(entity, types)[0];
 }
 
+function getFallbackEntityName(names: string[], geneSymbols: string[]): string | undefined {
+  return geneSymbols[0] || getPreferredName(names) || names[0];
+}
+
 export function getEntityDisplayName(entity: EntityLike): string {
   const { names, geneSymbols } = classifyEntityIdentifiers(entity);
   const publicId = getEntityPublicId(entity);
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
   if (isFallbackEntity(entity)) {
-    return getShortestAvailableIdentifier(entity)?.value || geneSymbols[0] || names[0] || "Entity";
+    return getFallbackEntityName(names, geneSymbols) || getShortestAvailableIdentifier(entity)?.value || "Entity";
   }
 
   if (isSmallMoleculeEntity(entity)) {
@@ -323,7 +331,8 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
   const entityTypeLabel = getEntityTypeLabel(entity).toLowerCase();
 
   if (isFallbackEntity(entity)) {
-    return getShortestAvailableIdentifier(entity)?.value || "Entity";
+    const primaryName = getFallbackEntityName(names, geneSymbols);
+    return getShortestAvailableIdentifier(entity, primaryName ? [primaryName] : [])?.value;
   }
 
   if (isCvTermEntity(entity)) {

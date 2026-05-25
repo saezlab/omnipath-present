@@ -113,6 +113,22 @@ def test_batch_terms(client):
     assert "terms" in data
 
 
+def test_get_ontology_for_kegg_pathway_terms():
+    """Test KEGG pathway ontology auto-detection."""
+    from api_service.config import get_ontology_for_term
+
+    for term_id in [
+        "map01100",
+        "rn01100",
+        "ko01100",
+        "hsa01100",
+        "mmu01100",
+        "KEGG_PATHWAY_CATEGORY:metabolism",
+        "br08901",
+    ]:
+        assert get_ontology_for_term(term_id) == "kegg_pathways"
+
+
 def test_search_terms_by_name(client):
     """Test ontology term lookup by human-readable name."""
     from api_service.main import TermSearchMatch

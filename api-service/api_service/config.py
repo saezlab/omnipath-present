@@ -84,6 +84,11 @@ wikipathways_source = (
     or _find_obo(CACHE_DIR, "wikipathways.obo")
     or f"{ONTOLOGY_DIR}/wikipathways.obo"
 )
+kegg_pathways_source = (
+    _find_obo(ONTOLOGY_DIR, "kegg_pathways.obo")
+    or _find_obo(CACHE_DIR, "kegg_pathways.obo")
+    or f"{ONTOLOGY_DIR}/kegg_pathways.obo"
+)
 
 CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
     "psi_mi": OntologyConfig(
@@ -121,6 +126,11 @@ CORE_ONTOLOGIES: dict[str, OntologyConfig] = {
         description="WikiPathways pathway ontology",
         preload=True,
     ),
+    "kegg_pathways": OntologyConfig(
+        source=kegg_pathways_source,
+        description="KEGG pathway ontology",
+        preload=True,
+    ),
 }
 
 # Merge in all local OBO files produced by the build/output pipeline without
@@ -138,6 +148,7 @@ PREFIX_TO_ONTOLOGY: dict[str, str] = {
     "HP": "hpo",
     "KW": "uniprot_keywords",
     "CHEBI": "chebi",
+    "KEGG_PATHWAY_CATEGORY": "kegg_pathways",
 }
 
 
@@ -153,6 +164,20 @@ def get_ontology_for_term(term_id: str) -> str | None:
 
     if normalized.upper().startswith("R-"):
         return "reactome_pathways"
+
+    if normalized == "br08901":
+        return "kegg_pathways"
+
+    upper = normalized.upper()
+    if upper.startswith(("MAP", "RN", "KO", "HSA", "MMU", "RNO", "DRE", "CEL", "DME", "SCE")):
+        prefix3 = upper[:3]
+        suffix3 = upper[3:]
+        if prefix3 in {"MAP", "HSA", "MMU", "RNO", "DRE", "CEL", "DME", "SCE"} and suffix3.isdigit() and len(suffix3) == 5:
+            return "kegg_pathways"
+        prefix2 = upper[:2]
+        suffix2 = upper[2:]
+        if prefix2 in {"RN", "KO"} and suffix2.isdigit() and len(suffix2) == 5:
+            return "kegg_pathways"
 
     if ":" not in normalized:
         return None

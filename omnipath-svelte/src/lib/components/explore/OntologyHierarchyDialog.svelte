@@ -49,6 +49,9 @@
     if (upper.startsWith('WP') && /^WP\d+/.test(upper)) return 'wikipathways';
     if (upper.startsWith('KW-')) return 'uniprot_keywords';
     if (upper.startsWith('R-')) return 'reactome_pathways';
+    if (upper === 'BR08901') return 'kegg_pathways';
+    if (/^(MAP|HSA|MMU|RNO|DRE|CEL|DME|SCE)\d{5}$/.test(upper)) return 'kegg_pathways';
+    if (/^(RN|KO)\d{5}$/.test(upper)) return 'kegg_pathways';
 
     const prefix = normalized.split(':', 1)[0]?.toUpperCase();
     if (prefix === 'GO') return 'gene_ontology';
@@ -57,6 +60,7 @@
     if (prefix === 'MI') return 'psi_mi';
     if (prefix === 'OM') return 'omnipath';
     if (prefix === 'CHEBI') return 'chebi';
+    if (prefix === 'KEGG_PATHWAY_CATEGORY') return 'kegg_pathways';
     return null;
   }
 
