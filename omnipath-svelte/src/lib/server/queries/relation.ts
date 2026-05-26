@@ -250,6 +250,14 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
       FROM ${schema}.facet_relation_bitmap
       WHERE facet_name = '${facetName}' AND facet_value = ANY(${param})`);
   };
+  const addAnnotationTermBitmap = (values: string[]) => {
+    if (values.length === 0) return;
+    const param = pushParam(values, "text[]");
+    bitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.ontology_terms terms
+      JOIN ${schema}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+      WHERE terms.term_id = ANY(${param})`);
+  };
 
   const relationCategories = normalizeStringValues(filters.relationCategories);
   if (relationCategories.length) {
@@ -293,47 +301,15 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   addFacetBitmap("source", normalizeStringValues(filters.sources));
   addFacetBitmap("taxonomy_id", normalizeStringValues(filters.taxonomyIds));
 
-  const annotationTerms = normalizeStringValues(filters.annotationTerms);
-  if (annotationTerms.length) {
-    const param = pushParam(annotationTerms, "text[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM (
-        WITH term_entities AS (
-          SELECT terms.term_entity_id, terms.term_id
-          FROM ${schema}.ontology_terms terms
-          WHERE terms.term_id = ANY(${param})
-        ),
-        annotated_entity_ids AS (
-          SELECT DISTINCT association.subject_entity_id AS entity_id
-          FROM ${schema}.relation association
-          JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
-          WHERE ${relationCategoryEqualsSql(schema, "association", "association")}
-        )
-        SELECT DISTINCT rer.relation_id
-        FROM ${schema}.relation_evidence_annotation rea
-        JOIN ${schema}.relation_evidence_relation rer
-          ON rer.source_id = rea.source_id
-         AND rer.relation_evidence_id = rea.relation_evidence_id
-        JOIN ${schema}.annotation a ON a.annotation_key = rea.annotation_key
-        JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
-        UNION
-        SELECT subject_relation.relation_id
-        FROM ${schema}.relation subject_relation
-        JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = subject_relation.subject_entity_id
-        UNION
-        SELECT object_relation.relation_id
-        FROM ${schema}.relation object_relation
-        JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = object_relation.object_entity_id
-      ) matched_relation_ids
-      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = matched_relation_ids.relation_id`);
-  }
+  addAnnotationTermBitmap(normalizeStringValues(filters.annotationTerms));
 
-  const scopeParts: string[] = [];
+  const scopeBitmapParts: string[] = [];
   const scopeEntityPks = normalizeIdValues(filters.scopeEntityPks);
   if (scopeEntityPks.length) {
     const param = pushParam(scopeEntityPks, "uuid[]");
-    scopeParts.push(`SELECT r.relation_id
+    scopeBitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.relation r
+      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
       WHERE r.subject_entity_id = ANY(${param})
          OR r.object_entity_id = ANY(${param})`);
   }
@@ -341,41 +317,15 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const scopeAnnotationTerms = normalizeStringValues(filters.scopeAnnotationTerms);
   if (scopeAnnotationTerms.length) {
     const param = pushParam(scopeAnnotationTerms, "text[]");
-    scopeParts.push(`SELECT relation_id
-      FROM (
-        WITH term_entities AS (
-          SELECT terms.term_entity_id, terms.term_id
-          FROM ${schema}.ontology_terms terms
-          WHERE terms.term_id = ANY(${param})
-        ),
-        annotated_entity_ids AS (
-          SELECT DISTINCT association.subject_entity_id AS entity_id
-          FROM ${schema}.relation association
-          JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
-          WHERE ${relationCategoryEqualsSql(schema, "association", "association")}
-        )
-        SELECT DISTINCT rer.relation_id
-        FROM ${schema}.relation_evidence_annotation rea
-        JOIN ${schema}.relation_evidence_relation rer
-          ON rer.source_id = rea.source_id
-         AND rer.relation_evidence_id = rea.relation_evidence_id
-        JOIN ${schema}.annotation a ON a.annotation_key = rea.annotation_key
-        JOIN term_entities term_entity ON term_entity.term_id IN (a.term, a.value)
-        UNION
-        SELECT subject_relation.relation_id
-        FROM ${schema}.relation subject_relation
-        JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = subject_relation.subject_entity_id
-        UNION
-        SELECT object_relation.relation_id
-        FROM ${schema}.relation object_relation
-        JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = object_relation.object_entity_id
-      ) scope_annotation_relation_ids`);
+    scopeBitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.ontology_terms terms
+      JOIN ${schema}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+      WHERE terms.term_id = ANY(${param})`);
   }
 
-  if (scopeParts.length) {
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM (${scopeParts.join("\nUNION\n")}) scope_relation_ids
-      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = scope_relation_ids.relation_id`);
+  if (scopeBitmapParts.length) {
+    bitmapParts.push(`SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM (${scopeBitmapParts.join("\nUNION ALL\n")}) scope_bitmap_parts`);
   }
 
   const cte = bitmapParts.length
@@ -400,7 +350,7 @@ export async function searchRelations({
   filters?: RelationFilters;
   limit?: number;
   offset?: number;
-} = {}): Promise<{ relations: EntityRelation[] }> {
+} = {}): Promise<{ relations: EntityRelation[]; total: number }> {
   const schema = SEARCH_SCHEMA();
   if (shouldUseIndexedTermSearch(filters)) {
     return searchRelationsByIndexedTerms({ schema, filters, limit, offset });
@@ -419,8 +369,13 @@ export async function searchRelations({
       participant_types: string[] | null;
       evidence_count: string | number | null;
       sources: string[] | null;
+      total_count: string | number;
     }>(
       `WITH ${cte},
+       total AS MATERIALIZED (
+         SELECT COALESCE(rb_cardinality(bitmap), 0)::bigint AS total_count
+         FROM filter_bitmap
+       ),
        page_ids AS MATERIALIZED (
          SELECT relation_bitmap.relation_id
          FROM filter_bitmap,
@@ -428,14 +383,18 @@ export async function searchRelations({
          JOIN ${schema}.relation_bitmap_id relation_bitmap
            ON relation_bitmap.bitmap_id = selected.bitmap_id
        )
-       SELECT ${relationSelect(schema, "r")}
+       SELECT ${relationSelect(schema, "r")}, total.total_count
        FROM page_ids page
        JOIN ${schema}.relation r ON r.relation_id = page.relation_id
+       CROSS JOIN total
        ORDER BY r.relation_id`,
       pageParams,
     );
 
-    return { relations: result.rows.map(toRelationRow) };
+    return {
+      relations: result.rows.map(toRelationRow),
+      total: Number(result.rows[0]?.total_count || 0),
+    };
   } finally {
     client.release();
   }
@@ -472,7 +431,7 @@ async function searchRelationsByIndexedTerms({
   filters: RelationFilters;
   limit: number;
   offset: number;
-}): Promise<{ relations: EntityRelation[] }> {
+}): Promise<{ relations: EntityRelation[]; total: number }> {
   const relationCategories = normalizeStringValues(filters.relationCategories);
   const predicates = normalizeStringValues(filters.predicates);
   const params: unknown[] = [];
@@ -493,29 +452,35 @@ async function searchRelationsByIndexedTerms({
 
   const client = await getPool().connect();
   try {
-    const result = await client.query<{
-      relation_id: string | number;
-      subject_entity_id: string | number;
-      predicate: string;
-      object_entity_id: string | number;
-      relation_category: string | null;
-      participant_types: string[] | null;
-      evidence_count: string | number | null;
-      sources: string[] | null;
-    }>(
-      `SELECT ${relationSelect(schema, "r")}
-       FROM ${schema}.relation r
-       JOIN ${schema}.vocab_relation_predicate predicate_filter
-         ON predicate_filter.relation_predicate_id = r.predicate_id
-       LEFT JOIN ${schema}.vocab_relation_category category_filter
-         ON category_filter.relation_category_id = r.relation_category_id
-       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY r.relation_id
-       LIMIT ${limitParam} OFFSET ${offsetParam}`,
-      params,
-    );
+    const [result, total] = await Promise.all([
+      client.query<{
+        relation_id: string | number;
+        subject_entity_id: string | number;
+        predicate: string;
+        object_entity_id: string | number;
+        relation_category: string | null;
+        participant_types: string[] | null;
+        evidence_count: string | number | null;
+        sources: string[] | null;
+      }>(
+        `SELECT ${relationSelect(schema, "r")}
+         FROM ${schema}.relation r
+         JOIN ${schema}.vocab_relation_predicate predicate_filter
+           ON predicate_filter.relation_predicate_id = r.predicate_id
+         LEFT JOIN ${schema}.vocab_relation_category category_filter
+           ON category_filter.relation_category_id = r.relation_category_id
+         ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY r.relation_id
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        params,
+      ),
+      countRelationsByFacetCounts(schema, filters),
+    ]);
 
-    return { relations: result.rows.map(toRelationRow) };
+    return {
+      relations: result.rows.map(toRelationRow),
+      total,
+    };
   } finally {
     client.release();
   }

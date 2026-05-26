@@ -1,5 +1,5 @@
 import type { RequestHandler } from "./$types";
-import { searchRelations, countRelations } from "$lib/server/queries/relation";
+import { searchRelations } from "$lib/server/queries/relation";
 import { getEntitiesByPublicIds } from "$lib/server/queries/entity";
 import { jsonBigIntSafe } from "$lib/server/api-utils";
 
@@ -86,16 +86,13 @@ export const GET: RequestHandler = async ({ url }) => {
 
   const serverFilters = await transformClientFilters(filters);
 
-  const [relations, total] = await Promise.all([
-    searchRelations({
-      filters: serverFilters,
-      limit: Number.isFinite(limit) ? limit : 20,
-      offset: Number.isFinite(offset) ? offset : 0,
-    }),
-    countRelations(serverFilters),
-  ]);
+  const result = await searchRelations({
+    filters: serverFilters,
+    limit: Number.isFinite(limit) ? limit : 20,
+    offset: Number.isFinite(offset) ? offset : 0,
+  });
 
-  return jsonBigIntSafe({ ...relations, total });
+  return jsonBigIntSafe(result);
 };
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -107,14 +104,11 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const serverFilters = await transformClientFilters(body.filters || {});
 
-  const [relations, total] = await Promise.all([
-    searchRelations({
-      filters: serverFilters,
-      limit: body.limit ?? 20,
-      offset: body.offset ?? 0,
-    }),
-    countRelations(serverFilters),
-  ]);
+  const result = await searchRelations({
+    filters: serverFilters,
+    limit: body.limit ?? 20,
+    offset: body.offset ?? 0,
+  });
 
-  return jsonBigIntSafe({ ...relations, total });
+  return jsonBigIntSafe(result);
 };
