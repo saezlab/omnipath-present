@@ -66,20 +66,10 @@
 		}
 	}
 
-	function formatFileSize(bytes: number | null | undefined): string {
-		const value = bytes || 0;
-		if (value < 1024) return `${value} B`;
+	const countFormatter = new Intl.NumberFormat('en-US');
 
-		const units = ['KB', 'MB', 'GB', 'TB'];
-		let size = value / 1024;
-		let unitIndex = 0;
-
-		while (size >= 1024 && unitIndex < units.length - 1) {
-			size /= 1024;
-			unitIndex += 1;
-		}
-
-		return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+	function formatCount(value: number | null | undefined): string {
+		return countFormatter.format(value || 0);
 	}
 
 	function formatDate(value: string | null | undefined): string {
@@ -92,6 +82,16 @@
 			month: 'short',
 			day: 'numeric'
 		}).format(date);
+	}
+
+	function resourceCounts(resource: ResourceRecord) {
+		return [
+			{ label: 'Entities', value: resource.entity_count },
+			{ label: 'Interactions', value: resource.interaction_count },
+			{ label: 'Associations', value: resource.association_count },
+			{ label: 'Identifiers', value: resource.identifier_count },
+			{ label: 'Ontology Terms', value: resource.ontology_term_count }
+		].filter((item) => item.value > 0);
 	}
 
 	function shortCommit(value: string | null | undefined): string {
@@ -180,11 +180,12 @@
 	<div class="min-h-0 flex-1 overflow-y-auto pr-1">
 		<section class="space-y-4">
 			{#if filteredResources.length > 0}
-					<div class="grid grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-						{#each filteredResources as resource (resource.resource_id)}
-							{@const expanded = expandedIds.has(resource.resource_id)}
-							{@const Icon = iconForResource(resource)}
-							<article class="flex h-full flex-col rounded-[1.25rem] border border-border/50 bg-card/70 p-4 transition-all hover:bg-muted/[0.18]">
+				<div class="grid grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+					{#each filteredResources as resource (resource.resource_id)}
+						{@const expanded = expandedIds.has(resource.resource_id)}
+						{@const Icon = iconForResource(resource)}
+						{@const counts = resourceCounts(resource)}
+						<article class="flex h-full flex-col rounded-[1.25rem] border border-border/50 bg-card/70 p-4 transition-all hover:bg-muted/[0.18]">
 								<div class="flex items-start justify-between gap-3">
 									<div class="flex min-w-0 items-start gap-3">
 										<div class="rounded-xl border border-border/60 bg-muted/25 p-2.5">
@@ -240,10 +241,14 @@
 
 											<dl class="grid gap-2 text-sm">
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Resource ID</dt><dd class="max-w-[65%] text-right font-mono break-words text-foreground/90">{resource.resource_id}</dd></div>
-												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">License</dt><dd class="max-w-[65%] text-right break-words text-foreground/90">{resource.license || '—'}</dd></div>
+												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">License</dt><dd class="max-w-[65%] text-right break-words text-foreground/90">{resource.license_label || resource.license || '—'}</dd></div>
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Last Downloaded</dt><dd class="text-right text-foreground/90">{formatDate(resource.last_downloaded_at)}</dd></div>
-												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Last Built</dt><dd class="text-right text-foreground/90">{formatDate(resource.last_built_at)}</dd></div>
-												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Snapshot Size</dt><dd class="text-right text-foreground/90">{formatFileSize(resource.total_size_bytes)}</dd></div>
+												{#each counts as count (`${resource.resource_id}-${count.label}`)}
+													<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">{count.label}</dt><dd class="text-right font-mono text-xs text-foreground/90">{formatCount(count.value)}</dd></div>
+												{/each}
+												{#if counts.length === 0}
+													<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Indexed Records</dt><dd class="text-right text-foreground/90">—</dd></div>
+												{/if}
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Input Module</dt><dd class="max-w-[65%] text-right font-mono text-xs break-words text-foreground/90">{resource.input_module || '—'}</dd></div>
 												<div class="flex items-start justify-between gap-4"><dt class="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">Input Commit</dt><dd class="max-w-[65%] text-right font-mono text-xs break-words text-foreground/90">{shortCommit(resource.input_module_commit)}{resource.input_module_dirty ? ' · dirty' : ''}</dd></div>
 											</dl>

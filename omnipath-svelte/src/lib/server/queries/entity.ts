@@ -65,14 +65,12 @@ function canonicalTypeSql(schema: string, alias = "e"): string {
   return canonicalIdentifierTypeNameSql(schema, alias);
 }
 
-function entityIdentifiersJsonSql(alias = "e"): string {
-  return `CASE
-    WHEN jsonb_typeof(${alias}.identifiers) = 'array' THEN ${alias}.identifiers
-    WHEN jsonb_typeof(${alias}.identifiers) = 'object'
-      AND jsonb_typeof(${alias}.identifiers -> 'evidence_identifiers') = 'array'
-      THEN ${alias}.identifiers -> 'evidence_identifiers'
-    ELSE '[]'::jsonb
-  END`;
+function matchingEntityIdentifiersSql(schema: string, queryParam: string): string {
+  return `SELECT DISTINCT eil.entity_id
+    FROM ${schema}.identifier_evidence i
+    JOIN ${schema}.entity_identifier_lookup eil
+      ON eil.identifier_id = i.identifier_id
+    WHERE LOWER(i.value) = ${queryParam}`;
 }
 
 function entityBaseSelect(schema: string, alias = "e"): string {
@@ -101,14 +99,17 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): 
       identifier: string;
     }>(
       `SELECT DISTINCT
-         e.entity_id,
-         NULL::uuid AS identifier_id,
-         item.identifier_type,
-         item.identifier
-	       FROM ${schema}.entity e
-	       CROSS JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text, identifier_type text)
-       WHERE e.entity_id = ANY($1::uuid[])
-         AND COALESCE(item.identifier, '') <> ''
+         eil.entity_id,
+         i.identifier_id,
+         it.name AS identifier_type,
+         i.value AS identifier
+       FROM ${schema}.entity_identifier_lookup eil
+       JOIN ${schema}.identifier_evidence i
+         ON i.identifier_id = eil.identifier_id
+       JOIN ${schema}.vocab_identifier_type it
+         ON it.identifier_type_id = i.identifier_type_id
+       WHERE eil.entity_id = ANY($1::uuid[])
+         AND i.value <> ''
        UNION
        SELECT DISTINCT
          terms.term_entity_id AS entity_id,
@@ -275,6 +276,7 @@ export async function searchEntities({
     const filterCtes: string[] = [];
     const filterJoins: string[] = [];
     const filterBitmaps: string[] = [];
+    const entityJoins: string[] = [];
     const addFacetFilter = (cteName: string, facetName: string, values: string[]) => {
       if (values.length === 0) return;
       const param = pushParam(values);
@@ -293,14 +295,10 @@ export async function searchEntities({
     const trimmedQuery = query.trim();
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
-      whereParts.push(`(
-        LOWER(e.canonical_identifier) = ${queryParam}
-        OR EXISTS (
-          SELECT 1
-          FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
-          WHERE LOWER(item.identifier) = ${queryParam}
-        )
+      filterCtes.push(`query_entity_ids AS MATERIALIZED (
+        ${matchingEntityIdentifiersSql(schema, queryParam)}
       )`);
+      entityJoins.push("JOIN query_entity_ids query_ids ON query_ids.entity_id = e.entity_id");
     }
 
     const entityPks = normalizeIdValues(filters.entity_pks);
@@ -360,6 +358,7 @@ export async function searchEntities({
        matched_entities AS MATERIALIZED (
          SELECT e.*
          FROM ${schema}.entity e
+         ${entityJoins.join("\n")}
          ${filterBitmaps.length > 0 ? `JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = e.entity_id` : ""}
          ${filterJoins.join("\n")}
          ${whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : ""}
@@ -1055,14 +1054,9 @@ export async function getScopedEntityFacetCounts({
       const queryParam = pushParam(trimmedQuery.toLowerCase());
       ctes.push(`query_bitmap AS MATERIALIZED (
         SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${schema}.entity e
-        JOIN ${schema}.entity_bitmap_id bitmap ON bitmap.entity_id = e.entity_id
-        WHERE LOWER(e.canonical_identifier) = ${queryParam}
-           OR e.entity_id IN (
-             SELECT e.entity_id
-             FROM jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text)
-             WHERE LOWER(item.identifier) = ${queryParam}
-           )
+        FROM (${matchingEntityIdentifiersSql(schema, queryParam)}) query_entities
+        JOIN ${schema}.entity_bitmap_id bitmap
+          ON bitmap.entity_id = query_entities.entity_id
       )`);
     }
 

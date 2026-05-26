@@ -8,16 +8,6 @@ import {
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 
-function entityIdentifiersJsonSql(alias = "e"): string {
-  return `CASE
-    WHEN jsonb_typeof(${alias}.identifiers) = 'array' THEN ${alias}.identifiers
-    WHEN jsonb_typeof(${alias}.identifiers) = 'object'
-      AND jsonb_typeof(${alias}.identifiers -> 'evidence_identifiers') = 'array'
-      THEN ${alias}.identifiers -> 'evidence_identifiers'
-    ELSE '[]'::jsonb
-  END`;
-}
-
 export async function getIdentifiersByEntityPk(entityPk: string | number): Promise<EntityIdentifier[]> {
   return getIdentifiersByEntityPks([entityPk]);
 }
@@ -40,15 +30,18 @@ export async function getIdentifiersByEntityPks(entityPks: Array<string | number
       identifier: string;
     }>(
       `SELECT DISTINCT
-         e.entity_id,
-         NULL::uuid AS identifier_id,
-         item.identifier_type,
-         item.identifier
-	       FROM ${schema}.entity e
-	       CROSS JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text, identifier_type text)
-       WHERE e.entity_id = ANY($1::uuid[])
-         AND COALESCE(item.identifier, '') <> ''
-       ORDER BY e.entity_id, item.identifier_type, item.identifier`,
+         eil.entity_id,
+         i.identifier_id,
+         it.name AS identifier_type,
+         i.value AS identifier
+       FROM ${schema}.entity_identifier_lookup eil
+       JOIN ${schema}.identifier_evidence i
+         ON i.identifier_id = eil.identifier_id
+       JOIN ${schema}.vocab_identifier_type it
+         ON it.identifier_type_id = i.identifier_type_id
+       WHERE eil.entity_id = ANY($1::uuid[])
+         AND i.value <> ''
+       ORDER BY eil.entity_id, it.name, i.value`,
       [normalized],
     );
 
@@ -93,18 +86,12 @@ export async function resolveEntityIdentifiers(identifiers: string[]): Promise<{
          ${entityTypeNameSql(schema, "e")} AS entity_type,
          e.taxonomy_id
        FROM requested
-       JOIN ${schema}.entity e ON LOWER(e.canonical_identifier) = requested.query_identifier
-       UNION
-       SELECT DISTINCT
-         requested.query_identifier AS lookup_identifier,
-         e.entity_id,
-         e.canonical_identifier AS id,
-         ${canonicalIdentifierTypeNameSql(schema, "e")} AS id_type,
-         ${entityTypeNameSql(schema, "e")} AS entity_type,
-         e.taxonomy_id
-       FROM requested
-       JOIN ${schema}.entity e ON TRUE
-	       JOIN LATERAL jsonb_to_recordset(${entityIdentifiersJsonSql("e")}) AS item(identifier text) ON LOWER(item.identifier) = requested.query_identifier
+       JOIN ${schema}.identifier_evidence i
+         ON LOWER(i.value) = requested.query_identifier
+       JOIN ${schema}.entity_identifier_lookup eil
+         ON eil.identifier_id = i.identifier_id
+       JOIN ${schema}.entity e
+         ON e.entity_id = eil.entity_id
        ORDER BY entity_id`,
       [lowered],
     );

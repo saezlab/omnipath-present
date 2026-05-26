@@ -7,6 +7,7 @@ export interface ResourceRecord {
 	description: string | null;
 	homepage_url: string | null;
 	license: string | null;
+	license_label: string | null;
 	pubmed_id: string | null;
 	input_module: string | null;
 	input_module_commit: string | null;
@@ -52,10 +53,31 @@ function normalizeDate(value: unknown): string | null {
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || 'public';
 
+async function hasColumn(
+	client: { query: (text: string, values?: unknown[]) => Promise<{ rowCount: number | null }> },
+	schema: string,
+	table: string,
+	column: string
+): Promise<boolean> {
+	const result = await client.query(
+		`SELECT 1
+		   FROM information_schema.columns
+		  WHERE table_schema = $1
+		    AND table_name = $2
+		    AND column_name = $3
+		  LIMIT 1`,
+		[schema, table, column]
+	);
+	return Boolean(result.rowCount);
+}
+
 export async function listResources(): Promise<ResourceRecord[]> {
 	const schema = SEARCH_SCHEMA();
 	const client = await getPool().connect();
 	try {
+		const licenseLabelSelect = await hasColumn(client, schema, 'resources', 'license_label')
+			? 'license_label'
+			: 'NULL::text AS license_label';
 		const result = await client.query<Record<string, unknown>>(
 			`SELECT
 			   resource_id,
@@ -63,6 +85,7 @@ export async function listResources(): Promise<ResourceRecord[]> {
 			   description,
 			   homepage_url,
 			   license,
+			   ${licenseLabelSelect},
 			   pubmed_id,
 			   resource_kind,
 			   input_module,
@@ -80,7 +103,7 @@ export async function listResources(): Promise<ResourceRecord[]> {
 			   last_built_at,
 			   build_status
 			 FROM ${schema}.resources
-			 ORDER BY total_size_bytes DESC, resource_id`,
+			 ORDER BY lower(coalesce(resource_name, resource_id)), resource_id`,
 		);
 
 		return result.rows
@@ -91,6 +114,7 @@ export async function listResources(): Promise<ResourceRecord[]> {
 				description: typeof row.description === 'string' ? row.description : null,
 				homepage_url: typeof row.homepage_url === 'string' ? row.homepage_url : null,
 				license: typeof row.license === 'string' ? row.license : null,
+				license_label: typeof row.license_label === 'string' ? row.license_label : null,
 				pubmed_id: typeof row.pubmed_id === 'string' ? row.pubmed_id : null,
 				input_module: typeof row.input_module === 'string' ? row.input_module : null,
 				input_module_commit:
