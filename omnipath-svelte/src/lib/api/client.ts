@@ -36,6 +36,7 @@ export async function fetchEntitiesSearch(params: {
         entityAttributes: unknown;
         sources: string[];
         relationCount?: number;
+        identifiersTotal?: number;
         identifiers: Array<{
           id?: string;
           entityPk: string;
@@ -67,6 +68,7 @@ export async function fetchEntitiesSearch(params: {
       entityAttributes: unknown;
       sources: string[];
       relationCount?: number;
+      identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
         entityPk: string;
@@ -146,6 +148,7 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
       taxonomyId: string | null;
       entityAttributes: unknown;
       sources: string[];
+      identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
         entityPk: string;
@@ -171,6 +174,7 @@ export async function fetchEntitiesByPks(pks: Array<string | number>) {
     taxonomyId: string | null;
     entityAttributes: unknown;
     sources: string[];
+    identifiersTotal?: number;
     identifiers: Array<{ id?: string; entityPk: string; identifier: string; identifierType: string }>;
   }> };
   return data;

@@ -20,11 +20,11 @@ http://localhost:8081
 1. Resolve or search proteins/entities before relation filtering.
    - `POST /entities/resolve`
    - Body: `{"identifiers":["P04637","TP53"],"filters":{"entityTypes":["Protein:MI:0326"]},"preferredTaxonomyIds":["9606"]}`
-   - Resolution uses exact canonical ID and `entity.identifiers` matching and returns candidates with all known identifiers, taxonomy, entity type, canonical ID, sources, relation count, and match metadata.
+   - Resolution uses exact rows in `identifier_evidence` joined through `entity_identifier_lookup` and returns candidates with all known identifiers, taxonomy, entity type, canonical ID, sources, relation count, and match metadata.
    - If `ambiguous` is true, do not guess unless the user supplied a taxon or another disambiguating identifier.
    - `POST /entities/search`
    - Body: `{"query":"TP53","filters":{"entityTypes":["Protein:MI:0326"]},"limit":10}`
-   - `/entities/search` also uses exact canonical ID and `entity.identifiers` matching. There are no fuzzy modes for entity lookup.
+   - `/entities/search` also uses exact rows in `identifier_evidence` joined through `entity_identifier_lookup`. There are no fuzzy modes for entity lookup.
    - `POST /entities/by-pks`
    - Body: `{"entityPks":[128747,137920]}`
 

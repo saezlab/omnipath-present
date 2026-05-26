@@ -105,16 +105,6 @@ def _chain_bitmaps(parts: list[str]) -> str:
     return expr
 
 
-def _entity_identifiers_json_sql(alias: str = "e") -> str:
-    return f"""CASE
-        WHEN jsonb_typeof({alias}.identifiers) = 'array' THEN {alias}.identifiers
-        WHEN jsonb_typeof({alias}.identifiers) = 'object'
-          AND jsonb_typeof({alias}.identifiers -> 'evidence_identifiers') = 'array'
-          THEN {alias}.identifiers -> 'evidence_identifiers'
-        ELSE '[]'::jsonb
-      END"""
-
-
 def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     entity_pks = _ints(payload.get("entityPks") or payload.get("entity_pks"))
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
@@ -161,14 +151,18 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         query_lower = query.lower()
         ctes.append(f"""
             query_bitmap AS MATERIALIZED (
-                SELECT rb_build_agg(e.entity_id::integer) AS bitmap
-                FROM {SEARCH_SCHEMA}.entity e
-                WHERE LOWER(e.canonical_identifier) = {push(query_lower)}
-                   OR EXISTS (
-                       SELECT 1
-                       FROM jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text)
-                       WHERE LOWER(item.identifier) = %s
-                   )
+                SELECT rb_build_agg(query_entities.entity_id::integer) AS bitmap
+                FROM (
+                    SELECT e.entity_id
+                    FROM {SEARCH_SCHEMA}.entity e
+                    WHERE LOWER(e.canonical_identifier) = {push(query_lower)}
+                    UNION
+                    SELECT eil.entity_id
+                    FROM {SEARCH_SCHEMA}.identifier_evidence i
+                    JOIN {SEARCH_SCHEMA}.entity_identifier_lookup eil
+                      ON eil.identifier_id = i.identifier_id
+                    WHERE LOWER(i.value) = %s
+                ) query_entities
             )
         """)
         params.append(query_lower)

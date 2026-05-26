@@ -2,6 +2,7 @@
 	import { ExternalLink } from '@lucide/svelte';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
 	import MoleculeStructure from '$lib/components/entity/MoleculeStructure.svelte';
 	import {
@@ -39,21 +40,34 @@
 	let { open = $bindable(false), entity }: Props = $props();
 	let hydratedEntity = $state<EntityLike | null>(null);
 	let loadingDetails = $state(false);
+	let detailsPublicId = $state<string | null>(null);
+	let identifierLimit = $state(20);
+
+	const IDENTIFIER_PAGE_SIZE = 20;
 
 	$effect(() => {
 		if (!open || !entity) {
 			hydratedEntity = null;
 			loadingDetails = false;
+			detailsPublicId = null;
+			identifierLimit = IDENTIFIER_PAGE_SIZE;
 			return;
 		}
 
 		const publicId = getEntityPublicId(entity);
+		if (detailsPublicId !== publicId) {
+			detailsPublicId = publicId;
+			identifierLimit = IDENTIFIER_PAGE_SIZE;
+			hydratedEntity = null;
+		}
 		let cancelled = false;
 		loadingDetails = true;
 
 		(async () => {
 			try {
-				const response = await fetch(`/app-api/entities/${encodeURIComponent(publicId)}`);
+				const url = new URL(`/app-api/entities/${encodeURIComponent(publicId)}`, window.location.origin);
+				url.searchParams.set('identifierLimit', String(identifierLimit));
+				const response = await fetch(url);
 				if (!response.ok) return;
 				const payload = (await response.json()) as { entity?: EntityLike | null };
 				if (!cancelled) hydratedEntity = payload.entity ?? entity;
@@ -236,6 +250,12 @@
 		return Array.from(sources).sort();
 	}
 
+	function getEntityIdentifierTotal(entity: EntityLike): number {
+		const total = (entity as { identifiersTotal?: unknown }).identifiersTotal;
+		const numericTotal = Number(total);
+		return Number.isFinite(numericTotal) ? numericTotal : getEntityIdentifiers(entity).length;
+	}
+
 </script>
 
 <Dialog bind:open>
@@ -244,6 +264,8 @@
 			{@const detailEntity = hydratedEntity ?? entity}
 			{@const detailSections = getDescriptionSections(detailEntity)}
 			{@const detailIdentifiers = getEntityIdentifiers(detailEntity)}
+			{@const visibleDetailIdentifiers = detailIdentifiers.slice(0, identifierLimit)}
+			{@const detailIdentifierTotal = getEntityIdentifierTotal(detailEntity)}
 			{@const detailSmiles = getEntitySmiles(detailEntity)}
 			{@const primaryIdentifierBadge = getEntityPrimaryIdentifierBadge(detailEntity)}
 			{@const detailTaxonomy = formatTaxonomyId(detailEntity.taxonomyId)}
@@ -348,13 +370,24 @@
 				{#if detailIdentifiers.length > 0}
 					<details class="group rounded-lg border bg-muted/5 px-3 py-2">
 						<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-							Identifiers ({detailIdentifiers.length})
+							Identifiers ({detailIdentifierTotal})
 						</summary>
 						<div class="mt-3 flex flex-wrap gap-2">
-							{#each detailIdentifiers as identifier}
+							{#each visibleDetailIdentifiers as identifier}
 								<IdentifierBadge identifierType={identifier.key} value={identifier.value} />
 							{/each}
 						</div>
+						{#if detailIdentifierTotal > visibleDetailIdentifiers.length}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="mt-3 w-full text-xs"
+								disabled={loadingDetails}
+								onclick={() => identifierLimit += IDENTIFIER_PAGE_SIZE}
+							>
+								{loadingDetails ? 'Loading...' : 'Load more'}
+							</Button>
+						{/if}
 					</details>
 				{/if}
 			</div>

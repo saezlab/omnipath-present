@@ -15,8 +15,11 @@ type EntityAnnotationRow = {
   source: string | null;
 };
 
-export async function getEntityDetails(publicId: string) {
-  const entity = await getEntityByPublicId(publicId);
+export async function getEntityDetails(
+  publicId: string,
+  options: { identifierLimit?: number } = {},
+) {
+  const entity = await getEntityByPublicId(publicId, options);
   if (!entity) return null;
 
   const schema = SEARCH_SCHEMA();

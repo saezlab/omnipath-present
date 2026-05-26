@@ -1,4 +1,4 @@
-import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType, jsonb, smallint, uuid } from "drizzle-orm/pg-core"
+import { pgTable, index, text, unique, bigserial, bigint, timestamp, foreignKey, uniqueIndex, check, integer, boolean, primaryKey, customType, smallint, uuid } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -176,7 +176,6 @@ export const entityInMinimal = pgTable("entity", {
 	taxonomyId: text("taxonomy_id"),
 	canonicalIdentifierTypeId: bigint("canonical_identifier_type_id", { mode: "number" }),
 	canonicalIdentifier: text("canonical_identifier").notNull(),
-	identifiers: jsonb().notNull(),
 	resolutionStatusId: smallint("resolution_status_id").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [

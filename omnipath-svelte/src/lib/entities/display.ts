@@ -56,11 +56,7 @@ export function isCvTermEntity(entity: EntityLike): boolean {
 
 export function getEntityIdentifiers(entity: EntityLike): EntityIdentifierLike[] {
   const typedEntity = entity as { identifiers?: unknown };
-  const raw = Array.isArray(typedEntity.identifiers)
-    ? typedEntity.identifiers
-    : isObject(typedEntity.identifiers) && Array.isArray(typedEntity.identifiers.evidence_identifiers)
-      ? typedEntity.identifiers.evidence_identifiers
-      : [];
+  const raw = Array.isArray(typedEntity.identifiers) ? typedEntity.identifiers : [];
   return raw
     .map((item: unknown) => {
       if (!isObject(item)) return null;

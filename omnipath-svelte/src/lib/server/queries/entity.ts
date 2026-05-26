@@ -8,7 +8,11 @@ import {
   relationCategoryEqualsSql,
 } from "$lib/server/queries/sql-fragments";
 
-export type EntityWithIdentifiers = Entity & { identifiers: EntityIdentifier[]; relationCount?: number };
+export type EntityWithIdentifiers = Entity & {
+  identifiers: EntityIdentifier[];
+  identifiersTotal?: number;
+  relationCount?: number;
+};
 
 const CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012";
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
@@ -142,20 +146,143 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): 
   }
 }
 
-async function hydrateEntities(schema: string, rows: Array<Entity & { relationCount?: number }>): Promise<EntityWithIdentifiers[]> {
-  const identifiersByEntityPk = await getIdentifiersForEntityPks(schema, rows.map((row) => row.entityPk));
+async function getIdentifierPageForEntityPks(
+  schema: string,
+  entityPks: string[],
+  limit: number,
+): Promise<{
+  identifiersByEntityPk: Map<string, EntityIdentifier[]>;
+  totalsByEntityPk: Map<string, number>;
+}> {
+  if (entityPks.length === 0) {
+    return {
+      identifiersByEntityPk: new Map(),
+      totalsByEntityPk: new Map(),
+    };
+  }
+
+  const normalizedLimit = Math.max(1, Math.min(Math.floor(limit), 500));
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      identifier_id: string | number | null;
+      identifier_type: string;
+      identifier: string;
+      identifier_total: string | number;
+    }>(
+      `WITH requested(entity_id) AS (
+         SELECT unnest($1::uuid[])
+       ),
+       identifier_rows AS (
+         SELECT
+           requested.entity_id,
+           i.identifier_id,
+           it.name AS identifier_type,
+           i.value AS identifier
+         FROM requested
+         JOIN ${schema}.entity_identifier_lookup eil
+           ON eil.entity_id = requested.entity_id
+         JOIN ${schema}.identifier_evidence i
+           ON i.identifier_id = eil.identifier_id
+         JOIN ${schema}.vocab_identifier_type it
+           ON it.identifier_type_id = i.identifier_type_id
+         WHERE i.value <> ''
+         UNION
+         SELECT
+           requested.entity_id,
+           NULL::uuid AS identifier_id,
+           'Name:OM:0200' AS identifier_type,
+           terms.label AS identifier
+         FROM requested
+         JOIN ${schema}.ontology_terms terms
+           ON terms.term_entity_id = requested.entity_id
+         WHERE terms.label IS NOT NULL
+           AND terms.label <> ''
+       ),
+       ranked AS (
+         SELECT
+           *,
+           COUNT(*) OVER (PARTITION BY entity_id) AS identifier_total,
+           ROW_NUMBER() OVER (
+             PARTITION BY entity_id
+             ORDER BY identifier_type, identifier
+           ) AS identifier_rank
+         FROM identifier_rows
+       )
+       SELECT
+         entity_id,
+         identifier_id,
+         identifier_type,
+         identifier,
+         identifier_total
+       FROM ranked
+       WHERE identifier_rank <= $2::integer
+       ORDER BY entity_id, identifier_type, identifier`,
+      [entityPks, normalizedLimit],
+    );
+
+    const identifiersByEntityPk = new Map<string, EntityIdentifier[]>();
+    const totalsByEntityPk = new Map<string, number>();
+    for (const row of result.rows) {
+      const entityPk = String(row.entity_id);
+      const identifiers = identifiersByEntityPk.get(entityPk) ?? [];
+      identifiers.push({
+        ...(row.identifier_id === null ? {} : { id: String(row.identifier_id) }),
+        entityPk,
+        identifier: row.identifier,
+        identifierType: row.identifier_type,
+      });
+      identifiersByEntityPk.set(entityPk, identifiers);
+      totalsByEntityPk.set(entityPk, Number(row.identifier_total || 0));
+    }
+    for (const entityPk of entityPks) {
+      if (!identifiersByEntityPk.has(entityPk)) identifiersByEntityPk.set(entityPk, []);
+      if (!totalsByEntityPk.has(entityPk)) totalsByEntityPk.set(entityPk, 0);
+    }
+
+    return { identifiersByEntityPk, totalsByEntityPk };
+  } finally {
+    client.release();
+  }
+}
+
+async function hydrateEntities(
+  schema: string,
+  rows: Array<Entity & { relationCount?: number }>,
+  options: { identifierLimit?: number } = {},
+): Promise<EntityWithIdentifiers[]> {
+  const entityPks = rows.map((row) => row.entityPk);
+  if (options.identifierLimit != null) {
+    const { identifiersByEntityPk, totalsByEntityPk } =
+      await getIdentifierPageForEntityPks(schema, entityPks, options.identifierLimit);
+    return rows.map((row) => ({
+      ...row,
+      identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+      identifiersTotal: totalsByEntityPk.get(row.entityPk) ?? 0,
+    }));
+  }
+
+  const identifiersByEntityPk = await getIdentifiersForEntityPks(schema, entityPks);
   return rows.map((row) => ({
     ...row,
     identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+    identifiersTotal: identifiersByEntityPk.get(row.entityPk)?.length ?? 0,
   }));
 }
 
-export async function getEntityByPublicId(publicId: string): Promise<EntityWithIdentifiers | null> {
-  const results = await getEntitiesByPublicIds([publicId]);
+export async function getEntityByPublicId(
+  publicId: string,
+  options: { identifierLimit?: number } = {},
+): Promise<EntityWithIdentifiers | null> {
+  const results = await getEntitiesByPublicIds([publicId], options);
   return results[0] ?? null;
 }
 
-export async function getEntitiesByPublicIds(publicIds: string[]): Promise<EntityWithIdentifiers[]> {
+export async function getEntitiesByPublicIds(
+  publicIds: string[],
+  options: { identifierLimit?: number } = {},
+): Promise<EntityWithIdentifiers[]> {
   const parsed = parsePublicEntityIds(publicIds.map((id) => id.trim()).filter(Boolean));
   if (parsed.length === 0) return [];
 
@@ -186,7 +313,7 @@ export async function getEntitiesByPublicIds(publicIds: string[]): Promise<Entit
       params,
     );
 
-    return hydrateEntities(schema, result.rows.map(toEntityRow));
+    return hydrateEntities(schema, result.rows.map(toEntityRow), options);
   } finally {
     client.release();
   }

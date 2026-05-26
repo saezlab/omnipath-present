@@ -62,7 +62,7 @@ export OMNIPATH_PG_SCHEMA=public
 ### Graph data
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/entities/resolve` | Resolve exact canonical IDs and `entity.identifiers` values, returning ranked candidates with identifiers, type, taxon, sources, and relation counts |
+| POST | `/entities/resolve` | Resolve exact identifier values through `identifier_evidence` and `entity_identifier_lookup`, returning ranked candidates with identifiers, type, taxon, sources, and relation counts |
 | POST / GET | `/entities/search` | Search matching entities by exact identifier/name, with optional type, taxon, source, and annotation filters |
 | POST | `/entities/by-pks` | Hydrate numeric entity primary keys into entity records and identifiers |
 | POST / GET | `/relations/search` | Search relations by entity scope, predicate, category, source, participant type, taxonomy, or ontology term |

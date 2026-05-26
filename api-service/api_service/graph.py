@@ -91,16 +91,6 @@ def _canonical_type_sql(alias: str = "e") -> str:
     return f"(SELECT it.name FROM {SEARCH_SCHEMA}.identifier_type it WHERE it.identifier_type_id = {alias}.canonical_identifier_type_id)"
 
 
-def _entity_identifiers_json_sql(alias: str = "e") -> str:
-    return f"""CASE
-        WHEN jsonb_typeof({alias}.identifiers) = 'array' THEN {alias}.identifiers
-        WHEN jsonb_typeof({alias}.identifiers) = 'object'
-          AND jsonb_typeof({alias}.identifiers -> 'evidence_identifiers') = 'array'
-          THEN {alias}.identifiers -> 'evidence_identifiers'
-        ELSE '[]'::jsonb
-      END"""
-
-
 def _entity_select(alias: str = "e") -> str:
     return f"""{alias}.entity_id,
       {alias}.canonical_identifier AS id,
@@ -128,14 +118,17 @@ def _identifiers_for_entity_pks(entity_pks: list[int]) -> dict[int, list[dict[st
         return {}
     sql = f"""
         SELECT DISTINCT
-          e.entity_id,
-          NULL::bigint AS identifier_id,
-          item.identifier_type,
-          item.identifier
-        FROM {SEARCH_SCHEMA}.entity e
-        CROSS JOIN LATERAL jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text, identifier_type text)
-        WHERE e.entity_id = ANY(%s::bigint[])
-          AND COALESCE(item.identifier, '') <> ''
+          eil.entity_id,
+          i.identifier_id,
+          it.name AS identifier_type,
+          i.value AS identifier
+        FROM {SEARCH_SCHEMA}.entity_identifier_lookup eil
+        JOIN {SEARCH_SCHEMA}.identifier_evidence i
+          ON i.identifier_id = eil.identifier_id
+        JOIN {SEARCH_SCHEMA}.vocab_identifier_type it
+          ON it.identifier_type_id = i.identifier_type_id
+        WHERE eil.entity_id = ANY(%s::bigint[])
+          AND i.value <> ''
         UNION
         SELECT DISTINCT
           terms.term_entity_id AS entity_id,
@@ -273,12 +266,12 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
             {_entity_type_sql('e')} AS entity_type,
             e.taxonomy_id,
             requested.query_identifier,
-            item.identifier AS match_identifier,
-            item.identifier_type AS match_identifier_type,
+            i.value AS match_identifier,
+            it.name AS match_identifier_type,
             'identifier' AS match_kind,
             CASE
-              WHEN item.identifier_type ILIKE 'Gene Name Primary:%%' THEN 950
-              WHEN item.identifier_type ILIKE 'Gene Name:%%' THEN 900
+              WHEN it.name ILIKE 'Gene Name Primary:%%' THEN 950
+              WHEN it.name ILIKE 'Gene Name:%%' THEN 900
               ELSE 800
             END
             + CASE WHEN e.taxonomy_id = ANY(%s::text[]) THEN 50 ELSE 0 END
@@ -287,9 +280,14 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
             {_entity_sources_sql("e")} AS sources
           FROM requested
-          JOIN {SEARCH_SCHEMA}.entity e ON TRUE
-          JOIN LATERAL jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text, identifier_type text)
-            ON item.identifier = requested.query_identifier
+          JOIN {SEARCH_SCHEMA}.identifier_evidence i
+            ON i.value = requested.query_identifier
+          JOIN {SEARCH_SCHEMA}.entity_identifier_lookup eil
+            ON eil.identifier_id = i.identifier_id
+          JOIN {SEARCH_SCHEMA}.entity e
+            ON e.entity_id = eil.entity_id
+          JOIN {SEARCH_SCHEMA}.vocab_identifier_type it
+            ON it.identifier_type_id = i.identifier_type_id
           LEFT JOIN {SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_id = e.entity_id
           {identifier_where_sql}
         )
@@ -373,10 +371,12 @@ def search_entities(payload: dict[str, Any]) -> dict[str, Any]:
     if query:
         where.append(f"""(
           (e.canonical_identifier = {push(query)})
-          OR EXISTS (
-            SELECT 1
-            FROM jsonb_to_recordset({_entity_identifiers_json_sql("e")}) AS item(identifier text)
-            WHERE item.identifier = %s
+          OR e.entity_id IN (
+            SELECT eil.entity_id
+            FROM {SEARCH_SCHEMA}.identifier_evidence i
+            JOIN {SEARCH_SCHEMA}.entity_identifier_lookup eil
+              ON eil.identifier_id = i.identifier_id
+            WHERE i.value = %s
           )
         )""")
         params.append(query)
