@@ -99,6 +99,21 @@ function ontologyTermEntityPredicate(schema: string, placeholder: string, entity
   )`;
 }
 
+function identifierPrioritySql(identifierTypeExpr: string): string {
+  return `CASE
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%name%' THEN 0
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%gene name primary%' THEN 1
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%uniprot%' THEN 2
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%smiles%' THEN 3
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%inchi key%' THEN 4
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%chebi%' THEN 5
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%chembl%' THEN 6
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%hmdb%' THEN 7
+    WHEN LOWER(${identifierTypeExpr}) LIKE '%pubchem%' THEN 8
+    ELSE 20
+  END`;
+}
+
 async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): Promise<Map<string, EntityIdentifier[]>> {
   if (entityPks.length === 0) return new Map();
   const client = await getPool().connect();
@@ -213,7 +228,7 @@ async function getIdentifierPageForEntityPks(
            COUNT(*) OVER (PARTITION BY entity_id) AS identifier_total,
            ROW_NUMBER() OVER (
              PARTITION BY entity_id
-             ORDER BY identifier_type, identifier
+             ORDER BY ${identifierPrioritySql("identifier_type")}, identifier_type, identifier
            ) AS identifier_rank
          FROM identifier_rows
        )
