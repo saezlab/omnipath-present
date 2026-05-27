@@ -37,6 +37,11 @@
 		sources: string[];
 	};
 
+	type EntityIdentifierLike = {
+		key: string;
+		value: string;
+	};
+
 	let { open = $bindable(false), entity }: Props = $props();
 	let hydratedEntity = $state<EntityLike | null>(null);
 	let loadingDetails = $state(false);
@@ -44,6 +49,57 @@
 	let identifierLimit = $state(20);
 
 	const IDENTIFIER_PAGE_SIZE = 20;
+
+	function normalizeIdentifierEntries(entityLike: EntityLike | null | undefined): EntityIdentifierLike[] {
+		if (!entityLike) return [];
+		return getEntityIdentifiers(entityLike).flatMap((identifier) => {
+			const key = identifier.key?.trim();
+			const value = identifier.value?.trim();
+			if (!key || !value) return [];
+			return [{ key, value }];
+		});
+	}
+
+	function mergeEntityDetails(
+		fallbackEntity: EntityLike,
+		nextEntity: EntityLike | null | undefined,
+		previousEntity: EntityLike | null,
+	): EntityLike {
+		const merged = {
+			...fallbackEntity,
+			...(previousEntity ?? {}),
+			...(nextEntity ?? {}),
+		} as EntityLike & {
+			identifiers?: EntityIdentifierLike[];
+			entityAttributes?: unknown;
+			sources?: string[];
+		};
+
+		const identifiers = new Map<string, EntityIdentifierLike>();
+		for (const entityLike of [fallbackEntity, previousEntity, nextEntity]) {
+			for (const identifier of normalizeIdentifierEntries(entityLike)) {
+				identifiers.set(`${identifier.key}\u0000${identifier.value}`, identifier);
+			}
+		}
+
+		if (identifiers.size > 0) {
+			merged.identifiers = Array.from(identifiers.values());
+		}
+
+		const nextAttributes = Array.isArray(nextEntity?.entityAttributes) ? nextEntity.entityAttributes : null;
+		const previousAttributes = Array.isArray(previousEntity?.entityAttributes) ? previousEntity.entityAttributes : null;
+		const fallbackAttributes = Array.isArray(fallbackEntity.entityAttributes) ? fallbackEntity.entityAttributes : null;
+		merged.entityAttributes = nextAttributes ?? previousAttributes ?? fallbackAttributes ?? null;
+
+		const sourceValues = [fallbackEntity, previousEntity, nextEntity].flatMap((entityLike) =>
+			Array.isArray(entityLike?.sources) ? entityLike.sources.filter(Boolean) : [],
+		);
+		if (sourceValues.length > 0) {
+			merged.sources = Array.from(new Set(sourceValues));
+		}
+
+		return merged;
+	}
 
 	$effect(() => {
 		if (!open || !entity) {
@@ -70,7 +126,7 @@
 				const response = await fetch(url);
 				if (!response.ok) return;
 				const payload = (await response.json()) as { entity?: EntityLike | null };
-				if (!cancelled) hydratedEntity = payload.entity ?? entity;
+				if (!cancelled) hydratedEntity = mergeEntityDetails(entity, payload.entity, hydratedEntity);
 			} finally {
 				if (!cancelled) loadingDetails = false;
 			}
