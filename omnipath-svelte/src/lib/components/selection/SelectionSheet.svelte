@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { ArrowRight, Database, Tag, Trash2, X } from '@lucide/svelte';
+	import { ArrowRight, Database, Settings2, Tag, Trash2, X } from '@lucide/svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Switch } from '$lib/components/ui/switch/index.js';
 	import {
 		Sheet,
 		SheetContent,
@@ -10,6 +11,7 @@
 	} from '$lib/components/ui/sheet/index.js';
 	import { buildSelectionUrl } from '$lib/navigation/url-codecs';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
+	import { getSelectionScopeSettings } from '$lib/stores/selection-scope.svelte';
 
 	interface Props {
 		open?: boolean;
@@ -19,6 +21,7 @@
 	let { open = $bindable(false), triggerClass = '' }: Props = $props();
 
 	const selection = getSelectionStore();
+	const scopeSettings = getSelectionScopeSettings();
 	const totalSelectionCount = $derived(selection.selectedEntities.length + selection.selectedAnnotations.length);
 	const selectionHref = $derived(
 		buildSelectionUrl({
@@ -66,6 +69,50 @@
 							<div class="mt-1 text-2xl font-semibold tabular-nums">
 								{selection.selectedAnnotations.length}
 							</div>
+						</div>
+					</div>
+
+					<div class="mt-4 rounded-xl border bg-background/70 p-3">
+						<div class="mb-3 flex items-center gap-2 text-sm font-medium">
+							<Settings2 class="size-4 text-primary" />
+							Selection settings
+						</div>
+
+						<div class="space-y-3">
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-muted-foreground">Scope operator</div>
+								<div class="inline-flex w-full rounded-md border bg-muted/30 p-0.5">
+									<Button
+										type="button"
+										variant={scopeSettings.mode === 'union' ? 'default' : 'ghost'}
+										size="sm"
+										class="h-8 flex-1 rounded-sm px-3"
+										onclick={() => scopeSettings.setMode('union')}
+									>
+										Union
+									</Button>
+									<Button
+										type="button"
+										variant={scopeSettings.mode === 'intersection' ? 'default' : 'ghost'}
+										size="sm"
+										class="h-8 flex-1 rounded-sm px-3"
+										onclick={() => scopeSettings.setMode('intersection')}
+									>
+										Intersection
+									</Button>
+								</div>
+							</div>
+
+							<label class="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2">
+								<span class="min-w-0 text-sm">
+									<span class="block font-medium">Include associated entities, members, and participants</span>
+								</span>
+								<Switch
+									size="sm"
+									checked={scopeSettings.expandSelection}
+									onCheckedChange={(checked) => scopeSettings.setExpandSelection(checked)}
+								/>
+							</label>
 						</div>
 					</div>
 				</div>

@@ -2,6 +2,29 @@ import type { SearchFilters } from "$lib/types/search";
 import type { InteractionDetailsData, InteractionListRow } from "$lib/types/interactions";
 
 export type EntitySearchCursor = { relationCount: number; entityPk: string };
+export type SelectionScopeMode = "union" | "intersection";
+
+export async function fetchSelectionScope(params: {
+  entityPks?: Array<string | number>;
+  annotationTermIds?: string[];
+  includeAssociatedEntities?: boolean;
+  includeMembersParticipants?: boolean;
+  mode?: SelectionScopeMode;
+}) {
+  const res = await fetch("/app-api/selection/scope", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to resolve selection scope");
+  return res.json() as Promise<{
+    entityPks: string[];
+    seedEntityPks: string[];
+    termEntityPks: string[];
+    criteriaCount: number;
+    expandedEntityCount: number;
+  }>;
+}
 
 export async function fetchEntitiesSearch(params: {
   query?: string;
@@ -301,6 +324,7 @@ export async function fetchTerms(termIds: string[]) {
 export async function fetchScopedEntityFacetCounts(params: {
   entityIds?: Array<string | number>;
   annotationTermIds?: string[];
+  includeCvTerms?: boolean;
   entityTypes?: string[];
   sources?: string[];
   ncbi_tax_id?: string[];
@@ -320,6 +344,8 @@ export async function fetchScopedEntityFacetCounts(params: {
 
 export async function fetchScopedRelationFacetCounts(params: {
   entityIds?: Array<string | number>;
+  endpointMode?: "any" | "both";
+  mode?: SelectionScopeMode;
   annotationTermIds?: string[];
   predicates?: string[];
   interactionTypes?: string[];

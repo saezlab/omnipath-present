@@ -59,8 +59,14 @@ CREATE TABLE "resources" (
 	"build_status" text
 );
 --> statement-breakpoint
-CREATE TABLE "annotation_term_relation_bitmap" (
+CREATE TABLE "annotation_term_direct_relation_bitmap" (
 	"term_entity_pk" bigint PRIMARY KEY NOT NULL,
+	"relation_bitmap" "roaringbitmap" NOT NULL,
+	"global_count" integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "entity_relation_bitmap" (
+	"entity_pk" bigint PRIMARY KEY NOT NULL,
 	"relation_bitmap" "roaringbitmap" NOT NULL,
 	"global_count" integer NOT NULL
 );

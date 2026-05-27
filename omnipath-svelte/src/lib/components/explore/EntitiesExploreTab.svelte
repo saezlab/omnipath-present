@@ -15,6 +15,7 @@
 		getEntitySecondaryName,
 		getEntityTypeLabel,
 		getIdentifierDisplayTypeForValue,
+		isCvTermEntity,
 		isUnresolvedEntity
 	} from '$lib/entities/display';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
@@ -31,9 +32,10 @@
 		selectedEntityIds?: string[];
 		selectedEntityPks?: Array<string | number>;
 		selectedAnnotationIds?: string[];
+		includeCvTerms?: boolean;
 	}
 
-	let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
+	let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds, includeCvTerms = false }: Props = $props();
 
 	const isMobile = new IsMobile();
 	const selection = getSelectionStore();
@@ -78,6 +80,7 @@
 		...filters,
 		...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
 		...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
+		...(includeCvTerms ? { include_cv_terms: true } : {}),
 	});
 
 	const facetQueryLimit = $derived(
@@ -98,6 +101,7 @@
 		const scope = {
 			entityIds: selectedEntityPks?.length ? selectedEntityPks : undefined,
 			annotationTermIds: selectedAnnotationIds?.length ? selectedAnnotationIds : undefined,
+			includeCvTerms,
 			entityTypes: filters.entity_types,
 			sources: filters.sources,
 			ncbi_tax_id: filters.ncbi_tax_id,
@@ -455,7 +459,8 @@
 	{@const secondaryName = getEntitySecondaryName(result)}
 	{@const displayIdentifierType = shouldRenderAsIdentifierBadge(result, displayName) ? getIdentifierDisplayTypeForValue(result, displayName) : undefined}
 	{@const entityTypeLabel = getEntityTypeLabel(result)}
-	{@const selected = selection.isSelected(publicId)}
+	{@const cvTerm = isCvTermEntity(result)}
+	{@const selected = cvTerm ? selection.isAnnotationSelected(result.canonicalIdentifier) : selection.isSelected(publicId)}
 	{@const entityTypeIcon = getEntityTypeEmoji(entityTypeLabel)}
 	{@const unresolved = isUnresolvedEntity(result)}
 	<div class="w-full max-w-md overflow-hidden rounded-lg border {unresolved ? 'border-dashed border-amber-300/90 bg-amber-50/35 dark:border-amber-700/70 dark:bg-amber-950/10' : 'border-border bg-card'}">
@@ -499,7 +504,15 @@
 				type="button"
 				onclick={(event) => {
 					event.stopPropagation();
-					if (selected) {
+					if (cvTerm && selected) {
+						selection.removeAnnotation(result.canonicalIdentifier);
+					} else if (cvTerm) {
+						selection.addAnnotation({
+							id: result.canonicalIdentifier,
+							label: displayName,
+							namespace: result.canonicalIdentifierType
+						});
+					} else if (selected) {
 						selection.removeEntity(publicId);
 					} else {
 						selection.addEntity({

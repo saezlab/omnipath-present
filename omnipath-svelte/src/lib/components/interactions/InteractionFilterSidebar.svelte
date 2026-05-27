@@ -16,10 +16,22 @@
     isMobile?: boolean;
     scopedEntityIds?: string[];
     scopedAnnotationIds?: string[];
+    scopeEndpointMode?: "any" | "both";
+    scopeMode?: "union" | "intersection";
     queryEntityIds?: string[];
   }
 
-  let { filters, onFilterChange, onClearFilters, isMobile = false, scopedEntityIds, scopedAnnotationIds, queryEntityIds }: Props = $props();
+  let {
+    filters,
+    onFilterChange,
+    onClearFilters,
+    isMobile = false,
+    scopedEntityIds,
+    scopedAnnotationIds,
+    scopeEndpointMode = "any",
+    scopeMode = "union",
+    queryEntityIds,
+  }: Props = $props();
 
   let predicatesByCategory = $state<Record<string, string[]>>({});
   let interactionTypeOptions = $state<string[]>([]);
@@ -47,6 +59,8 @@
     ];
     const scope = {
       entityIds: mergedEntityIds.length ? mergedEntityIds : undefined,
+      endpointMode: scopeEndpointMode,
+      mode: scopeMode,
       annotationTermIds: scopedAnnotationIds?.length ? scopedAnnotationIds : undefined,
       predicates: filters.predicates,
       interactionTypes: filters.interaction_types,

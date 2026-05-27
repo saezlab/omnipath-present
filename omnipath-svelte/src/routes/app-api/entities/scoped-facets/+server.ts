@@ -41,6 +41,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
     entityIds?: Array<string | number>;
     annotationTermIds?: string[];
+    includeCvTerms?: boolean;
     entityTypes?: string[];
     sources?: string[];
     ncbi_tax_id?: string[];
@@ -53,6 +54,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const counts = await getScopedEntityFacetCounts({
     entityPks: entityPks || [],
     annotationTermIds: body.annotationTermIds || [],
+    includeCvTerms: body.includeCvTerms === true,
     entityTypes: body.entityTypes || [],
     sources: body.sources || [],
     ncbi_tax_id: body.ncbi_tax_id || [],

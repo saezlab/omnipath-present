@@ -154,7 +154,7 @@ export async function searchOntologyTerms({
        FROM ${ontologyTermsTable(SEARCH_SCHEMA)}
        LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_entity_bitmap entity_counts
          ON entity_counts.term_entity_id = terms.term_entity_id
-       LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_relation_bitmap relation_counts
+       LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_direct_relation_bitmap relation_counts
          ON relation_counts.term_entity_id = terms.term_entity_id
        ${whereClause}
        ORDER BY annotated_item_count DESC, terms.term_id ASC
@@ -254,26 +254,26 @@ async function searchScopedOntologyTermsRelational({
   if (hasTermIds) {
     const termParam = pushParam(termIds);
     cteParts.push(`scope_entity_pks AS MATERIALIZED (
-      SELECT DISTINCT er.subject_entity_id AS entity_id
+      SELECT DISTINCT er.object_entity_id AS entity_id
       FROM ${schema}.relation er
       WHERE ${relationCategoryEqualsSql(schema, "er", "association")}
-        AND er.object_entity_id IN (
+        AND er.subject_entity_id IN (
           SELECT terms.term_entity_id FROM ${ontologyTermsTable(schema)} WHERE terms.term_id = ANY(${termParam}::text[])
         )
     )`);
   }
 
   let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
-    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.subject_entity_id = ANY(${pushParam(entityPks.map(String))}::uuid[])`;
+    ? `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.object_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
+    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.object_entity_id = ANY(${pushParam(entityPks.map(String))}::uuid[])`;
 
   if (hasTermIds && hasEntityPks) {
     const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.subject_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.subject_entity_id = ANY(${ePksParam}::uuid[]))`;
+    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.object_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.object_entity_id = ANY(${ePksParam}::uuid[]))`;
   }
 
   cteParts.push(`scope_term_pks AS MATERIALIZED (
-    SELECT DISTINCT er.object_entity_id AS term_entity_id
+    SELECT DISTINCT er.subject_entity_id AS term_entity_id
     ${scopeTermPksFrom}
   )`);
 
@@ -888,9 +888,9 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
          es.canonical_identifier,
          ${canonicalIdentifierTypeNameSql(SEARCH_SCHEMA, "es")} AS canonical_identifier_type
        FROM ${SEARCH_SCHEMA}.relation er
-       JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.subject_entity_id
+       JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.object_entity_id
        WHERE ${relationCategoryEqualsSql(SEARCH_SCHEMA, "er", "association")}
-         AND er.object_entity_id IN (
+         AND er.subject_entity_id IN (
            SELECT terms.term_entity_id FROM ${ontologyTermsTable(SEARCH_SCHEMA)} WHERE terms.term_id = ANY($1::text[])
          )`,
       [normalized],

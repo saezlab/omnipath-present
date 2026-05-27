@@ -312,18 +312,33 @@ export const annotationTermEntityBitmapInMinimal = pgTable("annotation_term_enti
 		}).onDelete("cascade"),
 ]);
 
-export const annotationTermRelationBitmapInMinimal = pgTable("annotation_term_relation_bitmap", {
+export const annotationTermDirectRelationBitmapInMinimal = pgTable("annotation_term_direct_relation_bitmap", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	termEntityId: bigint("term_entity_id", { mode: "number" }).primaryKey().notNull(),
 	// TODO: failed to parse database type 'roaringbitmap'
 	relationBitmap: roaringbitmap("relation_bitmap").notNull(),
 	globalCount: integer("global_count").notNull(),
 }, (table) => [
-	index("annotation_term_relation_count_idx").using("btree", table.globalCount.desc().nullsFirst().op("int4_ops")),
+	index("annotation_term_direct_relation_count_idx").using("btree", table.globalCount.desc().nullsFirst().op("int4_ops")),
 	foreignKey({
 			columns: [table.termEntityId],
 			foreignColumns: [entityInMinimal.entityId],
-			name: "annotation_term_relation_bitmap_term_entity_id_fkey"
+			name: "annotation_term_direct_relation_bitmap_term_entity_id_fkey"
+		}).onDelete("cascade"),
+]);
+
+export const entityRelationBitmapInMinimal = pgTable("entity_relation_bitmap", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	entityId: bigint("entity_id", { mode: "number" }).primaryKey().notNull(),
+	// TODO: failed to parse database type 'roaringbitmap'
+	relationBitmap: roaringbitmap("relation_bitmap").notNull(),
+	globalCount: integer("global_count").notNull(),
+}, (table) => [
+	index("entity_relation_count_idx").using("btree", table.globalCount.desc().nullsFirst().op("int4_ops")),
+	foreignKey({
+			columns: [table.entityId],
+			foreignColumns: [entityInMinimal.entityId],
+			name: "entity_relation_bitmap_entity_id_fkey"
 		}).onDelete("cascade"),
 ]);
 

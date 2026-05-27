@@ -612,12 +612,43 @@
       "policies": {},
       "isRLSEnabled": false
     },
-    "public.annotation_term_relation_bitmap": {
-      "name": "annotation_term_relation_bitmap",
+    "public.annotation_term_direct_relation_bitmap": {
+      "name": "annotation_term_direct_relation_bitmap",
       "schema": "",
       "columns": {
         "term_entity_pk": {
           "name": "term_entity_pk",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "relation_bitmap": {
+          "name": "relation_bitmap",
+          "type": "roaringbitmap",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "global_count": {
+          "name": "global_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_relation_bitmap": {
+      "name": "entity_relation_bitmap",
+      "schema": "",
+      "columns": {
+        "entity_pk": {
+          "name": "entity_pk",
           "type": "bigint",
           "primaryKey": true,
           "notNull": true

@@ -55,6 +55,8 @@ async function transformClientFilters(filters: Record<string, unknown>): Promise
     relationCategories: mapRelationCategories(filters.relation_categories),
     entityPks,
     scopeEntityPks,
+    scopeEndpointMode: filters.scope_endpoint_mode === "both" ? "both" : "any",
+    scopeMode: filters.selection_scope_mode === "intersection" ? "intersection" : "union",
     scopeAnnotationTerms: Array.isArray(filters.scope_annotation_ids)
       ? filters.scope_annotation_ids.filter((v): v is string => typeof v === "string")
       : undefined,

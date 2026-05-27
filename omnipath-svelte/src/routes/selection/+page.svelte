@@ -10,10 +10,11 @@
 	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
 	import SelectionSheet from '$lib/components/selection/SelectionSheet.svelte';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
-	import { getSelectionScope } from '$lib/stores/selection-scope.svelte';
+	import { getSelectionScope, getSelectionScopeSettings } from '$lib/stores/selection-scope.svelte';
 	import type { SearchFilters } from '$lib/types/search';
 
 	const selection = getSelectionStore();
+	const scopeSettings = getSelectionScopeSettings();
 	const tab = $derived($page.url.searchParams.get('tab') || 'entities');
 	const query = $derived($page.url.searchParams.get('q') || '');
 
@@ -21,12 +22,19 @@
 	let draftQuery = $state('');
 	let filters = $state<SearchFilters>({});
 
-	const shouldResolveOntologyEntities = $derived(tab === 'relations');
 	const scope = $derived(
-		getSelectionScope(selection.entityIds, selection.annotationIds, {
-			resolveAnnotationEntities: shouldResolveOntologyEntities
+		getSelectionScope(selection.entityIds, selection.selectedEntityPks, selection.annotationIds, {
+			includeAssociatedEntities: scopeSettings.expandSelection,
+			includeMembersParticipants: scopeSettings.expandSelection,
+			mode: scopeSettings.mode,
+			resolveAnnotationEntities: true
 		})
 	);
+	const scopeEndpointMode = $derived(scopeSettings.mode === 'intersection' ? 'both' : 'any');
+	const entityTabScopePks = $derived(Array.from(new Set([...scope.termEntityPks, ...scope.scopedEntityPks])));
+	const hasEntityTabScope = $derived(entityTabScopePks.length > 0);
+	const hasOntologyScope = $derived(scope.scopedEntityPks.length > 0);
+	const hasRelationScope = $derived(scope.scopedEntityPks.length > 0 || selection.annotationIds.length > 0);
 
 	$effect(() => {
 		draftQuery = query;
@@ -71,14 +79,10 @@
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
 
-	const isRelationSelectionEmpty = $derived(
-		scope.selectedEntityIds.length === 0 && scope.selectedAnnotationIds.length === 0
-	);
 	const hasSelection = $derived(selection.selectedEntities.length > 0 || selection.selectedAnnotations.length > 0);
-	const isSelectionEmpty = $derived(
-		tab === 'relations'
-			? isRelationSelectionEmpty
-			: selection.selectedEntities.length === 0 && selection.selectedAnnotations.length === 0
+	const isSelectionEmpty = $derived(!hasSelection);
+	const hasResolvedScopeForTab = $derived(
+		tab === 'relations' ? hasRelationScope : tab === 'entities' ? hasEntityTabScope : hasOntologyScope
 	);
 </script>
 
@@ -122,18 +126,49 @@
 		bind:searchInputRef={inputRef}
 	>
 		{#snippet content()}
-			{#if tab === 'entities'}
+			{#if scope.isLoading}
+				<div class="flex flex-1 items-center justify-center p-8">
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						<div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+						<span>Resolving selection scope...</span>
+					</div>
+				</div>
+			{:else if !hasResolvedScopeForTab}
+				<div class="flex flex-1 items-center justify-center p-8">
+					<Card class="w-full max-w-2xl border-dashed">
+						<CardContent class="space-y-3 py-10 text-center">
+							<h2 class="text-xl font-semibold">{tab === 'relations' ? 'No relation scope' : 'No entities in scope'}</h2>
+							<p class="text-sm text-muted-foreground">
+								Change the scope options or add an explicit entity to the selection.
+							</p>
+						</CardContent>
+					</Card>
+				</div>
+			{:else if tab === 'entities'}
 				<EntitiesExploreTab
 					{query}
 					{filters}
 					onFiltersChange={(f) => (filters = f)}
-					selectedEntityPks={selection.selectedEntityPks}
-					selectedAnnotationIds={scope.selectedAnnotationIds}
+					selectedEntityPks={entityTabScopePks}
+					includeCvTerms
 				/>
 			{:else if tab === 'relations'}
-				<RelationsExploreTab {query} {filters} onFilterChange={(f) => (filters = f)} scopedEntityIds={selection.entityIds} scopedAnnotationIds={scope.selectedAnnotationIds} />
+				<RelationsExploreTab
+					{query}
+					{filters}
+					onFilterChange={(f) => (filters = f)}
+					scopedEntityIds={scope.scopedEntityPks}
+					scopedAnnotationIds={selection.annotationIds}
+					scopeEndpointMode={scopeEndpointMode}
+					scopeMode={scopeSettings.mode}
+				/>
 			{:else}
-				<AnnotationBrowserTab {query} {filters} onFiltersChange={(f) => (filters = f)} selectedEntityPks={selection.selectedEntityPks} selectedAnnotationIds={scope.selectedAnnotationIds} />
+				<AnnotationBrowserTab
+					{query}
+					{filters}
+					onFiltersChange={(f) => (filters = f)}
+					selectedEntityPks={scope.scopedEntityPks}
+				/>
 			{/if}
 		{/snippet}
 

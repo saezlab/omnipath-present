@@ -92,10 +92,10 @@ function ontologyTermEntityPredicate(schema: string, placeholder: string, entity
   return `EXISTS (
     SELECT 1
     FROM ${schema}.relation r
-    JOIN ${schema}.ontology_terms terms ON terms.term_entity_id = r.object_entity_id
+    JOIN ${schema}.ontology_terms terms ON terms.term_entity_id = r.subject_entity_id
     WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
-      AND r.subject_entity_id = ${entityAlias}.entity_id
       AND terms.term_id = ANY(${placeholder}::text[])
+      AND r.object_entity_id = ${entityAlias}.entity_id
   )`;
 }
 
@@ -371,6 +371,7 @@ export async function searchEntities({
     sources?: string[];
     ncbi_tax_id?: string[];
     ontology_terms?: string[];
+    include_cv_terms?: boolean;
   };
   limit?: number;
   cursor?: EntitySearchCursor | null;
@@ -403,7 +404,8 @@ export async function searchEntities({
   const client = await getPool().connect();
 
   try {
-    const whereParts: string[] = [`${entityTypeSql(schema)} IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
+    const includeCvTerms = filters.include_cv_terms === true;
+    const whereParts: string[] = includeCvTerms ? [] : [`${entityTypeSql(schema)} IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -1065,6 +1067,7 @@ export type EntityFacetCount = {
 export async function getScopedEntityFacetCounts({
   entityPks = [],
   annotationTermIds = [],
+  includeCvTerms = false,
   entityTypes = [],
   sources = [],
   ncbi_tax_id = [],
@@ -1073,6 +1076,7 @@ export async function getScopedEntityFacetCounts({
 }: {
   entityPks?: Array<string | number>;
   annotationTermIds?: string[];
+  includeCvTerms?: boolean;
   entityTypes?: string[];
   sources?: string[];
   ncbi_tax_id?: string[];
@@ -1167,11 +1171,11 @@ export async function getScopedEntityFacetCounts({
     };
 
     const ctes: string[] = [];
-    ctes.push(`non_cv_entity_bitmap AS MATERIALIZED (
+    ctes.push(`base_entity_bitmap AS MATERIALIZED (
       SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.facet_entity_bitmap
       WHERE facet_name = 'entity_type'
-        AND facet_value <> '${CV_TERM_ENTITY_TYPE}'
+        ${includeCvTerms ? "" : `AND facet_value <> '${CV_TERM_ENTITY_TYPE}'`}
     )`);
 
     const scopeParts: string[] = [];
@@ -1194,7 +1198,7 @@ export async function getScopedEntityFacetCounts({
           SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
           FROM (${scopeParts.join("\nUNION ALL\n")}) scope_parts
         )`
-      : `scope_base AS MATERIALIZED (SELECT bitmap FROM non_cv_entity_bitmap)`);
+      : `scope_base AS MATERIALIZED (SELECT bitmap FROM base_entity_bitmap)`);
 
     if (trimmedQuery) {
       const queryParam = pushParam(trimmedQuery.toLowerCase());
@@ -1234,15 +1238,15 @@ export async function getScopedEntityFacetCounts({
     }
 
     const chain = (parts: string[]): string => parts.slice(1).reduce((expr, part) => `rb_and(${expr}, ${part})`, parts[0]);
-    const joins: string[] = ["CROSS JOIN scope_base", "CROSS JOIN non_cv_entity_bitmap"];
+    const joins: string[] = ["CROSS JOIN scope_base", "CROSS JOIN base_entity_bitmap"];
     if (trimmedQuery) joins.push("CROSS JOIN query_bitmap");
     if (normalizedEntityTypes.length > 0) joins.push("CROSS JOIN type_filter_bitmap");
     if (normalizedSources.length > 0) joins.push("CROSS JOIN source_filter_bitmap");
     if (normalizedTaxonomyIds.length > 0) joins.push("CROSS JOIN taxonomy_filter_bitmap");
 
-    const typeScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
-    const sourceScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
-    const taxonomyScope = chain(["scope_base.bitmap", "non_cv_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : [])]);
+    const typeScope = chain(["scope_base.bitmap", "base_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
+    const sourceScope = chain(["scope_base.bitmap", "base_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedTaxonomyIds.length > 0 ? ["taxonomy_filter_bitmap.bitmap"] : [])]);
+    const taxonomyScope = chain(["scope_base.bitmap", "base_entity_bitmap.bitmap", ...(trimmedQuery ? ["query_bitmap.bitmap"] : []), ...(normalizedEntityTypes.length > 0 ? ["type_filter_bitmap.bitmap"] : []), ...(normalizedSources.length > 0 ? ["source_filter_bitmap.bitmap"] : [])]);
 
     const facetCountSubquery = (
       facetName: string,
@@ -1259,7 +1263,7 @@ export async function getScopedEntityFacetCounts({
        WHERE scoped_count > 0`;
 
     const subqueries = [
-      facetCountSubquery("entity_type", typeScope, `AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'`),
+      facetCountSubquery("entity_type", typeScope, includeCvTerms ? "" : `AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'`),
       facetCountSubquery("source", sourceScope),
       facetCountSubquery("taxonomy_id", taxonomyScope),
     ];

@@ -219,6 +219,8 @@ export interface RelationFilters {
   taxonomyIds?: string[];
   annotationTerms?: string[];
   scopeEntityPks?: Array<string | number>;
+  scopeEndpointMode?: "any" | "both";
+  scopeMode?: "union" | "intersection";
   scopeAnnotationTerms?: string[];
 }
 
@@ -268,7 +270,7 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
     const param = pushParam(values, "text[]");
     bitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM ${schema}.ontology_terms terms
-      JOIN ${schema}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+      JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
       WHERE terms.term_id = ANY(${param})`);
   };
 
@@ -304,11 +306,9 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const entityPks = normalizeIdValues(filters.entityPks);
   if (entityPks.length) {
     const param = pushParam(entityPks, "uuid[]");
-    bitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.relation r
-      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
-      WHERE r.subject_entity_id = ANY(${param})
-         OR r.object_entity_id = ANY(${param})`);
+    bitmapParts.push(`SELECT COALESCE(rb_or_agg(relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.entity_relation_bitmap
+      WHERE entity_id = ANY(${param})`);
   }
 
   addFacetBitmap("source", normalizeStringValues(filters.sources));
@@ -320,24 +320,43 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
   const scopeEntityPks = normalizeIdValues(filters.scopeEntityPks);
   if (scopeEntityPks.length) {
     const param = pushParam(scopeEntityPks, "uuid[]");
-    scopeBitmapParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.relation r
-      JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
-      WHERE r.subject_entity_id = ANY(${param})
-         OR r.object_entity_id = ANY(${param})`);
+    const endpointPredicate = filters.scopeEndpointMode === "both"
+      ? `r.subject_entity_id = ANY(${param}) AND r.object_entity_id = ANY(${param})`
+      : `r.subject_entity_id = ANY(${param}) OR r.object_entity_id = ANY(${param})`;
+    scopeBitmapParts.push(filters.scopeEndpointMode === "both"
+      ? `SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${schema}.relation r
+        JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
+        WHERE ${endpointPredicate}`
+      : `SELECT COALESCE(rb_or_agg(relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${schema}.entity_relation_bitmap
+        WHERE entity_id = ANY(${param})`);
   }
 
   const scopeAnnotationTerms = normalizeStringValues(filters.scopeAnnotationTerms);
   if (scopeAnnotationTerms.length) {
     const param = pushParam(scopeAnnotationTerms, "text[]");
-    scopeBitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.ontology_terms terms
-      JOIN ${schema}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-      WHERE terms.term_id = ANY(${param})`);
+    if (filters.scopeMode === "intersection") {
+      scopeBitmapParts.push(`SELECT
+        CASE
+          WHEN COUNT(DISTINCT terms.term_id) = cardinality(${param})
+          THEN COALESCE(rb_and_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[]))
+          ELSE rb_build(ARRAY[]::integer[])
+        END AS bitmap
+        FROM ${schema}.ontology_terms terms
+        JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+        WHERE terms.term_id = ANY(${param})`);
+    } else {
+      scopeBitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+        FROM ${schema}.ontology_terms terms
+        JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+        WHERE terms.term_id = ANY(${param})`);
+    }
   }
 
   if (scopeBitmapParts.length) {
-    bitmapParts.push(`SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+    const scopeAgg = filters.scopeMode === "intersection" ? "rb_and_agg" : "rb_or_agg";
+    bitmapParts.push(`SELECT COALESCE(${scopeAgg}(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
       FROM (${scopeBitmapParts.join("\nUNION ALL\n")}) scope_bitmap_parts`);
   }
 
@@ -597,9 +616,9 @@ export async function getAssociatedEntityIds(entityPks: Array<string | number>):
          e.canonical_identifier AS id,
          ${canonicalTypeSql(schema, "e")} AS id_type
        FROM ${schema}.relation r
-       JOIN ${schema}.entity e ON e.entity_id = r.subject_entity_id
+       JOIN ${schema}.entity e ON e.entity_id = r.object_entity_id
        WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
-         AND r.object_entity_id = ANY($1::uuid[])
+         AND r.subject_entity_id = ANY($1::uuid[])
        ORDER BY id_type, id`,
       [normalized],
     );
@@ -619,6 +638,8 @@ export type RelationFacetCount = {
 
 export async function getScopedRelationFacetCounts({
   entityPks = [],
+  endpointMode = "any",
+  mode = "union",
   annotationTermIds = [],
   predicates = [],
   interactionTypes = [],
@@ -626,6 +647,8 @@ export async function getScopedRelationFacetCounts({
   taxonomyIds = [],
 }: {
   entityPks?: Array<string | number>;
+  endpointMode?: "any" | "both";
+  mode?: "union" | "intersection";
   annotationTermIds?: string[];
   predicates?: string[];
   interactionTypes?: string[];
@@ -652,23 +675,42 @@ export async function getScopedRelationFacetCounts({
     const scopeParts: string[] = [];
     if (normalizedTermIds.length > 0) {
       const termParam = pushParam(normalizedTermIds);
-      scopeParts.push(`SELECT b.relation_bitmap AS bitmap
-        FROM ${schema}.ontology_terms terms
-        JOIN ${schema}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${termParam}::text[])`);
+      if (mode === "intersection") {
+        scopeParts.push(`SELECT
+          CASE
+            WHEN COUNT(DISTINCT terms.term_id) = cardinality(${termParam}::text[])
+            THEN COALESCE(rb_and_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[]))
+            ELSE rb_build(ARRAY[]::integer[])
+          END AS bitmap
+          FROM ${schema}.ontology_terms terms
+          JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+          WHERE terms.term_id = ANY(${termParam}::text[])`);
+      } else {
+        scopeParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+          FROM ${schema}.ontology_terms terms
+          JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+          WHERE terms.term_id = ANY(${termParam}::text[])`);
+      }
     }
     if (normalizedEntityPks.length > 0) {
       const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${schema}.relation r
-        JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
-        WHERE r.subject_entity_id = ANY(${ePkParam}::uuid[])
-           OR r.object_entity_id = ANY(${ePkParam}::uuid[])`);
+      const endpointPredicate = endpointMode === "both"
+        ? `r.subject_entity_id = ANY(${ePkParam}::uuid[]) AND r.object_entity_id = ANY(${ePkParam}::uuid[])`
+        : `r.subject_entity_id = ANY(${ePkParam}::uuid[]) OR r.object_entity_id = ANY(${ePkParam}::uuid[])`;
+      scopeParts.push(endpointMode === "both"
+        ? `SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+          FROM ${schema}.relation r
+          JOIN ${schema}.relation_bitmap_id bitmap ON bitmap.relation_id = r.relation_id
+          WHERE ${endpointPredicate}`
+        : `SELECT COALESCE(rb_or_agg(relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+          FROM ${schema}.entity_relation_bitmap
+          WHERE entity_id = ANY(${ePkParam}::uuid[])`);
     }
 
+    const scopeAgg = mode === "intersection" ? "rb_and_agg" : "rb_or_agg";
     ctes.push(scopeParts.length > 0
       ? `scope_base AS MATERIALIZED (
-          SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+          SELECT COALESCE(${scopeAgg}(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
           FROM (${scopeParts.join("\nUNION ALL\n")}) scope_parts
         )`
       : `scope_base AS MATERIALIZED (

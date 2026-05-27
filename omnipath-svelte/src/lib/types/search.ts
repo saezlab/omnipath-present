@@ -23,6 +23,7 @@ export interface SearchFilters {
   ncbi_tax_id?: string[];
   ontology_terms?: string[];
   ontology_ids?: string[];
+  include_cv_terms?: boolean;
 
   parent_entity_ids?: Array<string | number>;
   member_entity_ids?: Array<string | number>;
@@ -31,6 +32,10 @@ export interface SearchFilters {
   association_annotation_terms?: string[];
 
   include_associated_entities?: boolean;
+  include_members_participants?: boolean;
+  selection_scope_mode?: "union" | "intersection";
+  scope_endpoint_mode?: "any" | "both";
+  scope_annotation_ids?: string[];
 }
 
 export interface SearchParams {

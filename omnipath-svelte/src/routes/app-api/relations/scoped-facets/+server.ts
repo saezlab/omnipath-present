@@ -41,6 +41,8 @@ async function resolveEntityIds(entityIds?: Array<string | number>): Promise<str
 export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
     entityIds?: Array<string | number>;
+    endpointMode?: "any" | "both";
+    mode?: "union" | "intersection";
     annotationTermIds?: string[];
     predicates?: string[];
     interactionTypes?: string[];
@@ -52,6 +54,8 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const counts = await getScopedRelationFacetCounts({
     entityPks: entityPks || [],
+    endpointMode: body.endpointMode === "both" ? "both" : "any",
+    mode: body.mode === "intersection" ? "intersection" : "union",
     annotationTermIds: body.annotationTermIds || [],
     predicates: body.predicates || [],
     interactionTypes: body.interactionTypes || [],

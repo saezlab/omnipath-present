@@ -29,9 +29,20 @@
     entitySearchFilters?: SearchFilters;
     scopedEntityIds?: string[];
     scopedAnnotationIds?: string[];
+    scopeEndpointMode?: "any" | "both";
+    scopeMode?: "union" | "intersection";
   }
 
-  let { filters, onFilterChange, query = '', entitySearchFilters = {}, scopedEntityIds, scopedAnnotationIds }: Props = $props();
+  let {
+    filters,
+    onFilterChange,
+    query = '',
+    entitySearchFilters = {},
+    scopedEntityIds,
+    scopedAnnotationIds,
+    scopeEndpointMode = "any",
+    scopeMode = "union",
+  }: Props = $props();
 
   const isMobile = new IsMobile();
   const RESULTS_PER_PAGE = 20;
@@ -62,7 +73,9 @@
     ...filters,
     ...(query.trim() && queryEntityIds.length > 0 ? { entity_ids: queryEntityIds } : {}),
     ...(scopedEntityIds && scopedEntityIds.length > 0 ? { scope_entity_ids: scopedEntityIds } : {}),
+    ...(scopedEntityIds && scopedEntityIds.length > 0 ? { scope_endpoint_mode: scopeEndpointMode } : {}),
     ...(scopedAnnotationIds && scopedAnnotationIds.length > 0 ? { scope_annotation_ids: scopedAnnotationIds } : {}),
+    ...((scopedEntityIds?.length || scopedAnnotationIds?.length) ? { selection_scope_mode: scopeMode } : {}),
   });
 
   // Resolve query text to entity IDs for relation scoping.
@@ -239,6 +252,8 @@
                 isMobile
                 scopedEntityIds={scopedEntityIds}
                 scopedAnnotationIds={scopedAnnotationIds}
+                scopeEndpointMode={scopeEndpointMode}
+                scopeMode={scopeMode}
                 queryEntityIds={queryEntityIds}
               />
             </div>
@@ -384,6 +399,8 @@
           onClearFilters={handleClearFilters}
           scopedEntityIds={scopedEntityIds}
           scopedAnnotationIds={scopedAnnotationIds}
+          scopeEndpointMode={scopeEndpointMode}
+          scopeMode={scopeMode}
           queryEntityIds={queryEntityIds}
         />
       </div>

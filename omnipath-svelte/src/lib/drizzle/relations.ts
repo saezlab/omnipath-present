@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal, entityEvidenceAnnotationInMinimal, entityAnnotationInMinimal, relationAnnotationInMinimal } from "./schema";
+import { entityEvidenceInMinimal, annotationInMinimal, relationEvidenceInMinimal, entityInMinimal, entityEvidenceResolutionInMinimal, entityRelationCountsInMinimal, relationInMinimal, ontologyTermsInMinimal, annotationTermEntityBitmapInMinimal, annotationTermDirectRelationBitmapInMinimal, entityRelationBitmapInMinimal, entityEvidenceIdentifierInMinimal, identifierInMinimal, relationEvidenceRelationInMinimal, relationEvidenceAnnotationInMinimal, entityEvidenceAnnotationInMinimal, entityAnnotationInMinimal, relationAnnotationInMinimal } from "./schema";
 
 export const entityEvidenceInMinimalRelations = relations(entityEvidenceInMinimal, ({one, many}) => ({
 	entityEvidenceInMinimal: one(entityEvidenceInMinimal, {
@@ -71,7 +71,8 @@ export const entityInMinimalRelations = relations(entityInMinimal, ({many}) => (
 	}),
 	ontologyTermsInMinimals: many(ontologyTermsInMinimal),
 	annotationTermEntityBitmapInMinimals: many(annotationTermEntityBitmapInMinimal),
-	annotationTermRelationBitmapInMinimals: many(annotationTermRelationBitmapInMinimal),
+	annotationTermDirectRelationBitmapInMinimals: many(annotationTermDirectRelationBitmapInMinimal),
+	entityRelationBitmapInMinimals: many(entityRelationBitmapInMinimal),
 }));
 
 export const entityEvidenceResolutionInMinimalRelations = relations(entityEvidenceResolutionInMinimal, ({one}) => ({
@@ -121,9 +122,16 @@ export const annotationTermEntityBitmapInMinimalRelations = relations(annotation
 	}),
 }));
 
-export const annotationTermRelationBitmapInMinimalRelations = relations(annotationTermRelationBitmapInMinimal, ({one}) => ({
+export const annotationTermDirectRelationBitmapInMinimalRelations = relations(annotationTermDirectRelationBitmapInMinimal, ({one}) => ({
 	entityInMinimal: one(entityInMinimal, {
-		fields: [annotationTermRelationBitmapInMinimal.termEntityId],
+		fields: [annotationTermDirectRelationBitmapInMinimal.termEntityId],
+		references: [entityInMinimal.entityId]
+	}),
+}));
+
+export const entityRelationBitmapInMinimalRelations = relations(entityRelationBitmapInMinimal, ({one}) => ({
+	entityInMinimal: one(entityInMinimal, {
+		fields: [entityRelationBitmapInMinimal.entityId],
 		references: [entityInMinimal.entityId]
 	}),
 }));
