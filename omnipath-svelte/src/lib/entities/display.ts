@@ -35,13 +35,34 @@ function isFallbackEntity(entity: EntityLike): boolean {
   return isFallbackIdentifierType(entity.canonicalIdentifierType);
 }
 
+export function getEntityResolutionStatus(entity: EntityLike): string | undefined {
+  const status = (entity as { resolutionStatus?: unknown }).resolutionStatus;
+  return typeof status === "string" && status.trim() ? status.trim().toLowerCase() : undefined;
+}
+
+function normalizedEntityTypeLabel(entity: EntityLike): string {
+  return getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
+}
+
+export function isResolverBackedEntity(entity: EntityLike): boolean {
+  const typeLabel = normalizedEntityTypeLabel(entity);
+  return typeLabel === "protein" || isSmallMoleculeEntity(entity);
+}
+
+export function isUnresolvedEntity(entity: EntityLike): boolean {
+  if (!isResolverBackedEntity(entity)) return false;
+  const status = getEntityResolutionStatus(entity);
+  if (status) return status === "unresolved";
+  return isFallbackEntity(entity);
+}
+
 function isHashLikeIdentifier(value: string | null | undefined): boolean {
   const text = value?.trim() || "";
   return /^[a-f0-9-]{24,}$/i.test(text) && /[a-f]/i.test(text);
 }
 
 export function isSmallMoleculeEntity(entity: EntityLike): boolean {
-  const typeLabel = getEntityTypeLabel(entity).toLowerCase().replace(/[\s_]/g, "");
+  const typeLabel = normalizedEntityTypeLabel(entity);
   return typeLabel === "smallmolecule"
     || typeLabel === "compound"
     || typeLabel === "metabolite"

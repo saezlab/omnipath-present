@@ -4,6 +4,7 @@ export type Entity = {
   entityPk: string;
   canonicalIdentifier: string;
   canonicalIdentifierType: string;
+  resolutionStatus?: string | null;
   entityType: string | null;
   taxonomyId: string | null;
   entityAttributes: unknown;

@@ -31,6 +31,7 @@ export async function fetchEntitiesSearch(params: {
         entityPk: string;
         canonicalIdentifier: string;
         canonicalIdentifierType: string;
+        resolutionStatus?: string | null;
         entityType: string | null;
         taxonomyId: string | null;
         entityAttributes: unknown;
@@ -63,6 +64,7 @@ export async function fetchEntitiesSearch(params: {
       entityPk: string;
       canonicalIdentifier: string;
       canonicalIdentifierType: string;
+      resolutionStatus?: string | null;
       entityType: string | null;
       taxonomyId: string | null;
       entityAttributes: unknown;
@@ -144,6 +146,7 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
       entityPk: string;
       canonicalIdentifier: string;
       canonicalIdentifierType: string;
+      resolutionStatus?: string | null;
       entityType: string | null;
       taxonomyId: string | null;
       entityAttributes: unknown;
@@ -170,6 +173,7 @@ export async function fetchEntitiesByPks(pks: Array<string | number>) {
     entityPk: string;
     canonicalIdentifier: string;
     canonicalIdentifierType: string;
+    resolutionStatus?: string | null;
     entityType: string | null;
     taxonomyId: string | null;
     entityAttributes: unknown;

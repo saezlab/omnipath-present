@@ -6,6 +6,7 @@ import {
   canonicalIdentifierTypeNameSql,
   entityTypeNameSql,
   relationCategoryEqualsSql,
+  resolutionStatusNameSql,
 } from "$lib/server/queries/sql-fragments";
 
 export type EntityWithIdentifiers = Entity & {
@@ -32,6 +33,7 @@ function toEntityRow(row: {
   entity_id: string | number;
   id: string;
   id_type: string;
+  resolution_status?: string | null;
   entity_type: string | null;
   taxonomy_id: string | null;
   sources?: string[] | null;
@@ -41,6 +43,7 @@ function toEntityRow(row: {
     entityPk: String(row.entity_id),
     canonicalIdentifier: row.id,
     canonicalIdentifierType: row.id_type,
+    resolutionStatus: row.resolution_status ?? null,
     entityType: row.entity_type,
     taxonomyId: row.taxonomy_id,
     entityAttributes: null,
@@ -69,6 +72,10 @@ function canonicalTypeSql(schema: string, alias = "e"): string {
   return canonicalIdentifierTypeNameSql(schema, alias);
 }
 
+function resolutionStatusSql(schema: string, alias = "e"): string {
+  return resolutionStatusNameSql(schema, alias);
+}
+
 function matchingEntityIdentifiersSql(schema: string, queryParam: string): string {
   return `SELECT DISTINCT eil.entity_id
     FROM ${schema}.identifier_evidence i
@@ -78,7 +85,7 @@ function matchingEntityIdentifiersSql(schema: string, queryParam: string): strin
 }
 
 function entityBaseSelect(schema: string, alias = "e"): string {
-  return `${alias}.entity_id, ${alias}.canonical_identifier AS id, ${canonicalTypeSql(schema, alias)} AS id_type, ${entityTypeSql(schema, alias)} AS entity_type, ${alias}.taxonomy_id, ARRAY[]::text[] AS sources`;
+  return `${alias}.entity_id, ${alias}.canonical_identifier AS id, ${canonicalTypeSql(schema, alias)} AS id_type, ${resolutionStatusSql(schema, alias)} AS resolution_status, ${entityTypeSql(schema, alias)} AS entity_type, ${alias}.taxonomy_id, ARRAY[]::text[] AS sources`;
 }
 
 function ontologyTermEntityPredicate(schema: string, placeholder: string, entityAlias = "e"): string {
@@ -300,6 +307,7 @@ export async function getEntitiesByPublicIds(
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -330,6 +338,7 @@ export async function getEntitiesByPks(pks: Array<string | number>): Promise<Ent
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -476,6 +485,7 @@ export async function searchEntities({
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -506,6 +516,7 @@ export async function searchEntities({
          page.entity_id,
 	         page.canonical_identifier AS id,
 	         ${canonicalTypeSql(schema, "page")} AS id_type,
+	         ${resolutionStatusSql(schema, "page")} AS resolution_status,
 	         ${entityTypeSql(schema, "page")} AS entity_type,
 	         page.taxonomy_id,
 	         ${entityFacetSourcesSql(schema, "page")} AS sources,
@@ -633,6 +644,7 @@ async function searchEntitiesByRelationCount({
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -642,6 +654,7 @@ async function searchEntitiesByRelationCount({
          e.entity_id,
          e.canonical_identifier AS id,
          it.name AS id_type,
+         ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
          ARRAY[]::text[] AS sources,
@@ -741,6 +754,7 @@ async function searchEntitiesByRelationCountAndEntityType({
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -750,6 +764,7 @@ async function searchEntitiesByRelationCountAndEntityType({
          e.entity_id,
          e.canonical_identifier AS id,
          it.name AS id_type,
+         ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
          ${entityFacetSourcesSql(schema, "e")} AS sources,
@@ -848,6 +863,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
         entity_id: string | number;
         id: string;
         id_type: string;
+        resolution_status: string | null;
         entity_type: string | null;
         taxonomy_id: string | null;
         sources: string[] | null;
@@ -910,6 +926,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
            e.entity_id,
            e.canonical_identifier AS id,
            ${canonicalTypeSql(schema, "e")} AS id_type,
+           ${resolutionStatusSql(schema, "e")} AS resolution_status,
            ${entityTypeSql(schema, "e")} AS entity_type,
            e.taxonomy_id,
            ${entityFacetSourcesSql(schema, "e")} AS sources,
@@ -932,6 +949,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
       entity_id: string | number;
       id: string;
       id_type: string;
+      resolution_status: string | null;
       entity_type: string | null;
       taxonomy_id: string | null;
       sources: string[] | null;
@@ -942,6 +960,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
          e.entity_id,
          e.canonical_identifier AS id,
          it.name AS id_type,
+         ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
          ${entityFacetSourcesSql(schema, "e")} AS sources,

@@ -6,6 +6,10 @@ export function canonicalIdentifierTypeNameSql(schema: string, alias: string): s
   return `(SELECT it.name FROM ${schema}.vocab_identifier_type it WHERE it.identifier_type_id = ${alias}.canonical_identifier_type_id)`;
 }
 
+export function resolutionStatusNameSql(schema: string, alias: string): string {
+  return `(SELECT rs.name FROM ${schema}.vocab_resolution_status rs WHERE rs.resolution_status_id = ${alias}.resolution_status_id)`;
+}
+
 export function relationPredicateNameSql(schema: string, alias: string): string {
   return `(SELECT rp.name FROM ${schema}.vocab_relation_predicate rp WHERE rp.relation_predicate_id = ${alias}.predicate_id)`;
 }
@@ -21,4 +25,3 @@ export function relationCategoryEqualsSql(schema: string, alias: string, value: 
 export function relationCategoryAnySql(schema: string, alias: string, placeholder: string): string {
   return `${relationCategoryNameSql(schema, alias)} = ANY(${placeholder})`;
 }
-

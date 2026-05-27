@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle, Tags } from '@lucide/svelte';
+  import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle, Tags, AlertTriangle } from '@lucide/svelte';
 
   const entityTypeConfig: Record<string, { icon: typeof CircleDot; color: string; bgColor: string; label: string }> = {
     protein: { icon: CircleDot, color: 'text-blue-500', bgColor: 'from-blue-50/80 to-blue-100/80 dark:from-blue-900/30 dark:to-blue-800/30', label: 'Protein' },
@@ -25,25 +25,46 @@
     return entityTypeConfig[normalized] || defaultConfig;
   }
 
+  function isResolverBackedEntityType(entityType: string | undefined) {
+    if (!entityType) return false;
+    const typeName = entityType.includes(':') ? entityType.split(':')[0] : entityType;
+    const normalized = typeName.toLowerCase().replace(/[\s_]/g, '');
+    return normalized === 'protein'
+      || normalized === 'smallmolecule'
+      || normalized === 'compound'
+      || normalized === 'metabolite'
+      || normalized === 'drug'
+      || normalized === 'lipid';
+  }
+
   interface Props {
     displayName: string;
     canonicalIdentifier: string;
     entityType?: string;
+    resolutionStatus?: string | null;
   }
 
-  let { displayName, canonicalIdentifier, entityType }: Props = $props();
+  let { displayName, canonicalIdentifier, entityType, resolutionStatus }: Props = $props();
 
   const typeConfig = $derived(getEntityTypeConfig(entityType));
   const TypeIcon = $derived(typeConfig.icon);
   const isDuplicate = $derived(displayName === canonicalIdentifier || /^\d+$/.test(canonicalIdentifier));
+  const isUnresolved = $derived(
+    isResolverBackedEntityType(entityType) && resolutionStatus?.trim().toLowerCase() === 'unresolved'
+  );
+  const rootClass = $derived(
+    isUnresolved
+      ? 'border-dashed border-amber-300/90 bg-amber-50/45 dark:border-amber-700/70 dark:bg-amber-950/20'
+      : `bg-gradient-to-br ${typeConfig.bgColor} border-slate-200/60 dark:border-slate-700/60`
+  );
 </script>
 
 <div class="relative">
-  <div class="relative bg-gradient-to-br {typeConfig.bgColor} backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 rounded-md px-2 py-1 shadow-sm min-w-[80px] w-full">
+  <div class="relative {rootClass} backdrop-blur-sm border rounded-md px-2 py-1 shadow-sm min-w-[80px] w-full">
     <div class="flex items-center gap-1.5 min-h-[32px]">
       <TypeIcon class="h-4 w-4 {typeConfig.color} shrink-0" />
       <div class="flex flex-col justify-center flex-1 min-w-0">
-        <span class="truncate text-xs font-medium leading-tight text-slate-900 dark:text-slate-100" title={`${typeConfig.label}: ${displayName || canonicalIdentifier}`}>
+        <span class="truncate text-xs font-medium leading-tight {isUnresolved ? 'text-slate-700 dark:text-slate-200' : 'text-slate-900 dark:text-slate-100'}" title={`${typeConfig.label}: ${displayName || canonicalIdentifier}`}>
           {displayName || canonicalIdentifier}
         </span>
         {#if displayName && !isDuplicate}
@@ -52,6 +73,12 @@
           </span>
         {/if}
       </div>
+      {#if isUnresolved}
+        <span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/80 bg-amber-100/70 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200" title="Unresolved entity">
+          <AlertTriangle class="size-3" />
+          Unresolved
+        </span>
+      {/if}
     </div>
   </div>
 </div>

@@ -302,6 +302,7 @@
                         displayName={getEntityDisplayName(sourceEntity)}
                         canonicalIdentifier={getEntityBadgeIdentifier(sourceEntity)}
                         entityType={getEntityTypeLabel(sourceEntity)}
+                        resolutionStatus={sourceEntity.resolutionStatus}
                       />
                     </button>
                   </TableCell>
@@ -327,6 +328,7 @@
                         displayName={getEntityDisplayName(targetEntity)}
                         canonicalIdentifier={getEntityBadgeIdentifier(targetEntity)}
                         entityType={getEntityTypeLabel(targetEntity)}
+                        resolutionStatus={targetEntity.resolutionStatus}
                       />
                     </button>
                   </TableCell>

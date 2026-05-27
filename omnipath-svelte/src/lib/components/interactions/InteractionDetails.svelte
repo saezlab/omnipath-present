@@ -262,6 +262,7 @@
             displayName={getEntityDisplayName(subjectEntity)}
             canonicalIdentifier={getEntityBadgeIdentifier(subjectEntity)}
             entityType={getEntityTypeLabel(subjectEntity)}
+            resolutionStatus={subjectEntity.resolutionStatus}
           />
         </div>
 
@@ -276,6 +277,7 @@
             displayName={getEntityDisplayName(objectEntity)}
             canonicalIdentifier={getEntityBadgeIdentifier(objectEntity)}
             entityType={getEntityTypeLabel(objectEntity)}
+            resolutionStatus={objectEntity.resolutionStatus}
           />
         </div>
       </div>

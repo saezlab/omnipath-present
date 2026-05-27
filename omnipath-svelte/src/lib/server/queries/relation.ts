@@ -7,6 +7,7 @@ import {
   relationCategoryEqualsSql,
   relationCategoryNameSql,
   relationPredicateNameSql,
+  resolutionStatusNameSql,
 } from "$lib/server/queries/sql-fragments";
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
@@ -42,6 +43,7 @@ function toEntityRow(row: {
   entity_id: string | number;
   id: string;
   id_type: string;
+  resolution_status?: string | null;
   entity_type: string | null;
   taxonomy_id: string | null;
 }): Entity {
@@ -49,6 +51,7 @@ function toEntityRow(row: {
     entityPk: String(row.entity_id),
     canonicalIdentifier: row.id,
     canonicalIdentifierType: row.id_type,
+    resolutionStatus: row.resolution_status ?? null,
     entityType: row.entity_type,
     taxonomyId: row.taxonomy_id,
     entityAttributes: null,
@@ -62,6 +65,10 @@ function entityTypeSql(schema: string, alias: string): string {
 
 function canonicalTypeSql(schema: string, alias: string): string {
   return canonicalIdentifierTypeNameSql(schema, alias);
+}
+
+function resolutionStatusSql(schema: string, alias: string): string {
+  return resolutionStatusNameSql(schema, alias);
 }
 
 function relationSelect(schema: string, alias = "r"): string {
@@ -118,10 +125,12 @@ export async function getRelationByPk(pk: string | number): Promise<RelationWith
       sources: string[] | null;
       subject_id: string;
       subject_id_type: string;
+      subject_resolution_status: string | null;
       subject_entity_type: string | null;
       subject_taxonomy_id: string | null;
       object_id: string;
       object_id_type: string;
+      object_resolution_status: string | null;
       object_entity_type: string | null;
       object_taxonomy_id: string | null;
     }>(
@@ -129,10 +138,12 @@ export async function getRelationByPk(pk: string | number): Promise<RelationWith
          ${relationSelect(schema, "r")},
          subject.canonical_identifier AS subject_id,
          ${canonicalTypeSql(schema, "subject")} AS subject_id_type,
+         ${resolutionStatusSql(schema, "subject")} AS subject_resolution_status,
          ${entityTypeSql(schema, "subject")} AS subject_entity_type,
          subject.taxonomy_id AS subject_taxonomy_id,
          object.canonical_identifier AS object_id,
          ${canonicalTypeSql(schema, "object")} AS object_id_type,
+         ${resolutionStatusSql(schema, "object")} AS object_resolution_status,
          ${entityTypeSql(schema, "object")} AS object_entity_type,
          object.taxonomy_id AS object_taxonomy_id
        FROM ${schema}.relation r
@@ -151,6 +162,7 @@ export async function getRelationByPk(pk: string | number): Promise<RelationWith
         entity_id: row.subject_entity_id,
         id: row.subject_id,
         id_type: row.subject_id_type,
+        resolution_status: row.subject_resolution_status,
         entity_type: row.subject_entity_type,
         taxonomy_id: row.subject_taxonomy_id,
       }),
@@ -158,6 +170,7 @@ export async function getRelationByPk(pk: string | number): Promise<RelationWith
         entity_id: row.object_entity_id,
         id: row.object_id,
         id_type: row.object_id_type,
+        resolution_status: row.object_resolution_status,
         entity_type: row.object_entity_type,
         taxonomy_id: row.object_taxonomy_id,
       }),

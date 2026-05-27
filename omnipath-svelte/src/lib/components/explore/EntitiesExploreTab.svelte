@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Box, Check, Eye, Filter, Link, Plus, X } from '@lucide/svelte';
+	import { AlertTriangle, Box, Check, Eye, Filter, Link, Plus, X } from '@lucide/svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Card, CardContent } from '$lib/components/ui/card/index.js';
@@ -14,7 +14,8 @@
 		getEntityPublicId,
 		getEntitySecondaryName,
 		getEntityTypeLabel,
-		getIdentifierDisplayTypeForValue
+		getIdentifierDisplayTypeForValue,
+		isUnresolvedEntity
 	} from '$lib/entities/display';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
@@ -456,7 +457,8 @@
 	{@const entityTypeLabel = getEntityTypeLabel(result)}
 	{@const selected = selection.isSelected(publicId)}
 	{@const entityTypeIcon = getEntityTypeEmoji(entityTypeLabel)}
-	<div class="w-full max-w-md overflow-hidden rounded-lg border border-border bg-card">
+	{@const unresolved = isUnresolvedEntity(result)}
+	<div class="w-full max-w-md overflow-hidden rounded-lg border {unresolved ? 'border-dashed border-amber-300/90 bg-amber-50/35 dark:border-amber-700/70 dark:bg-amber-950/10' : 'border-border bg-card'}">
 		<div class="flex items-center gap-3.5 px-4 py-3">
 			{#if entityTypeIcon}
 				<span class="flex size-5 shrink-0 items-center justify-center text-base leading-none" aria-hidden="true">
@@ -483,6 +485,12 @@
 				<span class="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground" title="Relations involving this entity">
 					<Link class="size-3.5" />
 					{(result.relationCount || 0).toLocaleString()}
+				</span>
+			{/if}
+			{#if unresolved}
+				<span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/80 bg-amber-100/70 px-1.5 py-1 text-[10px] font-medium leading-none text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200" title="Unresolved entity">
+					<AlertTriangle class="size-3" />
+					Unresolved
 				</span>
 			{/if}
 		</div>
