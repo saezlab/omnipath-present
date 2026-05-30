@@ -81,12 +81,62 @@ function entitySearchCountSql(alias = "rc"): string {
   return `COALESCE(${alias}.search_count, ${alias}.relation_count, 0)`;
 }
 
-function matchingEntityIdentifiersSql(schema: string, queryParam: string): string {
-  return `SELECT DISTINCT eil.entity_id
-    FROM ${schema}.identifier_evidence i
-    JOIN ${schema}.entity_identifier_lookup eil
-      ON eil.identifier_id = i.identifier_id
-    WHERE LOWER(i.value) = ${queryParam}`;
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function matchingEntityIdentifiersSql(
+  schema: string,
+  queryParam: string,
+  containsPatternParam?: string,
+): string {
+  const containsFallbackSql = containsPatternParam
+    ? `
+    UNION
+    SELECT entity_id
+    FROM contains_matches
+    WHERE NOT EXISTS (SELECT 1 FROM exact_matches)`
+    : "";
+
+  const containsCteSql = containsPatternParam
+    ? `,
+    contains_identifier_matches AS MATERIALIZED (
+      SELECT DISTINCT eil.entity_id
+      FROM ${schema}.identifier_evidence i
+      JOIN ${schema}.entity_identifier_lookup eil
+        ON eil.identifier_id = i.identifier_id
+      WHERE LOWER(i.value) LIKE ${containsPatternParam} ESCAPE '\\'
+    ),
+    contains_canonical_matches AS MATERIALIZED (
+      SELECT e.entity_id
+      FROM ${schema}.entity e
+      WHERE LOWER(e.canonical_identifier) LIKE ${containsPatternParam} ESCAPE '\\'
+    ),
+    contains_matches AS MATERIALIZED (
+      SELECT entity_id FROM contains_identifier_matches
+      UNION
+      SELECT entity_id FROM contains_canonical_matches
+    )`
+    : "";
+
+  return `WITH exact_identifier_matches AS MATERIALIZED (
+      SELECT DISTINCT eil.entity_id
+      FROM ${schema}.identifier_evidence i
+      JOIN ${schema}.entity_identifier_lookup eil
+        ON eil.identifier_id = i.identifier_id
+      WHERE LOWER(i.value) = ${queryParam}
+    ),
+    exact_canonical_matches AS MATERIALIZED (
+      SELECT e.entity_id
+      FROM ${schema}.entity e
+      WHERE LOWER(e.canonical_identifier) = ${queryParam}
+    ),
+    exact_matches AS MATERIALIZED (
+      SELECT entity_id FROM exact_identifier_matches
+      UNION
+      SELECT entity_id FROM exact_canonical_matches
+    )${containsCteSql}
+    SELECT entity_id FROM exact_matches${containsFallbackSql}`;
 }
 
 function entityBaseSelect(schema: string, alias = "e"): string {
@@ -518,9 +568,13 @@ export async function searchEntities({
 
     const trimmedQuery = query.trim();
     if (trimmedQuery) {
-      const queryParam = pushParam(trimmedQuery.toLowerCase());
+      const normalizedQuery = trimmedQuery.toLowerCase();
+      const queryParam = pushParam(normalizedQuery);
+      const containsPatternParam = normalizedQuery.length >= 3
+        ? pushParam(`%${escapeLikePattern(normalizedQuery)}%`)
+        : undefined;
       filterCtes.push(`query_entity_ids AS MATERIALIZED (
-        ${matchingEntityIdentifiersSql(schema, queryParam)}
+        ${matchingEntityIdentifiersSql(schema, queryParam, containsPatternParam)}
       )`);
       entityJoins.push("JOIN query_entity_ids query_ids ON query_ids.entity_id = e.entity_id");
     }
@@ -1276,10 +1330,14 @@ export async function getScopedEntityFacetCounts({
     }
 
     if (trimmedQuery) {
-      const queryParam = pushParam(trimmedQuery.toLowerCase());
+      const normalizedQuery = trimmedQuery.toLowerCase();
+      const queryParam = pushParam(normalizedQuery);
+      const containsPatternParam = normalizedQuery.length >= 3
+        ? pushParam(`%${escapeLikePattern(normalizedQuery)}%`)
+        : undefined;
       ctes.push(`query_bitmap AS MATERIALIZED (
         SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM (${matchingEntityIdentifiersSql(schema, queryParam)}) query_entities
+        FROM (${matchingEntityIdentifiersSql(schema, queryParam, containsPatternParam)}) query_entities
         JOIN ${schema}.entity_bitmap_id bitmap
           ON bitmap.entity_id = query_entities.entity_id
       )`);
