@@ -1,5 +1,5 @@
 import { getPool } from "$lib/server/db/client";
-import type { Entity, EntityIdentifier } from "$lib/drizzle";
+import type { Entity, EntityIdentifier, EntityOntologyHierarchy } from "$lib/drizzle";
 import { normalizeStringValues } from "$lib/entity-public-id";
 import { parsePublicEntityIds } from "$lib/server/entity-public-id";
 import {
@@ -11,11 +11,11 @@ import {
 
 export type EntityWithIdentifiers = Entity & {
   identifiers: EntityIdentifier[];
+  ontologyHierarchy?: EntityOntologyHierarchy | null;
   identifiersTotal?: number;
   relationCount?: number;
 };
 
-const CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012";
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 const INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES = 1000;
 const INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES = 5000;
@@ -76,6 +76,10 @@ function resolutionStatusSql(schema: string, alias = "e"): string {
   return resolutionStatusNameSql(schema, alias);
 }
 
+function entitySearchCountSql(alias = "rc"): string {
+  return `COALESCE(${alias}.search_count, ${alias}.relation_count, 0)`;
+}
+
 function matchingEntityIdentifiersSql(schema: string, queryParam: string): string {
   return `SELECT DISTINCT eil.entity_id
     FROM ${schema}.identifier_evidence i
@@ -92,7 +96,7 @@ function ontologyTermEntityPredicate(schema: string, placeholder: string, entity
   return `EXISTS (
     SELECT 1
     FROM ${schema}.relation r
-    JOIN ${schema}.ontology_terms terms ON terms.term_entity_id = r.subject_entity_id
+    JOIN ${schema}.entity_ontology_term terms ON terms.term_entity_id = r.subject_entity_id
     WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
       AND terms.term_id = ANY(${placeholder}::text[])
       AND r.object_entity_id = ${entityAlias}.entity_id
@@ -142,7 +146,7 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): 
          NULL::uuid AS identifier_id,
          'Name:OM:0200' AS identifier_type,
          terms.label AS identifier
-       FROM ${schema}.ontology_terms terms
+       FROM ${schema}.entity_ontology_term terms
        WHERE terms.term_entity_id = ANY($1::uuid[])
          AND terms.label IS NOT NULL
          AND terms.label <> ''
@@ -217,7 +221,7 @@ async function getIdentifierPageForEntityPks(
            'Name:OM:0200' AS identifier_type,
            terms.label AS identifier
          FROM requested
-         JOIN ${schema}.ontology_terms terms
+         JOIN ${schema}.entity_ontology_term terms
            ON terms.term_entity_id = requested.entity_id
          WHERE terms.label IS NOT NULL
            AND terms.label <> ''
@@ -269,18 +273,85 @@ async function getIdentifierPageForEntityPks(
   }
 }
 
+async function getOntologyHierarchyHintsForEntityPks(
+  schema: string,
+  entityPks: string[],
+): Promise<Map<string, EntityOntologyHierarchy>> {
+  const map = new Map<string, EntityOntologyHierarchy>();
+  if (entityPks.length === 0) return map;
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      term_entity_id: string | number;
+      term_id: string;
+      ontology_prefix: string | null;
+      label: string | null;
+      definition: string | null;
+      ontology_id: string | null;
+      child_count: string | number | null;
+      parent_count: string | number | null;
+    }>(
+      `WITH parent_counts AS (
+         SELECT subject_entity_id AS term_entity_id, COUNT(*) AS parent_count
+         FROM ${schema}.entity_ontology_relation
+         WHERE subject_entity_id = ANY($1::uuid[])
+         GROUP BY subject_entity_id
+       )
+       SELECT DISTINCT ON (terms.term_entity_id)
+         terms.term_entity_id,
+         terms.term_id,
+         terms.ontology_prefix,
+         terms.label,
+         terms.definition,
+         terms.ontology_id,
+         terms.child_count,
+         COALESCE(parent_counts.parent_count, 0)::bigint AS parent_count
+       FROM ${schema}.entity_ontology_term terms
+       LEFT JOIN parent_counts
+         ON parent_counts.term_entity_id = terms.term_entity_id
+       WHERE terms.term_entity_id = ANY($1::uuid[])
+         AND (COALESCE(terms.child_count, 0) > 0 OR COALESCE(parent_counts.parent_count, 0) > 0)
+       ORDER BY
+         terms.term_entity_id,
+         (COALESCE(terms.child_count, 0) + COALESCE(parent_counts.parent_count, 0)) DESC,
+         terms.ontology_id ASC,
+         terms.term_id ASC`,
+      [entityPks],
+    );
+
+    for (const row of result.rows) {
+      const entityPk = String(row.term_entity_id);
+      map.set(entityPk, {
+        termId: row.term_id,
+        ontologyPrefix: row.ontology_prefix,
+        label: row.label,
+        definition: row.definition,
+        ontologyId: row.ontology_id,
+        childCount: Number(row.child_count || 0),
+        parentCount: Number(row.parent_count || 0),
+      });
+    }
+    return map;
+  } finally {
+    client.release();
+  }
+}
+
 async function hydrateEntities(
   schema: string,
   rows: Array<Entity & { relationCount?: number }>,
   options: { identifierLimit?: number } = {},
 ): Promise<EntityWithIdentifiers[]> {
   const entityPks = rows.map((row) => row.entityPk);
+  const ontologyHierarchyByEntityPk = await getOntologyHierarchyHintsForEntityPks(schema, entityPks);
   if (options.identifierLimit != null) {
     const { identifiersByEntityPk, totalsByEntityPk } =
       await getIdentifierPageForEntityPks(schema, entityPks, options.identifierLimit);
     return rows.map((row) => ({
       ...row,
       identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+      ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
       identifiersTotal: totalsByEntityPk.get(row.entityPk) ?? 0,
     }));
   }
@@ -289,6 +360,7 @@ async function hydrateEntities(
   return rows.map((row) => ({
     ...row,
     identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+    ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
     identifiersTotal: identifiersByEntityPk.get(row.entityPk)?.length ?? 0,
   }));
 }
@@ -328,7 +400,7 @@ export async function getEntitiesByPublicIds(
       sources: string[] | null;
       relation_count: string | number | null;
     }>(
-      `SELECT ${entityBaseSelect(schema)}, COALESCE(rc.relation_count, 0)::bigint AS relation_count
+      `SELECT ${entityBaseSelect(schema)}, ${entitySearchCountSql("rc")}::bigint AS relation_count
        FROM ${schema}.entity e
        LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
        WHERE ${whereParts.join(" OR ")}
@@ -359,7 +431,7 @@ export async function getEntitiesByPks(pks: Array<string | number>): Promise<Ent
       sources: string[] | null;
       relation_count: string | number | null;
     }>(
-      `SELECT ${entityBaseSelect(schema)}, COALESCE(rc.relation_count, 0)::bigint AS relation_count
+      `SELECT ${entityBaseSelect(schema)}, ${entitySearchCountSql("rc")}::bigint AS relation_count
        FROM ${schema}.entity e
        LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
        WHERE e.entity_id = ANY($1::uuid[])
@@ -386,7 +458,6 @@ export async function searchEntities({
     sources?: string[];
     ncbi_tax_id?: string[];
     ontology_terms?: string[];
-    include_cv_terms?: boolean;
   };
   limit?: number;
   cursor?: EntitySearchCursor | null;
@@ -419,8 +490,7 @@ export async function searchEntities({
   const client = await getPool().connect();
 
   try {
-    const includeCvTerms = filters.include_cv_terms === true;
-    const whereParts: string[] = includeCvTerms ? [] : [`${entityTypeSql(schema)} IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'`];
+    const whereParts: string[] = [];
     const params: unknown[] = [];
     const pushParam = (value: unknown): string => {
       params.push(value);
@@ -518,7 +588,7 @@ export async function searchEntities({
          ${whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : ""}
        ),
        matched AS (
-         SELECT me.*, COALESCE(rc.relation_count, 0)::bigint AS relation_count
+         SELECT me.*, ${entitySearchCountSql("rc")}::bigint AS relation_count
          FROM matched_entities me
          LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = me.entity_id
        ),
@@ -627,7 +697,7 @@ async function searchEntitiesByRelationCount({
 }): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const normalizedCursor = normalizeEntitySearchCursor(cursor);
   // First-page landing (no cursor, no query, no filters): stratify across
-  // entity types so the user sees a mix of small molecules, proteins,
+  // entity types so the user sees a mix of chemicals, proteins,
   // complexes, etc. Without this, the highest relation_count rows happen to
   // cluster within a single entity_type and the landing card view ends up
   // looking like e.g. all meat products.
@@ -650,7 +720,7 @@ async function searchEntitiesByRelationCount({
   let cursorWhere = "";
   if (normalizedCursor) {
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = "AND (rc.relation_count < $1::bigint OR (rc.relation_count = $1::bigint AND rc.entity_id > $2::uuid))";
+    cursorWhere = `AND (${entitySearchCountSql("rc")} < $1::bigint OR (${entitySearchCountSql("rc")} = $1::bigint AND e.entity_id > $2::uuid))`;
   }
   params.push(queryLimit);
   const limitParam = `$${params.length}`;
@@ -674,15 +744,15 @@ async function searchEntitiesByRelationCount({
          ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
-         ARRAY[]::text[] AS sources,
-         rc.relation_count
-       FROM ${schema}.entity_relation_counts rc
-       JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
+         ${entityFacetSourcesSql(schema, "e")} AS sources,
+         ${entitySearchCountSql("rc")}::bigint AS relation_count
+       FROM ${schema}.entity e
+       LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
-       WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
+       WHERE TRUE
          ${cursorWhere}
-       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       ORDER BY ${entitySearchCountSql("rc")} DESC, e.entity_id ASC
        LIMIT ${limitParam}`,
       params,
     );
@@ -760,7 +830,7 @@ async function searchEntitiesByRelationCountAndEntityType({
   let cursorWhere = "";
   if (normalizedCursor) {
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = "AND (rc.relation_count < $2::bigint OR (rc.relation_count = $2::bigint AND rc.entity_id > $3::uuid))";
+    cursorWhere = "AND (rc.search_count < $2::bigint OR (rc.search_count = $2::bigint AND rc.entity_id > $3::uuid))";
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
@@ -785,15 +855,14 @@ async function searchEntitiesByRelationCountAndEntityType({
          et.name AS entity_type,
          e.taxonomy_id,
          ${entityFacetSourcesSql(schema, "e")} AS sources,
-         rc.relation_count
+         rc.search_count AS relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE et.name = ANY($1::text[])
-         AND et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
          ${cursorWhere}
-       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       ORDER BY rc.search_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
       params,
     );
@@ -861,10 +930,10 @@ async function searchEntitiesByRelationCountAndFacetFilters({
   if (normalizedCursor) {
     const countParam = pushParam(normalizedCursor.relationCount);
     const pkParam = pushParam(normalizedCursor.entityPk);
-    const relationCountSql = useBitmapDrivenSearch ? "COALESCE(rc.relation_count, 0)" : "rc.relation_count";
+    const relationCountSql = useBitmapDrivenSearch ? entitySearchCountSql("rc") : "rc.search_count";
     const entityIdSql = useBitmapDrivenSearch ? "e.entity_id" : "rc.entity_id";
     cursorWhere = `AND (${relationCountSql} < ${countParam}::bigint OR (${relationCountSql} = ${countParam}::bigint AND ${entityIdSql} > ${pkParam}::uuid))`;
-    positiveCursorWhere = `WHERE (rc.relation_count < ${countParam}::bigint OR (rc.relation_count = ${countParam}::bigint AND entity_bitmap.entity_id > ${pkParam}::uuid))`;
+    positiveCursorWhere = `WHERE (rc.search_count < ${countParam}::bigint OR (rc.search_count = ${countParam}::bigint AND entity_bitmap.entity_id > ${pkParam}::uuid))`;
     if (normalizedCursor.relationCount === 0) {
       zeroCursorWhere = `WHERE entity_bitmap.entity_id > ${pkParam}::uuid`;
     }
@@ -887,19 +956,12 @@ async function searchEntitiesByRelationCountAndFacetFilters({
         relation_count: string | number | null;
       }>(
         `WITH ${filterCteSql},
-         non_cv_entity_bitmap AS MATERIALIZED (
-           SELECT COALESCE(rb_or_agg(entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-           FROM ${schema}.facet_entity_bitmap
-           WHERE facet_name = 'entity_type'
-             AND facet_value <> '${CV_TERM_ENTITY_TYPE}'
-         ),
          combined_filter_bitmap AS MATERIALIZED (
-           SELECT rb_and(${bitmapIntersection(filterBitmaps)}, non_cv_entity_bitmap.bitmap) AS bitmap
+           SELECT ${bitmapIntersection(filterBitmaps)} AS bitmap
            FROM ${filterCteNames.join("\nCROSS JOIN ")}
-           CROSS JOIN non_cv_entity_bitmap
          ),
          relation_count_bitmap AS MATERIALIZED (
-           SELECT rb_build_agg(entity_bitmap.bitmap_id) AS bitmap
+           SELECT COALESCE(rb_build_agg(entity_bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
            FROM ${schema}.entity_relation_counts rc
            JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
          ),
@@ -914,13 +976,13 @@ async function searchEntitiesByRelationCountAndFacetFilters({
            CROSS JOIN relation_count_bitmap
          ),
          positive_page AS MATERIALIZED (
-           SELECT entity_bitmap.entity_id, rc.relation_count
+           SELECT entity_bitmap.entity_id, rc.search_count AS relation_count
            FROM positive_filter_bitmap
            CROSS JOIN LATERAL rb_iterate(positive_filter_bitmap.bitmap) matched(bitmap_id)
            JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.bitmap_id = matched.bitmap_id
            JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = entity_bitmap.entity_id
            ${positiveCursorWhere}
-           ORDER BY rc.relation_count DESC, entity_bitmap.entity_id ASC
+           ORDER BY rc.search_count DESC, entity_bitmap.entity_id ASC
            LIMIT ${limitParam}
          ),
          zero_page AS MATERIALIZED (
@@ -981,17 +1043,16 @@ async function searchEntitiesByRelationCountAndFacetFilters({
          et.name AS entity_type,
          e.taxonomy_id,
          ${entityFacetSourcesSql(schema, "e")} AS sources,
-         rc.relation_count
+         rc.search_count AS relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        ${filterJoins.join("\n")}
-       WHERE et.name IS DISTINCT FROM '${CV_TERM_ENTITY_TYPE}'
-         AND rb_contains(${bitmapIntersection(filterBitmaps)}, entity_bitmap.bitmap_id)
+       WHERE rb_contains(${bitmapIntersection(filterBitmaps)}, entity_bitmap.bitmap_id)
          ${cursorWhere}
-       ORDER BY rc.relation_count DESC, rc.entity_id ASC
+       ORDER BY rc.search_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
       params,
     );
@@ -1042,7 +1103,6 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
            SELECT DISTINCT ${entityTypeSql(schema)} AS value
            FROM ${schema}.entity e
            WHERE ${entityTypeSql(schema)} IS NOT NULL
-             AND ${entityTypeSql(schema)} <> '${CV_TERM_ENTITY_TYPE}'
          ) t`,
       );
       const sourceResult = await client.query<{ values: string[] | null }>(
@@ -1082,7 +1142,6 @@ export type EntityFacetCount = {
 export async function getScopedEntityFacetCounts({
   entityPks = [],
   annotationTermIds = [],
-  includeCvTerms = false,
   entityTypes = [],
   sources = [],
   ncbi_tax_id = [],
@@ -1091,7 +1150,6 @@ export async function getScopedEntityFacetCounts({
 }: {
   entityPks?: Array<string | number>;
   annotationTermIds?: string[];
-  includeCvTerms?: boolean;
   entityTypes?: string[];
   sources?: string[];
   ncbi_tax_id?: string[];
@@ -1134,7 +1192,6 @@ export async function getScopedEntityFacetCounts({
                   END AS scoped_count
            FROM ${schema}.facet_entity_bitmap f
            WHERE f.facet_name = 'entity_type'
-             AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'
            UNION ALL
            SELECT 'source' AS facet_name,
                   f.facet_value,
@@ -1184,16 +1241,12 @@ export async function getScopedEntityFacetCounts({
         COALESCE(
           rb_or_agg(entity_bitmap) FILTER (WHERE facet_name IN ('entity_type', 'source', 'taxonomy_id')),
           rb_build(ARRAY[]::integer[])
-        ) AS all_bitmap,
-        COALESCE(
-          rb_or_agg(entity_bitmap) FILTER (WHERE facet_name = 'entity_type' AND facet_value = '${CV_TERM_ENTITY_TYPE}'),
-          rb_build(ARRAY[]::integer[])
-        ) AS cv_term_bitmap
+        ) AS all_bitmap
       FROM ${schema}.facet_entity_bitmap
       WHERE facet_name IN ('entity_type', 'source', 'taxonomy_id')
     ),
     base_entity_bitmap AS MATERIALIZED (
-      SELECT ${includeCvTerms ? "all_bitmap" : "rb_andnot(all_bitmap, cv_term_bitmap)"} AS bitmap
+      SELECT all_bitmap AS bitmap
       FROM base_entity_bitmaps
     )`);
 
@@ -1201,9 +1254,10 @@ export async function getScopedEntityFacetCounts({
     if (normalizedTermIds.length > 0) {
       const termParam = pushParam(normalizedTermIds);
       scopeParts.push(`SELECT b.entity_bitmap AS bitmap
-        FROM ${schema}.ontology_terms terms
+        FROM ${schema}.entity_ontology_term terms
         JOIN ${schema}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${termParam}::text[])`);
+        WHERE terms.term_id = ANY(${termParam}::text[])
+           OR terms.term_aliases && ${termParam}::text[]`);
     }
     if (normalizedEntityPks.length > 0) {
       const ePkParam = pushParam(normalizedEntityPks);
@@ -1281,7 +1335,7 @@ export async function getScopedEntityFacetCounts({
       WHERE f.facet_name = '${facetName}' ${extraWhere}`;
 
     const subqueries = [
-      facetCountSubquery("entity_type", typeScope, includeCvTerms ? "" : `AND f.facet_value <> '${CV_TERM_ENTITY_TYPE}'`),
+      facetCountSubquery("entity_type", typeScope),
       facetCountSubquery("source", sourceScope),
       facetCountSubquery("taxonomy_id", taxonomyScope),
     ];

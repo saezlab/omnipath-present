@@ -269,9 +269,10 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
     if (values.length === 0) return;
     const param = pushParam(values, "text[]");
     bitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.ontology_terms terms
+      FROM ${schema}.entity_ontology_term terms
       JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-      WHERE terms.term_id = ANY(${param})`);
+      WHERE terms.term_id = ANY(${param})
+         OR terms.term_aliases && ${param}`);
   };
 
   const relationCategories = normalizeStringValues(filters.relationCategories);
@@ -343,14 +344,16 @@ function buildRelationBitmapQuery(filters: RelationFilters, schema: string) {
           THEN COALESCE(rb_and_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[]))
           ELSE rb_build(ARRAY[]::integer[])
         END AS bitmap
-        FROM ${schema}.ontology_terms terms
+        FROM ${schema}.entity_ontology_term terms
         JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${param})`);
+        WHERE terms.term_id = ANY(${param})
+           OR terms.term_aliases && ${param}`);
     } else {
       scopeBitmapParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${schema}.ontology_terms terms
+        FROM ${schema}.entity_ontology_term terms
         JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${param})`);
+        WHERE terms.term_id = ANY(${param})
+           OR terms.term_aliases && ${param}`);
     }
   }
 
@@ -682,14 +685,16 @@ export async function getScopedRelationFacetCounts({
             THEN COALESCE(rb_and_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[]))
             ELSE rb_build(ARRAY[]::integer[])
           END AS bitmap
-          FROM ${schema}.ontology_terms terms
+          FROM ${schema}.entity_ontology_term terms
           JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-          WHERE terms.term_id = ANY(${termParam}::text[])`);
+          WHERE terms.term_id = ANY(${termParam}::text[])
+             OR terms.term_aliases && ${termParam}::text[]`);
       } else {
         scopeParts.push(`SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-          FROM ${schema}.ontology_terms terms
+          FROM ${schema}.entity_ontology_term terms
           JOIN ${schema}.annotation_term_direct_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
-          WHERE terms.term_id = ANY(${termParam}::text[])`);
+          WHERE terms.term_id = ANY(${termParam}::text[])
+             OR terms.term_aliases && ${termParam}::text[]`);
       }
     }
     if (normalizedEntityPks.length > 0) {

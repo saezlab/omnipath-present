@@ -1,5 +1,6 @@
 import type { SearchFilters } from "$lib/types/search";
 import type { InteractionDetailsData, InteractionListRow } from "$lib/types/interactions";
+import type { EntityOntologyHierarchy } from "$lib/drizzle";
 
 export type EntitySearchCursor = { relationCount: number; entityPk: string };
 export type SelectionScopeMode = "union" | "intersection";
@@ -21,6 +22,7 @@ export async function fetchSelectionScope(params: {
     entityPks: string[];
     seedEntityPks: string[];
     termEntityPks: string[];
+    ontologyTermIds: string[];
     criteriaCount: number;
     expandedEntityCount: number;
   }>;
@@ -60,6 +62,7 @@ export async function fetchEntitiesSearch(params: {
         entityAttributes: unknown;
         sources: string[];
         relationCount?: number;
+        ontologyHierarchy?: EntityOntologyHierarchy | null;
         identifiersTotal?: number;
         identifiers: Array<{
           id?: string;
@@ -93,6 +96,7 @@ export async function fetchEntitiesSearch(params: {
       entityAttributes: unknown;
       sources: string[];
       relationCount?: number;
+      ontologyHierarchy?: EntityOntologyHierarchy | null;
       identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
@@ -174,6 +178,8 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
       taxonomyId: string | null;
       entityAttributes: unknown;
       sources: string[];
+      relationCount?: number;
+      ontologyHierarchy?: EntityOntologyHierarchy | null;
       identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
@@ -201,6 +207,8 @@ export async function fetchEntitiesByPks(pks: Array<string | number>) {
     taxonomyId: string | null;
     entityAttributes: unknown;
     sources: string[];
+    relationCount?: number;
+    ontologyHierarchy?: EntityOntologyHierarchy | null;
     identifiersTotal?: number;
     identifiers: Array<{ id?: string; entityPk: string; identifier: string; identifierType: string }>;
   }> };
@@ -273,6 +281,7 @@ export async function fetchScopedOntologySearch(params: {
       sources: string[];
       annotatedEntityCount: number;
       annotatedRelationCount: number;
+      annotatedItemCount: number;
     }>
   >;
 }
@@ -324,7 +333,6 @@ export async function fetchTerms(termIds: string[]) {
 export async function fetchScopedEntityFacetCounts(params: {
   entityIds?: Array<string | number>;
   annotationTermIds?: string[];
-  includeCvTerms?: boolean;
   entityTypes?: string[];
   sources?: string[];
   ncbi_tax_id?: string[];

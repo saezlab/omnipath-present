@@ -53,7 +53,7 @@
   const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
   const selectedOntologyIds = $derived(filters.ontology_ids || []);
 
-  // Fetch ontology counts from annotation terms available in the current scope.
+  // Fetch ontology counts from terms associated with entities in the current scope.
   $effect(() => {
     const q = query;
     const ePks = selectedEntityPks || [];
@@ -166,8 +166,8 @@
 
   function entityCountTooltip(scoped: boolean) {
     return scoped
-      ? 'Entities in the current scope annotated with this term'
-      : 'Entities annotated with this term';
+      ? 'Entities in the current scope associated with this term'
+      : 'Entities associated with this term';
   }
 
   function relationCountTooltip(scoped: boolean) {
@@ -197,7 +197,7 @@
         {#if loadingOntologies}
           <p class="text-sm text-muted-foreground">Loading filters...</p>
         {:else}
-          <p class="text-sm text-muted-foreground">No filters available</p>
+          <p class="text-sm text-muted-foreground">No ontology filters available</p>
         {/if}
       {/each}
     </div>
@@ -274,7 +274,7 @@
                       <Tooltip.Content sideOffset={6}>{entityCountTooltip(isScoped)}</Tooltip.Content>
                     </Tooltip.Root>
                   {/if}
-                  {#if !isScoped && term.annotatedRelationCount > 0}
+                  {#if term.annotatedRelationCount > 0}
                     <Tooltip.Root>
                       <Tooltip.Trigger>
                         {#snippet child({ props })}
@@ -358,9 +358,9 @@
               {/if}
             {:else}
               {#if isScoped}
-                No annotation terms are available for the current entity scope.
+                No associated ontology terms are available for the current entity scope.
               {:else}
-                No annotation terms are available to browse right now.
+                No ontology terms are available to browse right now.
               {/if}
             {/if}
           </p>
@@ -385,7 +385,7 @@
         </SheetTrigger>
         <SheetContent side="left" class="w-[85%] overflow-y-auto sm:w-[400px]">
           <SheetHeader>
-            <SheetTitle>Annotation filters</SheetTitle>
+            <SheetTitle>Ontology filters</SheetTitle>
           </SheetHeader>
           <div class="pt-4">{@render filterSidebarContent()}</div>
         </SheetContent>

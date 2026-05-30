@@ -46,7 +46,7 @@ function normalizedEntityTypeLabel(entity: EntityLike): string {
 
 export function isResolverBackedEntity(entity: EntityLike): boolean {
   const typeLabel = normalizedEntityTypeLabel(entity);
-  return typeLabel === "protein" || isSmallMoleculeEntity(entity);
+  return typeLabel === "protein" || isChemicalEntity(entity);
 }
 
 export function isUnresolvedEntity(entity: EntityLike): boolean {
@@ -61,9 +61,10 @@ function isHashLikeIdentifier(value: string | null | undefined): boolean {
   return /^[a-f0-9-]{24,}$/i.test(text) && /[a-f]/i.test(text);
 }
 
-export function isSmallMoleculeEntity(entity: EntityLike): boolean {
+export function isChemicalEntity(entity: EntityLike): boolean {
   const typeLabel = normalizedEntityTypeLabel(entity);
-  return typeLabel === "smallmolecule"
+  return typeLabel === "chemical"
+    || typeLabel === "smallmolecule"
     || typeLabel === "compound"
     || typeLabel === "metabolite"
     || typeLabel === "drug"
@@ -320,7 +321,7 @@ export function getEntityDisplayName(entity: EntityLike): string {
     return getFallbackEntityName(names, geneSymbols) || getShortestAvailableIdentifier(entity)?.value || "Entity";
   }
 
-  if (isSmallMoleculeEntity(entity)) {
+  if (isChemicalEntity(entity)) {
     const preferredName = getPreferredName(names);
     const chebiId = getIdentifierByType(entity, ["chebi"]);
     const pubchemId = getIdentifierByType(entity, ["pubchem compound", "pubchem"]);
@@ -369,7 +370,7 @@ export function getEntitySecondaryName(entity: EntityLike): string | undefined {
     return names[0] && names[0] !== primary ? names[0] : undefined;
   }
 
-  if (isSmallMoleculeEntity(entity)) {
+  if (isChemicalEntity(entity)) {
     return getIdentifierByType(entity, ["chebi"])
       || getIdentifierByType(entity, ["pubchem compound", "pubchem"])
       || getIdentifierByType(entity, ["hmdb"])

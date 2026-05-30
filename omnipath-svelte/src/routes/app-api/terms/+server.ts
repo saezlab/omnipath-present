@@ -30,8 +30,10 @@ export const POST: RequestHandler = async ({ request }) => {
         definition: row.definition,
         namespace: row.ontologyPrefix,
         ontologyPrefix: row.ontologyPrefix,
+        ontologyId: row.ontologyId,
         synonyms: row.synonyms,
         sources: row.sources,
+        relationCount: row.relationCount,
       };
     }
 

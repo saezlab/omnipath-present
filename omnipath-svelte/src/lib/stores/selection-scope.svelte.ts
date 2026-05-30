@@ -11,6 +11,7 @@ export interface DerivedSelectionScope {
   scopedEntityIds: string[];
   scopedEntityPks: string[];
   termEntityPks: string[];
+  ontologyTermIds: string[];
   criteriaCount: number;
   expandedEntityCount: number;
 }
@@ -66,6 +67,7 @@ export function deriveSelectionScope(input: {
   annotationMatchedEntityIds?: Array<string | number>;
   scopedEntityPks?: Array<string | number>;
   termEntityPks?: Array<string | number>;
+  ontologyTermIds?: Array<string | number>;
   criteriaCount?: number;
   expandedEntityCount?: number;
 }): DerivedSelectionScope {
@@ -75,6 +77,7 @@ export function deriveSelectionScope(input: {
   const annotationMatchedEntityIds = normalizeIds(input.annotationMatchedEntityIds);
   const scopedEntityPks = normalizeIds(input.scopedEntityPks);
   const termEntityPks = normalizeIds(input.termEntityPks);
+  const ontologyTermIds = normalizeIds(input.ontologyTermIds);
 
   return {
     selectedEntityIds,
@@ -84,6 +87,7 @@ export function deriveSelectionScope(input: {
     scopedEntityIds: selectedEntityIds,
     scopedEntityPks,
     termEntityPks,
+    ontologyTermIds,
     criteriaCount: input.criteriaCount || 0,
     expandedEntityCount: input.expandedEntityCount || 0,
   };
@@ -107,6 +111,7 @@ export function getSelectionScope(
   let annotationMatchedEntityIds = $state<string[]>([]);
   let scopedEntityPks = $state<string[]>(shouldResolve ? [] : selectedEntityPks);
   let termEntityPks = $state<string[]>([]);
+  let ontologyTermIds = $state<string[]>([]);
   let criteriaCount = $state(0);
   let expandedEntityCount = $state(0);
   let isLoading = $state(shouldResolve);
@@ -115,6 +120,7 @@ export function getSelectionScope(
     if (!browser) {
       scopedEntityPks = selectedEntityPks;
       termEntityPks = [];
+      ontologyTermIds = [];
       criteriaCount = 0;
       expandedEntityCount = 0;
       return;
@@ -123,6 +129,7 @@ export function getSelectionScope(
       annotationMatchedEntityIds = [];
       scopedEntityPks = [];
       termEntityPks = [];
+      ontologyTermIds = [];
       criteriaCount = 0;
       expandedEntityCount = 0;
       return;
@@ -139,6 +146,7 @@ export function getSelectionScope(
       });
       scopedEntityPks = scope.entityPks;
       termEntityPks = scope.termEntityPks;
+      ontologyTermIds = scope.ontologyTermIds;
       criteriaCount = scope.criteriaCount;
       expandedEntityCount = scope.expandedEntityCount;
       annotationMatchedEntityIds = [];
@@ -147,6 +155,7 @@ export function getSelectionScope(
       annotationMatchedEntityIds = [];
       scopedEntityPks = selectedEntityPks;
       termEntityPks = [];
+      ontologyTermIds = [];
       criteriaCount = 0;
       expandedEntityCount = 0;
     } finally {
@@ -166,6 +175,7 @@ export function getSelectionScope(
       annotationMatchedEntityIds: resolveAnnotationEntities ? annotationMatchedEntityIds : [],
       scopedEntityPks,
       termEntityPks,
+      ontologyTermIds,
       criteriaCount,
       expandedEntityCount,
     })
@@ -179,6 +189,7 @@ export function getSelectionScope(
     get scopedEntityIds() { return scope.scopedEntityIds; },
     get scopedEntityPks() { return scope.scopedEntityPks; },
     get termEntityPks() { return scope.termEntityPks; },
+    get ontologyTermIds() { return scope.ontologyTermIds; },
     get criteriaCount() { return scope.criteriaCount; },
     get expandedEntityCount() { return scope.expandedEntityCount; },
     get isLoading() { return isLoading; },

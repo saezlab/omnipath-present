@@ -3,8 +3,7 @@
 
   const entityTypeConfig: Record<string, { icon: typeof CircleDot; color: string; bgColor: string; label: string }> = {
     protein: { icon: CircleDot, color: 'text-blue-500', bgColor: 'from-blue-50/80 to-blue-100/80 dark:from-blue-900/30 dark:to-blue-800/30', label: 'Protein' },
-    smallmolecule: { icon: FlaskConical, color: 'text-green-500', bgColor: 'from-green-50/80 to-green-100/80 dark:from-green-900/30 dark:to-green-800/30', label: 'Small Molecule' },
-    small_molecule: { icon: FlaskConical, color: 'text-green-500', bgColor: 'from-green-50/80 to-green-100/80 dark:from-green-900/30 dark:to-green-800/30', label: 'Small Molecule' },
+    chemical: { icon: FlaskConical, color: 'text-green-500', bgColor: 'from-green-50/80 to-green-100/80 dark:from-green-900/30 dark:to-green-800/30', label: 'Chemical' },
     compound: { icon: FlaskConical, color: 'text-green-500', bgColor: 'from-green-50/80 to-green-100/80 dark:from-green-900/30 dark:to-green-800/30', label: 'Compound' },
     metabolite: { icon: FlaskConical, color: 'text-green-500', bgColor: 'from-green-50/80 to-green-100/80 dark:from-green-900/30 dark:to-green-800/30', label: 'Metabolite' },
     drug: { icon: FlaskConical, color: 'text-purple-500', bgColor: 'from-purple-50/80 to-purple-100/80 dark:from-purple-900/30 dark:to-purple-800/30', label: 'Drug' },
@@ -22,7 +21,8 @@
     if (!entityType) return defaultConfig;
     const typeName = entityType.includes(':') ? entityType.split(':')[0] : entityType;
     const normalized = typeName.toLowerCase().replace(/[\s_]/g, '');
-    return entityTypeConfig[normalized] || defaultConfig;
+    const normalizedAlias = normalized === 'smallmolecule' ? 'chemical' : normalized;
+    return entityTypeConfig[normalizedAlias] || defaultConfig;
   }
 
   function isResolverBackedEntityType(entityType: string | undefined) {
@@ -30,6 +30,7 @@
     const typeName = entityType.includes(':') ? entityType.split(':')[0] : entityType;
     const normalized = typeName.toLowerCase().replace(/[\s_]/g, '');
     return normalized === 'protein'
+      || normalized === 'chemical'
       || normalized === 'smallmolecule'
       || normalized === 'compound'
       || normalized === 'metabolite'

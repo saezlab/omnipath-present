@@ -15,6 +15,7 @@ export type SelectionScopeResult = {
   entityPks: string[];
   seedEntityPks: string[];
   termEntityPks: string[];
+  ontologyTermIds: string[];
   criteriaCount: number;
   expandedEntityCount: number;
 };
@@ -50,45 +51,76 @@ export async function resolveSelectionScope({
   mode = "union",
 }: SelectionScopeInput): Promise<SelectionScopeResult> {
   const seedEntityPks = normalizeIds(entityPks);
-  const termIds = normalizeTermIds(annotationTermIds);
+  const requestedTermIds = normalizeTermIds(annotationTermIds);
   const criteria: Array<Set<string>> = [];
   let termEntityPks: string[] = [];
+  let ontologyTermIds: string[] = requestedTermIds;
+  const seedOntologyTermEntityPks = new Set<string>();
 
   const schema = process.env.OMNIPATH_PG_SCHEMA || "public";
   const client = await getPool().connect();
   try {
-    if (termIds.length > 0) {
+    if (seedEntityPks.length > 0) {
+      const result = await client.query<{ term_entity_id: string; term_id: string }>(
+        `SELECT DISTINCT terms.term_entity_id::text, terms.term_id
+         FROM ${schema}.entity_ontology_term terms
+         WHERE terms.term_entity_id = ANY($1::uuid[])
+         ORDER BY terms.term_entity_id::text, terms.term_id`,
+        [seedEntityPks],
+      );
+      const seedOntologyTermIds = result.rows.map((row) => row.term_id);
+      for (const row of result.rows) seedOntologyTermEntityPks.add(row.term_entity_id);
+      ontologyTermIds = Array.from(new Set([...requestedTermIds, ...seedOntologyTermIds]));
+    }
+
+    if (ontologyTermIds.length > 0) {
       const result = await client.query<{ term_entity_id: string }>(
-        `SELECT term_entity_id::text
-         FROM ${schema}.ontology_terms
-         WHERE term_id = ANY($1::text[])
-         ORDER BY term_id`,
-        [termIds],
+        `SELECT DISTINCT terms.term_entity_id::text
+         FROM ${schema}.entity_ontology_term terms
+         WHERE terms.term_id = ANY($1::text[])
+            OR terms.term_aliases && $1::text[]
+         ORDER BY terms.term_entity_id::text`,
+        [ontologyTermIds],
       );
       termEntityPks = Array.from(new Set(result.rows.map((row) => row.term_entity_id)));
     }
 
-    if (includeAssociatedEntities && termIds.length > 0) {
+    if (includeAssociatedEntities && ontologyTermIds.length > 0) {
       const result = await client.query<CriterionRow>(
-        `SELECT
-           terms.term_id AS criterion_id,
-           array_agg(DISTINCT r.object_entity_id::text ORDER BY r.object_entity_id::text) AS entity_ids
-         FROM ${schema}.ontology_terms terms
-         JOIN ${schema}.relation r
-           ON r.subject_entity_id = terms.term_entity_id
-         WHERE ${relationCategoryEqualsSql(schema, "r", "association")}
-           AND terms.term_id = ANY($1::text[])
-         GROUP BY terms.term_id`,
-        [termIds],
+        `WITH requested AS (
+           SELECT unnest($1::text[]) AS term_id
+         ),
+         term_bitmaps AS (
+           SELECT
+             requested.term_id AS criterion_id,
+             COALESCE(rb_or_agg(bitmap.entity_bitmap), rb_build(ARRAY[]::integer[])) AS entity_bitmap
+           FROM requested
+           JOIN ${schema}.entity_ontology_term terms
+             ON terms.term_id = requested.term_id
+             OR requested.term_id = ANY(terms.term_aliases)
+           JOIN ${schema}.annotation_term_entity_bitmap bitmap
+             ON bitmap.term_entity_id = terms.term_entity_id
+           GROUP BY requested.term_id
+         )
+         SELECT
+           term_bitmaps.criterion_id,
+           array_agg(entity_bitmap.entity_id::text ORDER BY entity_bitmap.entity_id::text) AS entity_ids
+         FROM term_bitmaps
+         CROSS JOIN LATERAL rb_iterate(term_bitmaps.entity_bitmap) matched(bitmap_id)
+         JOIN ${schema}.entity_bitmap_id entity_bitmap
+           ON entity_bitmap.bitmap_id = matched.bitmap_id
+         GROUP BY term_bitmaps.criterion_id`,
+        [ontologyTermIds],
       );
       const entitiesByTermId = new Map(result.rows.map((row) => [row.criterion_id, row.entity_ids || []]));
-      criteria.push(...termIds.map((termId) => new Set(entitiesByTermId.get(termId) || [])));
+      criteria.push(...ontologyTermIds.map((termId) => new Set(entitiesByTermId.get(termId) || [])));
     }
 
     if (seedEntityPks.length > 0) {
-      const entityCriterion = new Set(seedEntityPks);
+      const entitySeedPks = seedEntityPks.filter((entityPk) => !seedOntologyTermEntityPks.has(entityPk));
+      const entityCriterion = new Set(entitySeedPks);
 
-      if (includeMembersParticipants) {
+      if (includeMembersParticipants && entitySeedPks.length > 0) {
         const result = await client.query<CriterionRow>(
           `SELECT
              r.subject_entity_id::text AS criterion_id,
@@ -97,14 +129,34 @@ export async function resolveSelectionScope({
            WHERE r.subject_entity_id = ANY($1::uuid[])
              AND ${relationPredicateNameSql(schema, "r")} IN ('has_member', 'has_participant')
            GROUP BY r.subject_entity_id`,
-          [seedEntityPks],
+          [entitySeedPks],
         );
         for (const row of result.rows) {
           for (const entityPk of row.entity_ids || []) entityCriterion.add(entityPk);
         }
       }
 
-      criteria.push(entityCriterion);
+      if (includeAssociatedEntities && entitySeedPks.length > 0) {
+        const result = await client.query<CriterionRow>(
+          `WITH endpoint AS (
+             SELECT r.subject_entity_id AS criterion_id, r.object_entity_id AS entity_id
+             FROM ${schema}.relation r
+             WHERE r.subject_entity_id = ANY($1::uuid[])
+               AND ${relationCategoryEqualsSql(schema, "r", "association")}
+           )
+           SELECT
+             criterion_id::text,
+             array_agg(DISTINCT entity_id::text ORDER BY entity_id::text) AS entity_ids
+           FROM endpoint
+           GROUP BY criterion_id`,
+          [entitySeedPks],
+        );
+        for (const row of result.rows) {
+          for (const entityPk of row.entity_ids || []) entityCriterion.add(entityPk);
+        }
+      }
+
+      if (entitySeedPks.length > 0) criteria.push(entityCriterion);
     }
   } finally {
     client.release();
@@ -126,6 +178,7 @@ export async function resolveSelectionScope({
     entityPks: [...scopedSet],
     seedEntityPks: seedEntityPks,
     termEntityPks,
+    ontologyTermIds,
     criteriaCount: criteria.length,
     expandedEntityCount: expandedSet.size,
   };

@@ -5,7 +5,6 @@
 	import ExploreBrowserShell from '$lib/components/explore/ExploreBrowserShell.svelte';
 	import EntitiesExploreTab from '$lib/components/explore/EntitiesExploreTab.svelte';
 	import RelationsExploreTab from '$lib/components/explore/RelationsExploreTab.svelte';
-	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
 	import SelectionSheet from '$lib/components/selection/SelectionSheet.svelte';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import type { SearchFilters } from '$lib/types/search';
@@ -16,10 +15,10 @@
 	let draftQuery = $state('');
 	let entityFilters = $state<SearchFilters>({});
 	let interactionFilters = $state<SearchFilters>({});
-	let annotationFilters = $state<SearchFilters>({});
 	let selectionSheetOpen = $state(false);
 
-	const tab = $derived($page.url.searchParams.get('tab') || 'entity');
+	const rawTab = $derived($page.url.searchParams.get('tab') || 'entity');
+	const tab = $derived(rawTab === 'relations' ? 'relations' : 'entity');
 	const query = $derived($page.url.searchParams.get('q') || '');
 	const entityMatchFilters = $derived(entityFilters);
 
@@ -72,9 +71,7 @@
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
 
-	const searchPlaceholder = $derived(
-		tab === 'ontology' ? 'Search ontology terms…' : tab === 'relations' ? 'Search relations…' : 'Search entities…'
-	);
+	const searchPlaceholder = $derived(tab === 'relations' ? 'Search relations…' : 'Search entities…');
 </script>
 
 <svelte:window />
@@ -88,8 +85,7 @@
 	onTabChange={setTab}
 	tabs={[
 		{ value: 'entity', label: 'entity' },
-		{ value: 'relations', label: 'relations' },
-		{ value: 'ontology', label: 'ontology' }
+		{ value: 'relations', label: 'relations' }
 	]}
 	searchPlaceholder={searchPlaceholder}
 	bind:searchInputRef={inputRef}
@@ -97,10 +93,8 @@
 	{#snippet content()}
 		{#if tab === 'entity'}
 			<EntitiesExploreTab {query} filters={entityFilters} onFiltersChange={(f) => (entityFilters = f)} />
-		{:else if tab === 'relations'}
-			<RelationsExploreTab {query} entitySearchFilters={entityMatchFilters} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
 		{:else}
-			<AnnotationBrowserTab {query} filters={annotationFilters} onFiltersChange={(f) => (annotationFilters = f)} />
+			<RelationsExploreTab {query} entitySearchFilters={entityMatchFilters} filters={interactionFilters} onFilterChange={(f) => (interactionFilters = f)} />
 		{/if}
 	{/snippet}
 

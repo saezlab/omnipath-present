@@ -1,6 +1,7 @@
 export type HierarchyNode = {
   id: string;
   name?: string | null;
+  ontologyId?: string | null;
   distance?: number;
   children?: HierarchyNode[];
   open?: boolean;
@@ -11,7 +12,11 @@ export type HierarchyNode = {
 
 export type ApiTermInfo = {
   id: string;
+  termId?: string;
   name?: string | null;
+  label?: string | null;
   definition?: string | null;
   namespace?: string | null;
+  ontologyId?: string | null;
+  relationCount?: number;
 };

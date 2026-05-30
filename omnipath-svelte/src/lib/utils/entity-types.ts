@@ -2,7 +2,7 @@
 
 // Map entity types to emojis for visual distinction
 export const entityTypeEmojis: Record<string, string> = {
-    'SmallMolecule': '🧪',
+    'Chemical': '🧪',
     'Lipid': '💧',
     'Cv_term': '🏷️',
     'Protein': '🧬',
@@ -33,12 +33,14 @@ const normalizedEntityTypeMap: Record<string, string> = Object.keys(entityTypeEm
     return acc;
 }, {} as Record<string, string>);
 
+normalizedEntityTypeMap.smallmolecule = 'Chemical';
+
 /**
  * Get emoji for an entity type value.
  * Handles case-insensitive matching and various naming formats:
  * - "TypeName:ID" format (e.g., "Protein:12345")
  * - lowercase (e.g., "protein")
- * - space-separated (e.g., "small molecule")
+ * - space-separated (e.g., "physical entity")
  * - underscore-separated (e.g., "PHYSICAL_ENTITY")
  */
 export function getEntityTypeEmoji(value: string): string | undefined {

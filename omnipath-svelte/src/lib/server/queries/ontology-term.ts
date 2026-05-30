@@ -1,10 +1,6 @@
-import type { PoolClient } from "pg";
 import { getPool } from "$lib/server/db/client";
 import { toPublicEntityId } from "$lib/entity-public-id";
-import {
-  canonicalIdentifierTypeNameSql,
-  relationCategoryEqualsSql,
-} from "$lib/server/queries/sql-fragments";
+import { canonicalIdentifierTypeNameSql } from "$lib/server/queries/sql-fragments";
 
 export type OntologyTerm = {
   termId: string;
@@ -14,6 +10,15 @@ export type OntologyTerm = {
   synonyms: string[];
   ontologyId: string | null;
   sources: string[];
+  relationCount: number;
+};
+
+export type OntologyHierarchyNode = {
+  id: string;
+  name: string | null;
+  ontologyId?: string | null;
+  distance?: number;
+  children: OntologyHierarchyNode[];
 };
 
 type OntologyTermRow = {
@@ -24,12 +29,81 @@ type OntologyTermRow = {
   definition: string | null;
   synonyms: string[] | null;
   synonyms_text?: string | null;
+  term_aliases?: string[] | null;
+  identifiers_text?: string | null;
   ontology_id: string | null;
   sources: string[] | null;
+  child_count?: string | number | null;
+  relation_count?: string | number | null;
+  annotated_entity_count?: string | number | null;
+  annotated_relation_count?: string | number | null;
+  annotated_item_count?: string | number | null;
 };
 
+type OntologyHierarchyRow = {
+  term_entity_id: string;
+  term_id: string;
+  label: string | null;
+  ontology_id: string;
+  distance: string | number;
+};
+
+type OntologyHierarchyEdgeRow = {
+  parent_entity_id: string;
+  child_entity_id: string;
+};
+
+export type OntologyTermWithAnnotationCounts = OntologyTerm & {
+  annotatedEntityCount: number;
+  annotatedRelationCount: number;
+  annotatedItemCount: number;
+};
+
+export type ScopedOntologyTerm = OntologyTerm & {
+  annotatedEntityCount: number;
+  annotatedRelationCount: number;
+  annotatedItemCount: number;
+};
+
+export type OntologyPrefixCount = {
+  prefix: string;
+  scopedCount: number;
+};
+
+export type OntologySourceCount = {
+  source: string;
+  scopedCount: number;
+};
+
+export type OntologyIdCount = {
+  ontologyId: string;
+  scopedCount: number;
+};
+
+function ontologyTermsQuery(schema: string): string {
+  return `
+    SELECT
+      terms.term_entity_id,
+      terms.term_id,
+      terms.ontology_prefix,
+      terms.label,
+      terms.definition,
+      terms.synonyms,
+      terms.synonyms_text,
+      terms.term_aliases,
+      terms.identifiers_text,
+      terms.ontology_id,
+      terms.sources,
+      terms.child_count,
+      COALESCE(relation_counts.relation_count, 0)::bigint AS relation_count
+    FROM ${schema}.entity_ontology_term terms
+    LEFT JOIN ${schema}.entity_relation_counts relation_counts
+      ON relation_counts.entity_id = terms.term_entity_id
+  `;
+}
+
 function ontologyTermsTable(schema: string, alias = "terms"): string {
-  return `${schema}.ontology_terms ${alias}`;
+  return `(${ontologyTermsQuery(schema)}) ${alias}`;
 }
 
 function ontologyTermSearchPredicate(placeholder: string): string {
@@ -39,6 +113,45 @@ function ontologyTermSearchPredicate(placeholder: string): string {
     OR terms.definition ILIKE ${placeholder}
     OR terms.ontology_prefix ILIKE ${placeholder}
     OR terms.synonyms_text ILIKE ${placeholder}
+    OR terms.identifiers_text ILIKE ${placeholder}
+  )`;
+}
+
+function ontologyTermIdMatchPredicate(placeholder: string): string {
+  return `(
+    terms.term_id = ANY(${placeholder}::text[])
+    OR terms.term_aliases && ${placeholder}::text[]
+  )`;
+}
+
+function ontologyBitmapScopeCtes(schema: string, entityPksParam: string, termIdsParam: string): string {
+  return `entity_scope_bitmap AS MATERIALIZED (
+    SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+    FROM (
+      SELECT b.entity_bitmap AS bitmap
+      FROM ${ontologyTermsTable(schema)}
+      JOIN ${schema}.annotation_term_entity_bitmap b
+        ON b.term_entity_id = terms.term_entity_id
+      WHERE ${ontologyTermIdMatchPredicate(termIdsParam)}
+      UNION ALL
+      SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.entity_bitmap_id bitmap
+      WHERE bitmap.entity_id = ANY(${entityPksParam}::uuid[])
+    ) scope_parts
+  ),
+  relation_scope_bitmap AS MATERIALIZED (
+    SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+    FROM (
+      SELECT b.relation_bitmap AS bitmap
+      FROM ${ontologyTermsTable(schema)}
+      JOIN ${schema}.annotation_term_direct_relation_bitmap b
+        ON b.term_entity_id = terms.term_entity_id
+      WHERE ${ontologyTermIdMatchPredicate(termIdsParam)}
+      UNION ALL
+      SELECT COALESCE(rb_or_agg(b.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+      FROM ${schema}.entity_relation_bitmap b
+      WHERE b.entity_id = ANY(${entityPksParam}::uuid[])
+    ) scope_parts
   )`;
 }
 
@@ -51,6 +164,7 @@ function toOntologyTerm(row: OntologyTermRow): OntologyTerm {
     ontologyId: row.ontology_id,
     synonyms: row.synonyms || [],
     sources: row.sources || [],
+    relationCount: Number(row.relation_count || 0),
   };
 }
 
@@ -58,16 +172,54 @@ function normalizeIdValues(values: Array<string | number> | undefined): string[]
   return Array.from(new Set((values || []).map((value) => String(value).trim()).filter(Boolean)));
 }
 
-export type OntologyTermWithAnnotationCounts = OntologyTerm & {
-  annotatedEntityCount: number;
-  annotatedRelationCount: number;
-  annotatedItemCount: number;
-};
+function hierarchyPredicatesForOntology(ontologyId: string | null): string[] {
+  if (ontologyId === "chebi") return ["is_a"];
+  if (ontologyId === "reactome_pathways") return ["part_of"];
+  return ["is_a", "part_of"];
+}
 
-export type ScopedOntologyTerm = OntologyTerm & {
-  annotatedEntityCount: number;
-  annotatedRelationCount: number;
-};
+function ontologyScopeCtes(schema: string, entityPksParam: string, termIdsParam: string): string {
+  return `
+    selected_terms AS MATERIALIZED (
+      SELECT DISTINCT terms.term_entity_id
+      FROM ${ontologyTermsTable(schema)}
+      WHERE terms.term_id = ANY(${termIdsParam}::text[])
+         OR terms.term_aliases && ${termIdsParam}::text[]
+    ),
+    descendant_entities(entity_id) AS (
+      SELECT selected_terms.term_entity_id AS entity_id
+      FROM selected_terms
+      UNION
+      SELECT eor.subject_entity_id AS entity_id
+      FROM ${schema}.entity_ontology_relation eor
+      JOIN descendant_entities descendants
+        ON descendants.entity_id = eor.object_entity_id
+    ),
+    explicit_entities AS MATERIALIZED (
+      SELECT unnest(${entityPksParam}::uuid[]) AS entity_id
+    ),
+    scope_entities AS MATERIALIZED (
+      SELECT entity_id FROM explicit_entities
+      UNION
+      SELECT entity_id FROM descendant_entities
+    ),
+    scoped_term_entities AS MATERIALIZED (
+      SELECT entity_id AS term_entity_id FROM scope_entities
+      UNION
+      SELECT eor.object_entity_id AS term_entity_id
+      FROM ${schema}.entity_ontology_relation eor
+      JOIN scope_entities scope
+        ON scope.entity_id = eor.subject_entity_id
+    ),
+    scope_child_counts AS MATERIALIZED (
+      SELECT eor.object_entity_id AS term_entity_id, COUNT(DISTINCT eor.subject_entity_id) AS scoped_child_count
+      FROM ${schema}.entity_ontology_relation eor
+      JOIN scope_entities scope
+        ON scope.entity_id = eor.subject_entity_id
+      GROUP BY eor.object_entity_id
+    )
+  `;
+}
 
 export async function getOntologyTermsByIds(termIds: string[]): Promise<OntologyTerm[]> {
   const normalized = Array.from(new Set(termIds.map((t) => t.trim()).filter(Boolean)));
@@ -76,11 +228,235 @@ export async function getOntologyTermsByIds(termIds: string[]): Promise<Ontology
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query<OntologyTermRow>(
-      `SELECT terms.*
-       FROM ${ontologyTermsTable(S)}
-       WHERE terms.term_id = ANY($1::text[])
-       ORDER BY terms.term_id`,
+      `WITH requested AS (
+         SELECT unnest($1::text[]) AS term_id
+       )
+       SELECT DISTINCT ON (requested.term_id)
+         terms.term_entity_id,
+         requested.term_id,
+         terms.ontology_prefix,
+         terms.label,
+         terms.definition,
+         terms.synonyms,
+         terms.synonyms_text,
+         terms.term_aliases,
+         terms.identifiers_text,
+         terms.ontology_id,
+         terms.sources,
+         terms.child_count,
+         terms.relation_count
+       FROM requested
+       JOIN ${ontologyTermsTable(S)}
+         ON terms.term_id = requested.term_id
+        OR requested.term_id = ANY(terms.term_aliases)
+       ORDER BY requested.term_id, terms.term_id`,
       [normalized],
+    );
+    return result.rows.map(toOntologyTerm);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getOntologyHierarchyTree(
+  termId: string,
+  ontologyId?: string | null,
+  maxDepth = 8,
+): Promise<OntologyHierarchyNode | null> {
+  const normalizedTermId = termId.trim();
+  if (!normalizedTermId) return null;
+  const requestedOntologyId = ontologyId || null;
+
+  const client = await getPool().connect();
+  try {
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const result = await client.query<OntologyHierarchyRow>(
+      `WITH RECURSIVE seed AS MATERIALIZED (
+         SELECT
+           terms.term_entity_id,
+           terms.term_id,
+           terms.label,
+           terms.ontology_id
+         FROM ${ontologyTermsTable(S)}
+         WHERE (terms.term_id = $1 OR $1 = ANY(terms.term_aliases))
+           AND ($2::text IS NULL OR terms.ontology_id = $2::text)
+         ORDER BY
+           CASE WHEN terms.term_id = $1 THEN 0 ELSE 1 END,
+           terms.child_count DESC,
+           terms.ontology_id ASC,
+           terms.term_id ASC
+         LIMIT 1
+       ),
+       ancestors(term_entity_id, term_id, label, ontology_id, distance) AS (
+         SELECT
+           seed.term_entity_id,
+           seed.term_id,
+           seed.label,
+           seed.ontology_id,
+           0::int AS distance
+         FROM seed
+         UNION
+         SELECT
+           parent.term_entity_id,
+           parent.term_id,
+           parent.label,
+           parent.ontology_id,
+           ancestors.distance + 1
+         FROM ancestors
+         JOIN ${S}.entity_ontology_relation eor
+           ON eor.subject_entity_id = ancestors.term_entity_id
+          AND eor.ontology_id = ancestors.ontology_id
+         JOIN ${S}.vocab_relation_predicate predicate
+           ON predicate.relation_predicate_id = eor.predicate_id
+         JOIN ${ontologyTermsTable(S, "parent")}
+           ON parent.term_entity_id = eor.object_entity_id
+          AND parent.ontology_id = eor.ontology_id
+         WHERE ancestors.distance < $3::int
+           AND predicate.name = ANY(
+             CASE ancestors.ontology_id
+               WHEN 'chebi' THEN ARRAY['is_a']::text[]
+               WHEN 'reactome_pathways' THEN ARRAY['part_of']::text[]
+               ELSE ARRAY['is_a', 'part_of']::text[]
+             END
+           )
+       )
+       SELECT DISTINCT ON (term_entity_id)
+         term_entity_id::text AS term_entity_id,
+         term_id,
+         label,
+         ontology_id,
+         distance
+       FROM ancestors
+       ORDER BY term_entity_id, distance ASC, label ASC NULLS LAST, term_id ASC`,
+      [normalizedTermId, requestedOntologyId, maxDepth],
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const ids = result.rows.map((row) => row.term_entity_id);
+    const ontology = result.rows[0]?.ontology_id || requestedOntologyId || null;
+    const edgePredicates = hierarchyPredicatesForOntology(ontology);
+    const edgeResult = await client.query<OntologyHierarchyEdgeRow>(
+      `SELECT DISTINCT
+         eor.object_entity_id::text AS parent_entity_id,
+         eor.subject_entity_id::text AS child_entity_id
+       FROM ${S}.entity_ontology_relation eor
+       JOIN ${S}.vocab_relation_predicate predicate
+         ON predicate.relation_predicate_id = eor.predicate_id
+       WHERE eor.object_entity_id = ANY($1::uuid[])
+         AND eor.subject_entity_id = ANY($1::uuid[])
+         AND ($2::text IS NULL OR eor.ontology_id = $2::text)
+         AND predicate.name = ANY($3::text[])`,
+      [ids, ontology, edgePredicates],
+    );
+
+    const nodes = new Map<string, OntologyHierarchyNode>();
+    const termEntityIdByTermId = new Map<string, string>();
+    for (const row of result.rows) {
+      nodes.set(row.term_entity_id, {
+        id: row.term_id,
+        name: row.label || row.term_id,
+        ontologyId: row.ontology_id,
+        distance: Number(row.distance || 0),
+        children: [],
+      });
+      termEntityIdByTermId.set(row.term_id, row.term_entity_id);
+    }
+
+    const childEntityIds = new Set<string>();
+    for (const edge of edgeResult.rows) {
+      const parent = nodes.get(edge.parent_entity_id);
+      const child = nodes.get(edge.child_entity_id);
+      if (!parent || !child) continue;
+      parent.children.push(child);
+      childEntityIds.add(edge.child_entity_id);
+    }
+
+    for (const node of nodes.values()) {
+      node.children.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    }
+
+    const roots = Array.from(nodes.entries())
+      .filter(([entityId]) => !childEntityIds.has(entityId))
+      .map(([, node]) => node)
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+
+    if (roots.length === 1) return roots[0];
+
+    const seedEntityId = termEntityIdByTermId.get(normalizedTermId);
+    const seedNode = seedEntityId ? nodes.get(seedEntityId) : null;
+    return {
+      id: ontology || normalizedTermId,
+      name: ontology || "Ontology",
+      ontologyId: ontology,
+      children: roots.length > 0 ? roots : seedNode ? [seedNode] : [],
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function getOntologyChildren(
+  termId: string,
+  ontologyId?: string | null,
+  limit = 200,
+): Promise<OntologyTerm[]> {
+  const normalizedTermId = termId.trim();
+  if (!normalizedTermId) return [];
+  const requestedOntologyId = ontologyId || null;
+
+  const client = await getPool().connect();
+  try {
+    const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const result = await client.query<OntologyTermRow>(
+      `WITH seed AS MATERIALIZED (
+         SELECT terms.term_entity_id, terms.ontology_id
+         FROM ${ontologyTermsTable(S)}
+         WHERE (terms.term_id = $1 OR $1 = ANY(terms.term_aliases))
+           AND ($2::text IS NULL OR terms.ontology_id = $2::text)
+         ORDER BY
+           CASE WHEN terms.term_id = $1 THEN 0 ELSE 1 END,
+           terms.child_count DESC,
+           terms.ontology_id ASC,
+           terms.term_id ASC
+         LIMIT 1
+       )
+       SELECT DISTINCT ON (terms.term_entity_id)
+         terms.term_entity_id,
+         terms.term_id,
+         terms.ontology_prefix,
+         terms.label,
+         terms.definition,
+         terms.synonyms,
+         terms.synonyms_text,
+         terms.term_aliases,
+         terms.identifiers_text,
+         terms.ontology_id,
+         terms.sources,
+         terms.child_count
+       FROM seed
+       JOIN ${S}.entity_ontology_relation eor
+         ON eor.object_entity_id = seed.term_entity_id
+        AND eor.ontology_id = seed.ontology_id
+       JOIN ${S}.vocab_relation_predicate predicate
+         ON predicate.relation_predicate_id = eor.predicate_id
+       JOIN ${ontologyTermsTable(S)}
+         ON terms.term_entity_id = eor.subject_entity_id
+        AND terms.ontology_id = eor.ontology_id
+       WHERE predicate.name = ANY(
+         CASE seed.ontology_id
+           WHEN 'chebi' THEN ARRAY['is_a']::text[]
+           WHEN 'reactome_pathways' THEN ARRAY['part_of']::text[]
+           ELSE ARRAY['is_a', 'part_of']::text[]
+         END
+       )
+       ORDER BY
+         terms.term_entity_id,
+         terms.child_count DESC,
+         terms.label ASC NULLS LAST,
+         terms.term_id ASC
+       LIMIT $3::int`,
+      [normalizedTermId, requestedOntologyId, limit],
     );
     return result.rows.map(toOntologyTerm);
   } finally {
@@ -113,8 +489,7 @@ export async function searchOntologyTerms({
 
     if (trimmedQuery) {
       params.push(`%${trimmedQuery}%`);
-      const placeholder = `$${params.length}`;
-      whereParts.push(ontologyTermSearchPredicate(placeholder));
+      whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
     }
 
     if (normalizedPrefixes.length > 0) {
@@ -133,48 +508,37 @@ export async function searchOntologyTerms({
     const offsetPlaceholder = `$${params.length}`;
     const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
 
-    const result = await client.query<{
-      term_entity_id: string | number;
-      term_id: string;
-      ontology_prefix: string | null;
-      ontology_id: string | null;
-      label: string | null;
-      definition: string | null;
-      synonyms: string[] | null;
-      sources: string[] | null;
-      annotated_entity_count: string | number | null;
-      annotated_relation_count: string | number | null;
-      annotated_item_count: string | number | null;
-    }>(
+    const result = await client.query<OntologyTermRow>(
       `SELECT
          terms.*,
-         COALESCE(entity_counts.global_count, 0) AS annotated_entity_count,
-         COALESCE(relation_counts.global_count, 0) AS annotated_relation_count,
-         COALESCE(entity_counts.global_count, 0) + COALESCE(relation_counts.global_count, 0) AS annotated_item_count
+         COALESCE(entity_counts.global_count, 0)::bigint AS annotated_entity_count,
+         COALESCE(relation_counts.global_count, 0)::bigint AS annotated_relation_count,
+         (
+           COALESCE(entity_counts.global_count, 0)
+           + COALESCE(relation_counts.global_count, 0)
+         )::bigint AS annotated_item_count
        FROM ${ontologyTermsTable(SEARCH_SCHEMA)}
        LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_entity_bitmap entity_counts
          ON entity_counts.term_entity_id = terms.term_entity_id
        LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_direct_relation_bitmap relation_counts
          ON relation_counts.term_entity_id = terms.term_entity_id
        ${whereClause}
-       ORDER BY annotated_item_count DESC, terms.term_id ASC
+       ORDER BY annotated_item_count DESC, terms.child_count DESC, terms.term_id ASC
        LIMIT ${limitPlaceholder}
        OFFSET ${offsetPlaceholder}`,
       params,
     );
 
-    return result.rows.map((row) => ({
-      termId: row.term_id,
-      ontologyPrefix: row.ontology_prefix,
-      label: row.label,
-      definition: row.definition,
-      ontologyId: row.ontology_id,
-      synonyms: row.synonyms || [],
-      sources: row.sources || [],
-      annotatedEntityCount: Number(row.annotated_entity_count || 0),
-      annotatedRelationCount: Number(row.annotated_relation_count || 0),
-      annotatedItemCount: Number(row.annotated_item_count || 0),
-    }));
+    return result.rows.map((row) => {
+      const entityCount = Number(row.annotated_entity_count || 0);
+      const relationCount = Number(row.annotated_relation_count || 0);
+      return {
+        ...toOntologyTerm(row),
+        annotatedEntityCount: entityCount,
+        annotatedRelationCount: relationCount,
+        annotatedItemCount: entityCount + relationCount,
+      };
+    });
   } finally {
     client.release();
   }
@@ -197,9 +561,9 @@ export async function getOntologyPrefixes(): Promise<string[]> {
     try {
       const S = process.env.OMNIPATH_PG_SCHEMA || "public";
       const result = await client.query<{ prefix: string | null }>(
-        `SELECT DISTINCT ontology_prefix AS prefix
+        `SELECT DISTINCT terms.ontology_prefix AS prefix
          FROM ${ontologyTermsTable(S)}
-         WHERE ontology_prefix IS NOT NULL
+         WHERE terms.ontology_prefix IS NOT NULL
          ORDER BY prefix`,
       );
       const value = result.rows.map((r) => String(r.prefix)).filter(Boolean);
@@ -215,255 +579,6 @@ export async function getOntologyPrefixes(): Promise<string[]> {
   })();
 
   return ontologyPrefixesInFlight;
-}
-
-async function searchScopedOntologyTermsRelational({
-  entityPks,
-  termIds,
-  query,
-  prefixes,
-  ontologyIds,
-  limit,
-  offset,
-  client,
-  schema,
-}: {
-  entityPks: string[];
-  termIds: string[];
-  query: string;
-  prefixes: string[];
-  ontologyIds: string[];
-  limit: number;
-  offset: number;
-  client: PoolClient;
-  schema: string;
-}): Promise<ScopedOntologyTerm[]> {
-  const params: unknown[] = [];
-
-  const pushParam = (value: unknown): string => {
-    params.push(value);
-    return `$${params.length}`;
-  };
-
-  const hasTermIds = termIds.length > 0;
-  const hasEntityPks = entityPks.length > 0;
-
-  // Build CTEs to force phased execution and avoid 4.7M-row fan-out
-  const cteParts: string[] = [];
-
-  if (hasTermIds) {
-    const termParam = pushParam(termIds);
-    cteParts.push(`scope_entity_pks AS MATERIALIZED (
-      SELECT DISTINCT er.object_entity_id AS entity_id
-      FROM ${schema}.relation er
-      WHERE ${relationCategoryEqualsSql(schema, "er", "association")}
-        AND er.subject_entity_id IN (
-          SELECT terms.term_entity_id FROM ${ontologyTermsTable(schema)} WHERE terms.term_id = ANY(${termParam}::text[])
-        )
-    )`);
-  }
-
-  let scopeTermPksFrom: string = hasTermIds
-    ? `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.object_entity_id IN (SELECT entity_id FROM scope_entity_pks)`
-    : `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND er.object_entity_id = ANY(${pushParam(entityPks.map(String))}::uuid[])`;
-
-  if (hasTermIds && hasEntityPks) {
-    const ePksParam = pushParam(entityPks.map(String));
-    scopeTermPksFrom = `FROM ${schema}.relation er WHERE ${relationCategoryEqualsSql(schema, "er", "association")} AND (er.object_entity_id IN (SELECT entity_id FROM scope_entity_pks) OR er.object_entity_id = ANY(${ePksParam}::uuid[]))`;
-  }
-
-  cteParts.push(`scope_term_pks AS MATERIALIZED (
-    SELECT DISTINCT er.subject_entity_id AS term_entity_id
-    ${scopeTermPksFrom}
-  )`);
-
-  const whereParts: string[] = [];
-  if (query) {
-    const placeholder = pushParam(`%${query}%`);
-    whereParts.push(ontologyTermSearchPredicate(placeholder));
-  }
-
-  if (prefixes.length > 0) {
-    const prefixParam = pushParam(prefixes);
-    whereParts.push(`terms.ontology_prefix = ANY(${prefixParam}::text[])`);
-  }
-
-  if (ontologyIds.length > 0) {
-    const ontologyParam = pushParam(ontologyIds);
-    whereParts.push(`terms.ontology_id = ANY(${ontologyParam}::text[])`);
-  }
-
-  const limitParam = pushParam(limit);
-  const offsetParam = pushParam(offset);
-  const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
-
-  const result = await client.query<{
-    term_id: string;
-    ontology_prefix: string | null;
-    ontology_id: string | null;
-    label: string | null;
-    definition: string | null;
-    synonyms: string[] | null;
-    sources: string[] | null;
-    annotated_entity_count: string | number;
-    annotated_relation_count: string | number;
-  }>(
-    `WITH ${cteParts.join(",\n")},
-     scope_term_counts AS MATERIALIZED (
-       SELECT er.object_entity_id AS term_entity_id, COUNT(DISTINCT er.subject_entity_id) AS annotated_entity_count
-       ${scopeTermPksFrom}
-       GROUP BY er.object_entity_id
-     )
-     SELECT
-       terms.*,
-       scope_term_counts.annotated_entity_count,
-       0 AS annotated_relation_count
-     FROM scope_term_counts
-     JOIN ${ontologyTermsTable(schema)} ON terms.term_entity_id = scope_term_counts.term_entity_id
-     WHERE true
-     ${whereClause}
-     ORDER BY scope_term_counts.annotated_entity_count DESC, terms.term_id ASC
-     LIMIT ${limitParam}
-     OFFSET ${offsetParam}`,
-    params,
-  );
-
-  return result.rows.map((row) => ({
-    termId: row.term_id,
-    ontologyPrefix: row.ontology_prefix,
-    label: row.label,
-    definition: row.definition,
-    ontologyId: row.ontology_id,
-    synonyms: row.synonyms || [],
-    sources: row.sources || [],
-    annotatedEntityCount: Number(row.annotated_entity_count || 0),
-    annotatedRelationCount: Number(row.annotated_relation_count || 0),
-  }));
-}
-
-async function searchScopedOntologyTermsBitmap({
-  entityPks,
-  termIds,
-  query,
-  prefixes,
-  ontologyIds,
-  limit,
-  offset,
-  client,
-  schema,
-}: {
-  entityPks: string[];
-  termIds: string[];
-  query: string;
-  prefixes: string[];
-  ontologyIds: string[];
-  limit: number;
-  offset: number;
-  client: PoolClient;
-  schema: string;
-}): Promise<ScopedOntologyTerm[]> {
-  const params: unknown[] = [];
-
-  const pushParam = (value: unknown): string => {
-    params.push(value);
-    return `$${params.length}`;
-  };
-
-  const hasTermIds = termIds.length > 0;
-  const hasEntityPks = entityPks.length > 0;
-
-  // Build scope bitmap by ORing bitmaps of selected terms and selected entity IDs.
-  const scopeParts: string[] = [];
-
-  if (hasTermIds) {
-    const termParam = pushParam(termIds);
-    scopeParts.push(`SELECT b.entity_bitmap AS bitmap
-      FROM ${ontologyTermsTable(schema)}
-      JOIN ${schema}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-      WHERE terms.term_id = ANY(${termParam}::text[])`);
-  }
-
-  if (hasEntityPks) {
-    const ePkParam = pushParam(entityPks);
-    scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM ${schema}.entity_bitmap_id bitmap
-      WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
-  }
-
-  const scopeBitmapSql = `scope_bitmap AS MATERIALIZED (
-    SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-    FROM (
-      ${scopeParts.join("\n      UNION ALL\n      ")}
-    ) scope_parts
-  )`;
-
-  const whereParts: string[] = [];
-  if (query) {
-    const placeholder = pushParam(`%${query}%`);
-    whereParts.push(ontologyTermSearchPredicate(placeholder));
-  }
-
-  if (prefixes.length > 0) {
-    const prefixParam = pushParam(prefixes);
-    whereParts.push(`terms.ontology_prefix = ANY(${prefixParam}::text[])`);
-  }
-
-  if (ontologyIds.length > 0) {
-    const ontologyParam = pushParam(ontologyIds);
-    whereParts.push(`terms.ontology_id = ANY(${ontologyParam}::text[])`);
-  }
-
-  const limitParam = pushParam(limit);
-  const offsetParam = pushParam(offset);
-  const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
-
-  const result = await client.query<{
-    term_id: string;
-    ontology_prefix: string | null;
-    ontology_id: string | null;
-    label: string | null;
-    definition: string | null;
-    synonyms: string[] | null;
-    sources: string[] | null;
-    annotated_entity_count: string | number;
-    annotated_relation_count: string | number;
-  }>(
-    `WITH ${scopeBitmapSql}
-     SELECT
-       terms.term_id,
-       terms.ontology_prefix,
-       terms.ontology_id,
-       terms.label,
-       terms.definition,
-       terms.synonyms,
-       terms.sources,
-       sc.scoped_count AS annotated_entity_count,
-       0 AS annotated_relation_count
-     FROM ${ontologyTermsTable(schema)}
-     JOIN ${schema}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-     CROSS JOIN scope_bitmap sb
-     CROSS JOIN LATERAL (
-       SELECT rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) AS scoped_count
-     ) sc
-     WHERE sc.scoped_count > 0
-       ${whereClause}
-     ORDER BY sc.scoped_count DESC, terms.term_id ASC
-     LIMIT ${limitParam}
-     OFFSET ${offsetParam}`,
-    params,
-  );
-
-  return result.rows.map((row) => ({
-    termId: row.term_id,
-    ontologyPrefix: row.ontology_prefix,
-    label: row.label,
-    definition: row.definition,
-    ontologyId: row.ontology_id,
-    synonyms: row.synonyms || [],
-    sources: row.sources || [],
-    annotatedEntityCount: Number(row.annotated_entity_count || 0),
-    annotatedRelationCount: Number(row.annotated_relation_count || 0),
-  }));
 }
 
 export async function searchScopedOntologyTerms({
@@ -494,64 +609,71 @@ export async function searchScopedOntologyTerms({
 
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
+    const params: unknown[] = [normalizedEntityPks, normalizedTermIds];
+    const whereParts: string[] = [];
 
-    // Fast path: use bitmap-based set intersection when the table is populated.
-    const bitmapCheck = await client.query<{ ready: boolean }>(
-      `SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = $1 AND table_name = 'annotation_term_entity_bitmap'
-      ) AND EXISTS (
-        SELECT 1 FROM ${S}.annotation_term_entity_bitmap LIMIT 1
-      ) AS ready`,
-      [S],
-    );
-    const useBitmap = bitmapCheck.rows[0]?.ready === true;
-
-    if (useBitmap) {
-      try {
-        return await searchScopedOntologyTermsBitmap({
-          entityPks: normalizedEntityPks,
-          termIds: normalizedTermIds,
-          query: trimmedQuery,
-          prefixes: normalizedPrefixes,
-          ontologyIds: normalizedOntologyIds,
-          limit,
-          offset,
-          client,
-          schema: S,
-        });
-      } catch (err) {
-        // Bitmap path can fail if the extension is missing, entity PKs exceed
-        // 32-bit range, or the table is empty. Fall back to relational path.
-        console.warn("Bitmap scoped search failed, falling back to relational path:", err);
-      }
+    if (trimmedQuery) {
+      params.push(`%${trimmedQuery}%`);
+      whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
     }
 
-    return await searchScopedOntologyTermsRelational({
-      entityPks: normalizedEntityPks,
-      termIds: normalizedTermIds,
-      query: trimmedQuery,
-      prefixes: normalizedPrefixes,
-      ontologyIds: normalizedOntologyIds,
-      limit,
-      offset,
-      client,
-      schema: S,
-    });
+    if (normalizedPrefixes.length > 0) {
+      params.push(normalizedPrefixes);
+      whereParts.push(`terms.ontology_prefix = ANY($${params.length}::text[])`);
+    }
+
+    if (normalizedOntologyIds.length > 0) {
+      params.push(normalizedOntologyIds);
+      whereParts.push(`terms.ontology_id = ANY($${params.length}::text[])`);
+    }
+
+    params.push(limit);
+    const limitPlaceholder = `$${params.length}`;
+    params.push(offset);
+    const offsetPlaceholder = `$${params.length}`;
+    const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
+
+    const result = await client.query<OntologyTermRow>(
+      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
+       SELECT
+         terms.*,
+         scoped.annotated_entity_count,
+         scoped.annotated_relation_count,
+         item_count.annotated_item_count
+       FROM ${ontologyTermsTable(S)}
+       LEFT JOIN ${S}.annotation_term_entity_bitmap entity_bitmap
+         ON entity_bitmap.term_entity_id = terms.term_entity_id
+       LEFT JOIN ${S}.annotation_term_direct_relation_bitmap relation_bitmap
+         ON relation_bitmap.term_entity_id = terms.term_entity_id
+       CROSS JOIN entity_scope_bitmap entity_scope
+       CROSS JOIN relation_scope_bitmap relation_scope
+       CROSS JOIN LATERAL (
+         SELECT
+           COALESCE(rb_cardinality(rb_and(entity_bitmap.entity_bitmap, entity_scope.bitmap)), 0)::bigint AS annotated_entity_count,
+           COALESCE(rb_cardinality(rb_and(relation_bitmap.relation_bitmap, relation_scope.bitmap)), 0)::bigint AS annotated_relation_count
+       ) scoped
+       CROSS JOIN LATERAL (
+         SELECT
+           scoped.annotated_entity_count + scoped.annotated_relation_count AS annotated_item_count
+       ) item_count
+       WHERE item_count.annotated_item_count > 0
+         ${whereClause}
+       ORDER BY item_count.annotated_item_count DESC, terms.term_id ASC
+       LIMIT ${limitPlaceholder}
+       OFFSET ${offsetPlaceholder}`,
+      params,
+    );
+
+    return result.rows.map((row) => ({
+      ...toOntologyTerm(row),
+      annotatedEntityCount: Number(row.annotated_entity_count || 0),
+      annotatedRelationCount: Number(row.annotated_relation_count || 0),
+      annotatedItemCount: Number(row.annotated_item_count || 0),
+    }));
   } finally {
     client.release();
   }
 }
-
-export type OntologyPrefixCount = {
-  prefix: string;
-  scopedCount: number;
-};
-
-export type OntologySourceCount = {
-  source: string;
-  scopedCount: number;
-};
 
 export async function getScopedOntologyPrefixCounts({
   entityPks = [],
@@ -570,22 +692,16 @@ export async function getScopedOntologyPrefixCounts({
   const client = await getPool().connect();
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const params: unknown[] = [];
+    const params: unknown[] = hasScope ? [normalizedEntityPks, normalizedTermIds] : [];
+    const whereParts: string[] = [];
 
-    const pushParam = (value: unknown): string => {
-      params.push(value);
-      return `$${params.length}`;
-    };
+    if (trimmedQuery) {
+      params.push(`%${trimmedQuery}%`);
+      whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
+    }
 
-    // No scope: return total term counts per prefix.
     if (!hasScope) {
-      const whereParts: string[] = [];
-      if (trimmedQuery) {
-        const queryParam = pushParam(`%${trimmedQuery}%`);
-        whereParts.push(ontologyTermSearchPredicate(queryParam));
-      }
       const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
-
       const result = await client.query<{
         ontology_prefix: string | null;
         scoped_count: string | number;
@@ -594,7 +710,7 @@ export async function getScopedOntologyPrefixCounts({
          FROM ${ontologyTermsTable(S)}
          ${whereClause}
          GROUP BY terms.ontology_prefix
-         ORDER BY scoped_count DESC`,
+         ORDER BY scoped_count DESC, terms.ontology_prefix ASC`,
         params,
       );
 
@@ -604,51 +720,28 @@ export async function getScopedOntologyPrefixCounts({
       }));
     }
 
-    // Scoped: count terms that annotate the selected entities.
-    const ctes: string[] = [];
-    const scopeParts: string[] = [];
-    if (normalizedTermIds.length > 0) {
-      const termParam = pushParam(normalizedTermIds);
-      scopeParts.push(`SELECT b.entity_bitmap AS bitmap
-        FROM ${ontologyTermsTable(S)}
-        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${termParam}::text[])`);
-    }
-    if (normalizedEntityPks.length > 0) {
-      const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${S}.entity_bitmap_id bitmap
-        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
-    }
-
-    ctes.push(`scope_base AS MATERIALIZED (
-      SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-      FROM (
-        ${scopeParts.join("\n        UNION ALL\n        ")}
-      ) scope_parts
-    )`);
-
-    const whereParts: string[] = [];
-    if (trimmedQuery) {
-      const queryParam = pushParam(`%${trimmedQuery}%`);
-      whereParts.push(ontologyTermSearchPredicate(queryParam));
-    }
-
     const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
 
     const result = await client.query<{
       ontology_prefix: string | null;
       scoped_count: string | number;
     }>(
-      `WITH ${ctes.join(",\n")}
+      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
        SELECT terms.ontology_prefix, COUNT(*) AS scoped_count
        FROM ${ontologyTermsTable(S)}
-       JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-       CROSS JOIN scope_base sb
-       WHERE rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) > 0
-         ${whereClause}
+       LEFT JOIN ${S}.annotation_term_entity_bitmap entity_bitmap
+         ON entity_bitmap.term_entity_id = terms.term_entity_id
+       LEFT JOIN ${S}.annotation_term_direct_relation_bitmap relation_bitmap
+         ON relation_bitmap.term_entity_id = terms.term_entity_id
+       CROSS JOIN entity_scope_bitmap entity_scope
+       CROSS JOIN relation_scope_bitmap relation_scope
+       WHERE (
+         COALESCE(rb_cardinality(rb_and(entity_bitmap.entity_bitmap, entity_scope.bitmap)), 0)
+         + COALESCE(rb_cardinality(rb_and(relation_bitmap.relation_bitmap, relation_scope.bitmap)), 0)
+       ) > 0
+       ${whereClause}
        GROUP BY terms.ontology_prefix
-       ORDER BY scoped_count DESC`,
+       ORDER BY scoped_count DESC, terms.ontology_prefix ASC`,
       params,
     );
 
@@ -660,11 +753,6 @@ export async function getScopedOntologyPrefixCounts({
     client.release();
   }
 }
-
-export type OntologyIdCount = {
-  ontologyId: string;
-  scopedCount: number;
-};
 
 export async function getScopedOntologyIdCounts({
   entityPks = [],
@@ -683,30 +771,16 @@ export async function getScopedOntologyIdCounts({
   const client = await getPool().connect();
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const params: unknown[] = [];
-    const pushParam = (value: unknown): string => {
-      params.push(value);
-      return `$${params.length}`;
-    };
+    const params: unknown[] = hasScope ? [normalizedEntityPks, normalizedTermIds] : [];
+    const whereParts: string[] = [];
 
-    const queryWhereParts: string[] = [];
     if (trimmedQuery) {
-      const queryParam = pushParam(`%${trimmedQuery}%`);
-      queryWhereParts.push(ontologyTermSearchPredicate(queryParam));
+      params.push(`%${trimmedQuery}%`);
+      whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
     }
 
     if (!hasScope) {
-      if (!trimmedQuery) {
-        const result = await client.query<{ ontology_id: string; scoped_count: string | number }>(
-          `SELECT facet_value AS ontology_id, entity_count AS scoped_count
-           FROM ${S}.facet_entity_bitmap
-           WHERE facet_name = 'ontology_id'
-           ORDER BY entity_count DESC, facet_value ASC`,
-        );
-        return result.rows.map((row) => ({ ontologyId: row.ontology_id, scopedCount: Number(row.scoped_count || 0) }));
-      }
-
-      const whereClause = queryWhereParts.length > 0 ? `WHERE ${queryWhereParts.join(" AND ")}` : "";
+      const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
       const result = await client.query<{ ontology_id: string | null; scoped_count: string | number }>(
         `SELECT terms.ontology_id, COUNT(*) AS scoped_count
          FROM ${ontologyTermsTable(S)}
@@ -715,40 +789,29 @@ export async function getScopedOntologyIdCounts({
          ORDER BY scoped_count DESC, terms.ontology_id ASC`,
         params,
       );
+
       return result.rows
         .filter((row) => row.ontology_id)
         .map((row) => ({ ontologyId: row.ontology_id || "unknown", scopedCount: Number(row.scoped_count || 0) }));
     }
 
-    const scopeParts: string[] = [];
-    if (normalizedTermIds.length > 0) {
-      const termParam = pushParam(normalizedTermIds);
-      scopeParts.push(`SELECT b.entity_bitmap AS bitmap
-        FROM ${ontologyTermsTable(S)}
-        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${termParam}::text[])`);
-    }
-    if (normalizedEntityPks.length > 0) {
-      const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${S}.entity_bitmap_id bitmap
-        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
-    }
+    const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
 
-    const whereClause = queryWhereParts.length > 0 ? `AND ${queryWhereParts.join(" AND ")}` : "";
     const result = await client.query<{ ontology_id: string | null; scoped_count: string | number }>(
-      `WITH scope_base AS MATERIALIZED (
-        SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM (
-          ${scopeParts.join("\n          UNION ALL\n          ")}
-        ) scope_parts
-      )
+      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
        SELECT terms.ontology_id, COUNT(*) AS scoped_count
        FROM ${ontologyTermsTable(S)}
-       JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-       CROSS JOIN scope_base sb
-       WHERE rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) > 0
-         ${whereClause}
+       LEFT JOIN ${S}.annotation_term_entity_bitmap entity_bitmap
+         ON entity_bitmap.term_entity_id = terms.term_entity_id
+       LEFT JOIN ${S}.annotation_term_direct_relation_bitmap relation_bitmap
+         ON relation_bitmap.term_entity_id = terms.term_entity_id
+       CROSS JOIN entity_scope_bitmap entity_scope
+       CROSS JOIN relation_scope_bitmap relation_scope
+       WHERE (
+         COALESCE(rb_cardinality(rb_and(entity_bitmap.entity_bitmap, entity_scope.bitmap)), 0)
+         + COALESCE(rb_cardinality(rb_and(relation_bitmap.relation_bitmap, relation_scope.bitmap)), 0)
+       ) > 0
+       ${whereClause}
        GROUP BY terms.ontology_id
        ORDER BY scoped_count DESC, terms.ontology_id ASC`,
       params,
@@ -779,34 +842,24 @@ export async function getScopedOntologySourceCounts({
   const client = await getPool().connect();
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const params: unknown[] = [];
-
-    const pushParam = (value: unknown): string => {
-      params.push(value);
-      return `$${params.length}`;
-    };
-
+    const params: unknown[] = hasScope ? [normalizedEntityPks, normalizedTermIds] : [];
     const whereParts: string[] = [];
+
     if (trimmedQuery) {
-      const queryParam = pushParam(`%${trimmedQuery}%`);
-      whereParts.push(ontologyTermSearchPredicate(queryParam));
+      params.push(`%${trimmedQuery}%`);
+      whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
     }
 
     if (!hasScope) {
-      const termWhereClause = ["source.value <> ''", ...whereParts].join(" AND ");
-      const result = await client.query<{
-        source: string | null;
-        scoped_count: string | number;
-      }>(
-        `SELECT source_counts.source, source_counts.scoped_count
-         FROM (
-           SELECT source.value AS source, COUNT(*) AS scoped_count
-           FROM ${ontologyTermsTable(S)}
-           CROSS JOIN LATERAL unnest(terms.sources) AS source(value)
-           WHERE ${termWhereClause}
-           GROUP BY source.value
-         ) source_counts
-         ORDER BY source_counts.scoped_count DESC, source_counts.source ASC, source_counts.source ASC`,
+      const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+      const result = await client.query<{ source: string | null; scoped_count: string | number }>(
+        `SELECT source.value AS source, COUNT(*) AS scoped_count
+         FROM ${ontologyTermsTable(S)}
+         CROSS JOIN LATERAL unnest(terms.sources) AS source(value)
+         ${whereClause}
+         ${whereClause ? "AND" : "WHERE"} source.value <> ''
+         GROUP BY source.value
+         ORDER BY scoped_count DESC, source.value ASC`,
         params,
       );
 
@@ -816,40 +869,25 @@ export async function getScopedOntologySourceCounts({
       }));
     }
 
-    const scopeParts: string[] = [];
-    if (normalizedTermIds.length > 0) {
-      const termParam = pushParam(normalizedTermIds);
-      scopeParts.push(`SELECT b.entity_bitmap AS bitmap
-        FROM ${ontologyTermsTable(S)}
-        JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-        WHERE terms.term_id = ANY(${termParam}::text[])`);
-    }
-    if (normalizedEntityPks.length > 0) {
-      const ePkParam = pushParam(normalizedEntityPks);
-      scopeParts.push(`SELECT COALESCE(rb_build_agg(bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM ${S}.entity_bitmap_id bitmap
-        WHERE bitmap.entity_id = ANY(${ePkParam}::uuid[])`);
-    }
-
     const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
-    const result = await client.query<{
-      source: string | null;
-      scoped_count: string | number;
-    }>(
-      `WITH scope_base AS MATERIALIZED (
-        SELECT COALESCE(rb_or_agg(bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
-        FROM (
-          ${scopeParts.join("\n          UNION ALL\n          ")}
-        ) scope_parts
-      )
+
+    const result = await client.query<{ source: string | null; scoped_count: string | number }>(
+      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
        SELECT source.value AS source, COUNT(*) AS scoped_count
        FROM ${ontologyTermsTable(S)}
-       JOIN ${S}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
-       CROSS JOIN scope_base sb
+       LEFT JOIN ${S}.annotation_term_entity_bitmap entity_bitmap
+         ON entity_bitmap.term_entity_id = terms.term_entity_id
+       LEFT JOIN ${S}.annotation_term_direct_relation_bitmap relation_bitmap
+         ON relation_bitmap.term_entity_id = terms.term_entity_id
+       CROSS JOIN entity_scope_bitmap entity_scope
+       CROSS JOIN relation_scope_bitmap relation_scope
        CROSS JOIN LATERAL unnest(terms.sources) AS source(value)
-       WHERE rb_cardinality(rb_and(b.entity_bitmap, sb.bitmap)) > 0
-         AND source.value <> ''
-         ${whereClause}
+       WHERE (
+         COALESCE(rb_cardinality(rb_and(entity_bitmap.entity_bitmap, entity_scope.bitmap)), 0)
+         + COALESCE(rb_cardinality(rb_and(relation_bitmap.relation_bitmap, relation_scope.bitmap)), 0)
+       ) > 0
+       ${whereClause}
+       AND source.value <> ''
        GROUP BY source.value
        ORDER BY scoped_count DESC, source.value ASC`,
       params,
@@ -871,7 +909,7 @@ export async function rebuildAllBitmaps(): Promise<void> {
   throw new Error("Bitmap rebuilds are owned by omnipath_build/minimal, not the Svelte app");
 }
 
-/** @deprecated Use {@link rebuildAllBitmaps} instead. Rebuilds only annotation-term → entity bitmaps. */
+/** @deprecated Use {@link rebuildAllBitmaps} instead. Rebuilds only annotation-term -> entity bitmaps. */
 export async function rebuildAnnotationTermBitmaps(): Promise<void> {
   throw new Error("Bitmap rebuilds are owned by omnipath_build/minimal, not the Svelte app");
 }
@@ -884,15 +922,26 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
   try {
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query(
-      `SELECT DISTINCT
+      `WITH RECURSIVE selected_terms AS MATERIALIZED (
+         SELECT DISTINCT terms.term_entity_id
+         FROM ${ontologyTermsTable(SEARCH_SCHEMA)}
+         WHERE terms.term_id = ANY($1::text[])
+            OR terms.term_aliases && $1::text[]
+       ),
+       selected_entities(entity_id) AS (
+         SELECT term_entity_id AS entity_id FROM selected_terms
+         UNION
+         SELECT eor.subject_entity_id AS entity_id
+         FROM ${SEARCH_SCHEMA}.entity_ontology_relation eor
+         JOIN selected_entities selected
+           ON selected.entity_id = eor.object_entity_id
+       )
+       SELECT DISTINCT
          es.canonical_identifier,
          ${canonicalIdentifierTypeNameSql(SEARCH_SCHEMA, "es")} AS canonical_identifier_type
-       FROM ${SEARCH_SCHEMA}.relation er
-       JOIN ${SEARCH_SCHEMA}.entity es ON es.entity_id = er.object_entity_id
-       WHERE ${relationCategoryEqualsSql(SEARCH_SCHEMA, "er", "association")}
-         AND er.subject_entity_id IN (
-           SELECT terms.term_entity_id FROM ${ontologyTermsTable(SEARCH_SCHEMA)} WHERE terms.term_id = ANY($1::text[])
-         )`,
+       FROM selected_entities selected
+       JOIN ${SEARCH_SCHEMA}.entity es
+         ON es.entity_id = selected.entity_id`,
       [normalized],
     );
     return result.rows.map((row) => toPublicEntityId(row));

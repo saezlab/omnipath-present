@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AlertTriangle, Box, Check, Eye, Filter, Link, Plus, X } from '@lucide/svelte';
+	import { AlertTriangle, Box, Check, Filter, Link, Network, Plus, X } from '@lucide/svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Card, CardContent } from '$lib/components/ui/card/index.js';
@@ -8,6 +8,7 @@
 	import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
 	import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
+	import OntologyHierarchyDialog from '$lib/components/explore/OntologyHierarchyDialog.svelte';
 	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts, type EntitySearchCursor } from '$lib/api/client';
 	import {
 		getEntityDisplayName,
@@ -15,7 +16,6 @@
 		getEntitySecondaryName,
 		getEntityTypeLabel,
 		getIdentifierDisplayTypeForValue,
-		isCvTermEntity,
 		isUnresolvedEntity
 	} from '$lib/entities/display';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
@@ -32,10 +32,9 @@
 		selectedEntityIds?: string[];
 		selectedEntityPks?: Array<string | number>;
 		selectedAnnotationIds?: string[];
-		includeCvTerms?: boolean;
 	}
 
-	let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds, includeCvTerms = false }: Props = $props();
+	let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
 
 	const isMobile = new IsMobile();
 	const selection = getSelectionStore();
@@ -75,12 +74,21 @@
 	let scopedFacetCounts = $state<Map<string, number>>(new Map());
 	let detailsEntity = $state<EntityResult | null>(null);
 	let detailsOpen = $state(false);
+	let hierarchyTerm = $state<{
+		termId: string;
+		ontologyPrefix: string | null;
+		label: string | null;
+		definition: string | null;
+		ontologyId?: string | null;
+		synonyms?: string[];
+		sources?: string[];
+	} | null>(null);
+	let hierarchyOpen = $state(false);
 
 	const effectiveFilters = $derived({
 		...filters,
 		...(selectedEntityPks && selectedEntityPks.length > 0 ? { entity_pks: selectedEntityPks } : {}),
 		...(selectedAnnotationIds && selectedAnnotationIds.length > 0 ? { annotation_term_ids: selectedAnnotationIds } : {}),
-		...(includeCvTerms ? { include_cv_terms: true } : {}),
 	});
 
 	const facetQueryLimit = $derived(
@@ -101,7 +109,6 @@
 		const scope = {
 			entityIds: selectedEntityPks?.length ? selectedEntityPks : undefined,
 			annotationTermIds: selectedAnnotationIds?.length ? selectedAnnotationIds : undefined,
-			includeCvTerms,
 			entityTypes: filters.entity_types,
 			sources: filters.sources,
 			ncbi_tax_id: filters.ncbi_tax_id,
@@ -271,6 +278,25 @@
 		detailsOpen = true;
 	}
 
+	function handleDetailsKeydown(event: KeyboardEvent, entity: EntityResult) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		openDetails(entity);
+	}
+
+	function openOntologyHierarchy(entity: EntityResult) {
+		const term = entity.ontologyHierarchy;
+		if (!term) return;
+		hierarchyTerm = {
+			termId: term.termId,
+			ontologyPrefix: term.ontologyPrefix,
+			label: term.label || getEntityDisplayName(entity),
+			definition: term.definition,
+			ontologyId: term.ontologyId,
+		};
+		hierarchyOpen = true;
+	}
+
 	function shouldRenderAsIdentifierBadge(entity: EntityResult, value: string | undefined): boolean {
 		const text = value?.trim() || '';
 		return /^\d+$/.test(text) || (!!text && text === entity.canonicalIdentifier);
@@ -332,6 +358,7 @@
 {/if}
 
 <EntityDetailsDialog bind:open={detailsOpen} entity={detailsEntity} />
+<OntologyHierarchyDialog bind:open={hierarchyOpen} term={hierarchyTerm} />
 
 {#snippet filterSnippet(mobile = false)}
 	<div class={mobile ? 'space-y-6' : 'h-full overflow-hidden flex flex-col bg-transparent'}>
@@ -445,7 +472,7 @@
 				<CardContent class="flex flex-col items-center justify-center gap-2 py-16 text-center">
 					<div class="text-lg font-semibold">No entities found</div>
 					<p class="max-w-2xl text-sm text-muted-foreground">
-						Try a gene symbol, UniProt identifier, small molecule name, or broader text query.
+						Try a gene symbol, UniProt identifier, chemical name, or broader text query.
 					</p>
 				</CardContent>
 			</Card>
@@ -459,12 +486,19 @@
 	{@const secondaryName = getEntitySecondaryName(result)}
 	{@const displayIdentifierType = shouldRenderAsIdentifierBadge(result, displayName) ? getIdentifierDisplayTypeForValue(result, displayName) : undefined}
 	{@const entityTypeLabel = getEntityTypeLabel(result)}
-	{@const cvTerm = isCvTermEntity(result)}
-	{@const selected = cvTerm ? selection.isAnnotationSelected(result.canonicalIdentifier) : selection.isSelected(publicId)}
+	{@const selected = selection.isSelected(publicId)}
 	{@const entityTypeIcon = getEntityTypeEmoji(entityTypeLabel)}
 	{@const unresolved = isUnresolvedEntity(result)}
+	{@const ontologyHierarchy = result.ontologyHierarchy}
 	<div class="w-full max-w-md overflow-hidden rounded-lg border {unresolved ? 'border-dashed border-amber-300/90 bg-amber-50/35 dark:border-amber-700/70 dark:bg-amber-950/10' : 'border-border bg-card'}">
-		<div class="flex items-center gap-3.5 px-4 py-3">
+		<div
+			class="flex cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+			role="button"
+			tabindex="0"
+			title="Open entity details"
+			onclick={() => openDetails(result)}
+			onkeydown={(event) => handleDetailsKeydown(event, result)}
+		>
 			{#if entityTypeIcon}
 				<span class="flex size-5 shrink-0 items-center justify-center text-base leading-none" aria-hidden="true">
 					{entityTypeIcon}
@@ -487,9 +521,9 @@
 				{/if}
 			</div>
 			{#if (result.relationCount || 0) > 0}
-				<span class="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground" title="Relations involving this entity">
+				<span class="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground" title="Associated entities or relations">
 					<Link class="size-3.5" />
-					{(result.relationCount || 0).toLocaleString()}
+					{formatNumber(result.relationCount || 0)}
 				</span>
 			{/if}
 			{#if unresolved}
@@ -504,15 +538,7 @@
 				type="button"
 				onclick={(event) => {
 					event.stopPropagation();
-					if (cvTerm && selected) {
-						selection.removeAnnotation(result.canonicalIdentifier);
-					} else if (cvTerm) {
-						selection.addAnnotation({
-							id: result.canonicalIdentifier,
-							label: displayName,
-							namespace: result.canonicalIdentifierType
-						});
-					} else if (selected) {
+					if (selected) {
 						selection.removeEntity(publicId);
 					} else {
 						selection.addEntity({
@@ -535,18 +561,21 @@
 					Add
 				{/if}
 			</button>
-			<div class="w-px bg-border"></div>
-			<button
-				type="button"
-				onclick={(event) => {
-					event.stopPropagation();
-					openDetails(result);
-				}}
-				class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-			>
-				<Eye class="size-4" />
-				Details
-			</button>
+			{#if ontologyHierarchy}
+				<div class="w-px bg-border"></div>
+				<button
+					type="button"
+					onclick={(event) => {
+						event.stopPropagation();
+						openOntologyHierarchy(result);
+					}}
+					class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+					title={`Explore ${ontologyHierarchy.termId} in ontology`}
+				>
+					<Network class="size-4" />
+					Ontology
+				</button>
+			{/if}
 		</div>
 	</div>
 {/snippet}

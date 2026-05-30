@@ -12,6 +12,16 @@ export type Entity = {
   relationCount?: number;
 };
 
+export type EntityOntologyHierarchy = {
+  termId: string;
+  ontologyPrefix: string | null;
+  label: string | null;
+  definition: string | null;
+  ontologyId: string | null;
+  childCount: number;
+  parentCount: number;
+};
+
 export type EntityInsert = Entity;
 
 export type EntityIdentifier = {

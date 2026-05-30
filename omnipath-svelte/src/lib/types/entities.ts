@@ -1,9 +1,10 @@
-import type { Entity, EntityIdentifier, Identifier as DrizzleIdentifier } from '$lib/drizzle';
+import type { Entity, EntityIdentifier, EntityOntologyHierarchy, Identifier as DrizzleIdentifier } from '$lib/drizzle';
 
 export type Identifier = DrizzleIdentifier;
 export type EntityRecord = Entity;
 export type EntityWithIdentifiers = Entity & {
   identifiers: EntityIdentifier[];
+  ontologyHierarchy?: EntityOntologyHierarchy | null;
   identifiersTotal?: number;
   relationCount?: number;
 };

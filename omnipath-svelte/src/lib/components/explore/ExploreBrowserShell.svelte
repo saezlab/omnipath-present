@@ -74,7 +74,7 @@
 							onclick={() => onTabChange(item.value)}
 							class={`h-11 flex-1 text-sm font-medium capitalize transition-all ${
 										tab === item.value
-											? 'bg-[#DDEBCE] text-foreground dark:bg-[#006165]'
+											? 'bg-[#FCCC06]/35 text-[#5F4A00] dark:bg-[#A88C32] dark:text-[#1F1A00]'
 											: 'text-muted-foreground hover:bg-muted/30 hover:text-foreground'
 							}`}
 						>

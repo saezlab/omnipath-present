@@ -14,7 +14,7 @@
 		getEntitySmiles,
 		getEntityTypeLabel,
 		getIdentifierTypeLabel,
-		isSmallMoleculeEntity,
+		isChemicalEntity,
 		type EntityLike
 	} from '$lib/entities/display';
 
@@ -325,7 +325,7 @@
 			{@const detailSmiles = getEntitySmiles(detailEntity)}
 			{@const primaryIdentifierBadge = getEntityPrimaryIdentifierBadge(detailEntity)}
 			{@const detailTaxonomy = formatTaxonomyId(detailEntity.taxonomyId)}
-			{@const showMoleculeStructure = isSmallMoleculeEntity(detailEntity) && detailSmiles}
+			{@const showChemicalStructure = isChemicalEntity(detailEntity) && detailSmiles}
 			{@const detailAttributes = Array.isArray(detailEntity.entityAttributes) ? detailEntity.entityAttributes : []}
 			{@const detailAnnotationRows = normalizeAnnotationRows(detailAttributes)}
 			{@const detailPubmedIds = pubmedIdsFromAnnotations(detailAnnotationRows)}
@@ -344,10 +344,10 @@
 				{#if loadingDetails && !hydratedEntity}
 					<p class="text-sm text-muted-foreground">Loading annotations...</p>
 				{/if}
-				{#if showMoleculeStructure}
+				{#if showChemicalStructure}
 					<div class="rounded-lg border bg-muted/10 p-4">
 						<div class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-							Molecule structure
+							Chemical structure
 						</div>
 						<div class="flex justify-center">
 							<MoleculeStructure smiles={detailSmiles} width={320} height={240} renderOnClick={false} />

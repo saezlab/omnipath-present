@@ -56,6 +56,7 @@ export function parseSelectionTab(value: string | null | undefined): SelectionTa
   if (value === "selection") {
     return "entities";
   }
+  if (value === "summary") return "ontology";
   if (value && SELECTION_TABS.has(value as SelectionTab)) {
     return value as SelectionTab;
   }

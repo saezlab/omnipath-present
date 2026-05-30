@@ -5,9 +5,9 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Card, CardContent } from '$lib/components/ui/card/index.js';
 	import ExploreBrowserShell from '$lib/components/explore/ExploreBrowserShell.svelte';
+	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
 	import EntitiesExploreTab from '$lib/components/explore/EntitiesExploreTab.svelte';
 	import RelationsExploreTab from '$lib/components/explore/RelationsExploreTab.svelte';
-	import AnnotationBrowserTab from '$lib/components/explore/AnnotationBrowserTab.svelte';
 	import SelectionSheet from '$lib/components/selection/SelectionSheet.svelte';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import { getSelectionScope, getSelectionScopeSettings } from '$lib/stores/selection-scope.svelte';
@@ -15,7 +15,8 @@
 
 	const selection = getSelectionStore();
 	const scopeSettings = getSelectionScopeSettings();
-	const tab = $derived($page.url.searchParams.get('tab') || 'entities');
+	const rawTab = $derived($page.url.searchParams.get('tab') || 'entities');
+	const tab = $derived(rawTab === 'relations' || rawTab === 'ontology' ? rawTab : rawTab === 'summary' ? 'ontology' : 'entities');
 	const query = $derived($page.url.searchParams.get('q') || '');
 
 	let inputRef = $state<HTMLInputElement | null>(null);
@@ -32,9 +33,9 @@
 	);
 	const scopeEndpointMode = $derived(scopeSettings.mode === 'intersection' ? 'both' : 'any');
 	const entityTabScopePks = $derived(Array.from(new Set([...scope.termEntityPks, ...scope.scopedEntityPks])));
+	const scopeAnnotationIds = $derived(Array.from(new Set([...selection.annotationIds, ...scope.ontologyTermIds])));
 	const hasEntityTabScope = $derived(entityTabScopePks.length > 0);
-	const hasOntologyScope = $derived(scope.scopedEntityPks.length > 0);
-	const hasRelationScope = $derived(scope.scopedEntityPks.length > 0 || selection.annotationIds.length > 0);
+	const hasRelationScope = $derived(scope.scopedEntityPks.length > 0 || scopeAnnotationIds.length > 0);
 
 	$effect(() => {
 		draftQuery = query;
@@ -82,7 +83,11 @@
 	const hasSelection = $derived(selection.selectedEntities.length > 0 || selection.selectedAnnotations.length > 0);
 	const isSelectionEmpty = $derived(!hasSelection);
 	const hasResolvedScopeForTab = $derived(
-		tab === 'relations' ? hasRelationScope : tab === 'entities' ? hasEntityTabScope : hasOntologyScope
+		tab === 'relations'
+			? hasRelationScope
+			: tab === 'ontology'
+				? hasEntityTabScope || scopeAnnotationIds.length > 0
+				: hasEntityTabScope
 	);
 </script>
 
@@ -92,8 +97,7 @@
 			<CardContent class="space-y-4 py-12 text-center">
 				<h1 class="text-2xl font-semibold">Selection is empty</h1>
 				<p class="text-muted-foreground">
-				Use Explore to add entities or ontology terms. Selection will scope entities, relations, and
-				ontology to that shared subset.
+					Use Explore to add entities or ontology terms. Selection will scope entities and relations to that shared subset.
 				</p>
 				{#if selection.selectedAnnotations.length > 0}
 					<div class="flex flex-wrap justify-center gap-2">
@@ -118,10 +122,10 @@
 			{ value: 'relations', label: 'Relations' },
 			{ value: 'ontology', label: 'Ontology' }
 		]}
-		searchPlaceholder={tab === 'ontology'
-			? 'Search scoped ontology…'
-			: tab === 'relations'
+		searchPlaceholder={tab === 'relations'
 				? 'Search scoped relations…'
+				: tab === 'ontology'
+					? 'Search associated ontology terms…'
 				: 'Search scoped entities…'}
 		bind:searchInputRef={inputRef}
 	>
@@ -137,7 +141,7 @@
 				<div class="flex flex-1 items-center justify-center p-8">
 					<Card class="w-full max-w-2xl border-dashed">
 						<CardContent class="space-y-3 py-10 text-center">
-							<h2 class="text-xl font-semibold">{tab === 'relations' ? 'No relation scope' : 'No entities in scope'}</h2>
+							<h2 class="text-xl font-semibold">{tab === 'relations' ? 'No relation scope' : tab === 'ontology' ? 'No ontology scope' : 'No entities in scope'}</h2>
 							<p class="text-sm text-muted-foreground">
 								Change the scope options or add an explicit entity to the selection.
 							</p>
@@ -150,7 +154,6 @@
 					{filters}
 					onFiltersChange={(f) => (filters = f)}
 					selectedEntityPks={entityTabScopePks}
-					includeCvTerms
 				/>
 			{:else if tab === 'relations'}
 				<RelationsExploreTab
@@ -158,16 +161,17 @@
 					{filters}
 					onFilterChange={(f) => (filters = f)}
 					scopedEntityIds={scope.scopedEntityPks}
-					scopedAnnotationIds={selection.annotationIds}
+					scopedAnnotationIds={scopeAnnotationIds}
 					scopeEndpointMode={scopeEndpointMode}
 					scopeMode={scopeSettings.mode}
 				/>
-			{:else}
+			{:else if tab === 'ontology'}
 				<AnnotationBrowserTab
 					{query}
 					{filters}
 					onFiltersChange={(f) => (filters = f)}
-					selectedEntityPks={scope.scopedEntityPks}
+					selectedEntityPks={entityTabScopePks}
+					selectedAnnotationIds={scopeAnnotationIds}
 				/>
 			{/if}
 		{/snippet}

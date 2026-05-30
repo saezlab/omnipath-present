@@ -238,8 +238,14 @@ export const entityRelationCountsInMinimal = pgTable("entity_relation_counts", {
 	entityId: bigint("entity_id", { mode: "number" }).primaryKey().notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	relationCount: bigint("relation_count", { mode: "number" }).notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	ontologyAnnotatedEntityCount: bigint("ontology_annotated_entity_count", { mode: "number" }).notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	ontologyAnnotatedRelationCount: bigint("ontology_annotated_relation_count", { mode: "number" }).notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	searchCount: bigint("search_count", { mode: "number" }).notNull(),
 }, (table) => [
-	index("entity_relation_counts_count_idx").using("btree", table.relationCount.desc().nullsFirst().op("int8_ops"), table.entityId.asc().nullsLast().op("int8_ops")),
+	index("entity_relation_counts_search_count_idx").using("btree", table.searchCount.desc().nullsFirst().op("int8_ops"), table.entityId.asc().nullsLast().op("int8_ops")),
 	foreignKey({
 			columns: [table.entityId],
 			foreignColumns: [entityInMinimal.entityId],

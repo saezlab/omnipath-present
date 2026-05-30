@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlertCircle, Check, Loader2, Network, Plus } from '@lucide/svelte';
+  import { AlertCircle, Check, Link, Loader2, Network, Plus } from '@lucide/svelte';
   import { Badge } from '$lib/components/ui/badge/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import {
@@ -17,6 +17,7 @@
     ontologyPrefix: string | null;
     label: string | null;
     definition: string | null;
+    ontologyId?: string | null;
     synonyms?: string[];
     sources?: string[];
   };
@@ -41,49 +42,19 @@
 
   const selectedNodeInSelection = $derived(selectedNode ? selection.isAnnotationSelected(selectedNode.id) : false);
 
-  let availableOntologyIdsCache: Promise<Set<string>> | null = null;
-
-  function staticOntologyIdForTermId(termId: string): string | null {
-    const normalized = termId.trim();
-    const upper = normalized.toUpperCase();
-    if (upper.startsWith('WP') && /^WP\d+/.test(upper)) return 'wikipathways';
-    if (upper.startsWith('KW-')) return 'uniprot_keywords';
-    if (upper.startsWith('R-')) return 'reactome_pathways';
-    if (upper === 'BR08901') return 'kegg_pathways';
-    if (/^(MAP|HSA|MMU|RNO|DRE|CEL|DME|SCE)\d{5}$/.test(upper)) return 'kegg_pathways';
-    if (/^(RN|KO)\d{5}$/.test(upper)) return 'kegg_pathways';
-
-    const prefix = normalized.split(':', 1)[0]?.toUpperCase();
-    if (prefix === 'GO') return 'gene_ontology';
-    if (prefix === 'HP') return 'hpo';
-    if (prefix === 'KW') return 'uniprot_keywords';
-    if (prefix === 'MI') return 'psi_mi';
-    if (prefix === 'OM') return 'omnipath';
-    if (prefix === 'CHEBI') return 'chebi';
-    if (prefix === 'KEGG_PATHWAY_CATEGORY') return 'kegg_pathways';
-    return null;
-  }
-
-  async function availableOntologyIds(): Promise<Set<string>> {
-    availableOntologyIdsCache ||= fetchJson<{ ontologies: Array<{ id: string; loaded: boolean }> }>('/api/ontologies')
-      .then((data) => new Set((data.ontologies || []).map((ontology) => ontology.id)));
-    return availableOntologyIdsCache;
-  }
-
   async function ontologyIdForTermId(termId: string): Promise<string | null> {
-    const staticId = staticOntologyIdForTermId(termId);
-    const ids = await availableOntologyIds().catch(() => null);
-    if (staticId && (!ids || ids.has(staticId))) return staticId;
-
-    const prefix = termId.includes(':') ? termId.split(':', 1)[0].toLowerCase() : null;
-    if (prefix && ids?.has(prefix)) return prefix;
-    return staticId;
+    const node = findNode(root, termId);
+    if (node?.ontologyId) return node.ontologyId;
+    if (term?.termId === termId && term.ontologyId) return term.ontologyId;
+    if (selectedDetails?.id === termId && selectedDetails.ontologyId) return selectedDetails.ontologyId;
+    return null;
   }
 
   function cloneNode(node: HierarchyNode, selectedTermId: string): HierarchyNode {
     return {
       id: node.id,
       name: node.name || node.id,
+      ontologyId: node.ontologyId,
       distance: node.distance,
       children: (node.children || []).map((child) => cloneNode(child, selectedTermId)),
       // Open the initial /tree path so the seed term is visible immediately.
@@ -104,17 +75,17 @@
   }
 
   async function fetchTermTree(termId: string): Promise<HierarchyNode | null> {
-    const data = await fetchJson<{ root: HierarchyNode | null }>('/api/tree', {
+    const data = await fetchJson<{ root: HierarchyNode | null }>('/app-api/ontology/tree', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ term_ids: [termId] }),
+      body: JSON.stringify({ term_ids: [termId], ontologyId: term?.ontologyId || null }),
     });
     return data.root;
   }
 
   async function fetchApiTerms(termIds: string[]): Promise<Record<string, ApiTermInfo | null>> {
     if (termIds.length === 0) return {};
-    const data = await fetchJson<{ terms: Record<string, ApiTermInfo | null> }>('/api/terms', {
+    const data = await fetchJson<{ terms: Record<string, ApiTermInfo | null> }>('/app-api/terms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ term_ids: termIds }),
@@ -151,6 +122,7 @@
       root = tree ? cloneNode(tree, termId) : {
         id: termId,
         name: term?.label || termId,
+        ontologyId: term?.ontologyId || null,
         children: [],
         open: true,
         childrenLoaded: false,
@@ -165,6 +137,7 @@
       root = {
         id: termId,
         name: term?.label || termId,
+        ontologyId: term?.ontologyId || null,
         children: [],
         open: true,
         childrenLoaded: false,
@@ -184,6 +157,7 @@
       name: node.name || node.id,
       definition: null,
       namespace: node.id.includes(':') ? node.id.split(':', 1)[0].toLowerCase() : null,
+      relationCount: 0,
     };
     detailsLoading = true;
     detailsError = null;
@@ -205,21 +179,20 @@
   async function expandNode(node: HierarchyNode) {
     if (node.childrenLoading || node.childrenLoaded) return;
     const ontologyId = await ontologyIdForTermId(node.id);
-    if (!ontologyId) {
-      node.error = `Cannot infer ontology for ${node.id}`;
-      return;
-    }
 
     node.childrenLoading = true;
     node.error = null;
     try {
-      const encodedTermId = encodeURIComponent(node.id);
-      const data = await fetchJson<{ term_id: string; children: string[] }>(`/api/${ontologyId}/term/${encodedTermId}/children`);
-      const childIds = Array.from(new Set((data.children || []).map(String).filter(Boolean)));
-      const terms = await fetchApiTerms(childIds);
-      const fetchedChildren = childIds.map((id) => ({
-        id,
-        name: terms[id]?.name || id,
+      const params = new URLSearchParams({ termId: node.id });
+      if (ontologyId) params.set('ontologyId', ontologyId);
+      const data = await fetchJson<{
+        termId: string;
+        children: Array<ApiTermInfo & { termId?: string; label?: string | null }>;
+      }>(`/app-api/ontology/children?${params.toString()}`);
+      const fetchedChildren = (data.children || []).map((child) => ({
+        id: child.termId || child.id,
+        name: child.label || child.name || child.termId || child.id,
+        ontologyId: child.ontologyId || ontologyId || node.ontologyId || null,
         children: [],
         open: false,
         childrenLoaded: false,
@@ -274,7 +247,7 @@
       </div>
     </DialogHeader>
 
-    <div class="grid min-h-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_420px]">
+    <div class="grid min-h-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(30rem,42vw)] xl:grid-cols-[minmax(0,1fr)_minmax(38rem,42vw)]">
       <div class="min-h-0 overflow-auto bg-background p-4">
         {#if loading}
           <div class="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -309,10 +282,10 @@
         {/if}
       </div>
 
-      <aside class="min-h-0 overflow-y-auto bg-background p-5">
+      <aside class="min-h-0 min-w-0 overflow-y-auto bg-background p-5">
         {#if selectedNode}
           <div class="space-y-5">
-            <div class="space-y-2">
+            <div class="min-w-0 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" class="font-mono">{selectedNode.id}</Badge>
                 {#if selectedDetails?.namespace}
@@ -323,6 +296,13 @@
                 {/if}
               </div>
               <h3 class="text-2xl font-semibold leading-tight">{selectedDetails?.name || selectedNode.name || selectedNode.id}</h3>
+              {#if (selectedDetails?.relationCount || 0) > 0}
+                <div class="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm text-muted-foreground">
+                  <Link class="size-4" />
+                  <span class="tabular-nums">{(selectedDetails?.relationCount || 0).toLocaleString()}</span>
+                  <span>relations</span>
+                </div>
+              {/if}
               {#if detailsLoading}
                 <div class="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 class="h-4 w-4 animate-spin" />
@@ -346,7 +326,7 @@
               </Button>
             </div>
 
-            <section class="space-y-2">
+            <section class="min-w-0 space-y-2">
               <h4 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Definition</h4>
               <p class="whitespace-pre-wrap rounded-lg bg-background p-3 text-sm leading-6 text-foreground/90">
                 {selectedDetails?.definition || 'No definition available for this ontology term.'}
