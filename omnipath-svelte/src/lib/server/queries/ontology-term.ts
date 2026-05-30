@@ -1,6 +1,5 @@
 import { getPool } from "$lib/server/db/client";
 import { toPublicEntityId } from "$lib/entity-public-id";
-import { canonicalIdentifierTypeNameSql } from "$lib/server/queries/sql-fragments";
 
 export type OntologyTerm = {
   termId: string;
@@ -487,6 +486,58 @@ export async function searchOntologyTerms({
     const params: unknown[] = [];
     const whereParts: string[] = [];
 
+    if (
+      !trimmedQuery
+      && normalizedPrefixes.length === 0
+      && normalizedOntologyIds.length === 0
+    ) {
+      const candidateLimit = Math.max(1, Math.floor(limit + offset));
+      const result = await client.query<OntologyTermRow>(
+        `WITH candidate_terms AS MATERIALIZED (
+           SELECT term_entity_id
+           FROM (
+             SELECT term_entity_id
+             FROM ${SEARCH_SCHEMA}.annotation_term_entity_bitmap
+             ORDER BY global_count DESC
+             LIMIT $1::integer
+           ) top_entity_terms
+           UNION
+           SELECT term_entity_id
+           FROM ${SEARCH_SCHEMA}.annotation_term_direct_relation_bitmap
+         )
+         SELECT
+           terms.*,
+           COALESCE(entity_counts.global_count, 0)::bigint AS annotated_entity_count,
+           COALESCE(relation_counts.global_count, 0)::bigint AS annotated_relation_count,
+           (
+             COALESCE(entity_counts.global_count, 0)
+             + COALESCE(relation_counts.global_count, 0)
+           )::bigint AS annotated_item_count
+         FROM candidate_terms candidate
+         JOIN ${ontologyTermsTable(SEARCH_SCHEMA)}
+           ON terms.term_entity_id = candidate.term_entity_id
+         LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_entity_bitmap entity_counts
+           ON entity_counts.term_entity_id = terms.term_entity_id
+         LEFT JOIN ${SEARCH_SCHEMA}.annotation_term_direct_relation_bitmap relation_counts
+           ON relation_counts.term_entity_id = terms.term_entity_id
+         ORDER BY annotated_item_count DESC, terms.child_count DESC, terms.term_id ASC
+         LIMIT $2::integer
+         OFFSET $3::integer`,
+        [candidateLimit, limit, offset],
+      );
+
+      return result.rows.map((row) => {
+        const entityCount = Number(row.annotated_entity_count || 0);
+        const relationCount = Number(row.annotated_relation_count || 0);
+        return {
+          ...toOntologyTerm(row),
+          annotatedEntityCount: entityCount,
+          annotatedRelationCount: relationCount,
+          annotatedItemCount: entityCount + relationCount,
+        };
+      });
+    }
+
     if (trimmedQuery) {
       params.push(`%${trimmedQuery}%`);
       whereParts.push(ontologyTermSearchPredicate(`$${params.length}`));
@@ -561,9 +612,9 @@ export async function getOntologyPrefixes(): Promise<string[]> {
     try {
       const S = process.env.OMNIPATH_PG_SCHEMA || "public";
       const result = await client.query<{ prefix: string | null }>(
-        `SELECT DISTINCT terms.ontology_prefix AS prefix
-         FROM ${ontologyTermsTable(S)}
-         WHERE terms.ontology_prefix IS NOT NULL
+        `SELECT DISTINCT ontology_prefix AS prefix
+         FROM ${S}.entity_ontology_term
+         WHERE ontology_prefix IS NOT NULL
          ORDER BY prefix`,
       );
       const value = result.rows.map((r) => String(r.prefix)).filter(Boolean);
@@ -919,12 +970,17 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
   if (normalized.length === 0) return [];
 
   const client = await getPool().connect();
+  let inTransaction = false;
   try {
+    await client.query("BEGIN");
+    inTransaction = true;
+    await client.query("SET LOCAL jit = off");
+
     const SEARCH_SCHEMA = process.env.OMNIPATH_PG_SCHEMA || "public";
     const result = await client.query(
       `WITH RECURSIVE selected_terms AS MATERIALIZED (
          SELECT DISTINCT terms.term_entity_id
-         FROM ${ontologyTermsTable(SEARCH_SCHEMA)}
+         FROM ${SEARCH_SCHEMA}.entity_ontology_term terms
          WHERE terms.term_id = ANY($1::text[])
             OR terms.term_aliases && $1::text[]
        ),
@@ -935,16 +991,30 @@ export async function getEntityIdsForAnnotationTerms(termIds: string[]): Promise
          FROM ${SEARCH_SCHEMA}.entity_ontology_relation eor
          JOIN selected_entities selected
            ON selected.entity_id = eor.object_entity_id
+       ),
+       selected_entity_ids AS MATERIALIZED (
+         SELECT DISTINCT entity_id
+         FROM selected_entities
        )
-       SELECT DISTINCT
+       SELECT
          es.canonical_identifier,
-         ${canonicalIdentifierTypeNameSql(SEARCH_SCHEMA, "es")} AS canonical_identifier_type
-       FROM selected_entities selected
+         it.name AS canonical_identifier_type
+       FROM selected_entity_ids selected
        JOIN ${SEARCH_SCHEMA}.entity es
-         ON es.entity_id = selected.entity_id`,
+         ON es.entity_id = selected.entity_id
+       LEFT JOIN ${SEARCH_SCHEMA}.vocab_identifier_type it
+         ON it.identifier_type_id = es.canonical_identifier_type_id`,
       [normalized],
     );
-    return result.rows.map((row) => toPublicEntityId(row));
+    const entityIds = result.rows.map((row) => toPublicEntityId(row));
+    await client.query("COMMIT");
+    inTransaction = false;
+    return entityIds;
+  } catch (error) {
+    if (inTransaction) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    throw error;
   } finally {
     client.release();
   }

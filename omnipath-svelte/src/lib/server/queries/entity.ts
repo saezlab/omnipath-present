@@ -19,6 +19,7 @@ export type EntityWithIdentifiers = Entity & {
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 const INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES = 1000;
 const INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES = 5000;
+const ENTITY_SEARCH_IDENTIFIER_LIMIT = 20;
 
 export type EntitySearchCursor = {
   relationCount: number;
@@ -618,7 +619,7 @@ export async function searchEntities({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
   } finally {
     client.release();
   }
@@ -720,7 +721,7 @@ async function searchEntitiesByRelationCount({
   let cursorWhere = "";
   if (normalizedCursor) {
     params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = `AND (${entitySearchCountSql("rc")} < $1::bigint OR (${entitySearchCountSql("rc")} = $1::bigint AND e.entity_id > $2::uuid))`;
+    cursorWhere = `AND (rc.search_count < $1::bigint OR (rc.search_count = $1::bigint AND rc.entity_id > $2::uuid))`;
   }
   params.push(queryLimit);
   const limitParam = `$${params.length}`;
@@ -746,13 +747,13 @@ async function searchEntitiesByRelationCount({
          e.taxonomy_id,
          ${entityFacetSourcesSql(schema, "e")} AS sources,
          ${entitySearchCountSql("rc")}::bigint AS relation_count
-       FROM ${schema}.entity e
-       LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
+       FROM ${schema}.entity_relation_counts rc
+       JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
        JOIN ${schema}.vocab_entity_type et ON et.entity_type_id = e.entity_type_id
        LEFT JOIN ${schema}.vocab_identifier_type it ON it.identifier_type_id = e.canonical_identifier_type_id
        WHERE TRUE
          ${cursorWhere}
-       ORDER BY ${entitySearchCountSql("rc")} DESC, e.entity_id ASC
+       ORDER BY rc.search_count DESC, rc.entity_id ASC
        LIMIT ${limitParam}`,
       params,
     );
@@ -760,13 +761,13 @@ async function searchEntitiesByRelationCount({
     const rows = result.rows.map(toEntityRow);
     if (stratified) {
       const sampledRows = selectStratifiedEntitySample(rows, limit);
-      return { entities: await hydrateEntities(schema, sampledRows), nextCursor: null };
+      return { entities: await hydrateEntities(schema, sampledRows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor: null };
     }
     const nextCursor = rows.length === limit
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
   } finally {
     client.release();
   }
@@ -872,7 +873,7 @@ async function searchEntitiesByRelationCountAndEntityType({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
   } finally {
     client.release();
   }
@@ -1021,7 +1022,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
         ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
         : null;
 
-      return { entities: await hydrateEntities(schema, rows), nextCursor };
+      return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
     }
 
     const result = await client.query<{
@@ -1062,7 +1063,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
   } finally {
     client.release();
   }
@@ -1100,9 +1101,9 @@ export async function getEntityFilterOptions(): Promise<{ entity_types: string[]
       const typeResult = await client.query<{ values: string[] | null }>(
         `SELECT array_agg(value ORDER BY value) AS values
 	         FROM (
-           SELECT DISTINCT ${entityTypeSql(schema)} AS value
-           FROM ${schema}.entity e
-           WHERE ${entityTypeSql(schema)} IS NOT NULL
+           SELECT facet_value AS value
+           FROM ${schema}.facet_entity_bitmap
+           WHERE facet_name = 'entity_type'
          ) t`,
       );
       const sourceResult = await client.query<{ values: string[] | null }>(

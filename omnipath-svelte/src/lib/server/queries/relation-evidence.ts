@@ -29,7 +29,12 @@ async function getEvidenceByRelationPksInternal(relationPks: Array<string | numb
 
   const schema = SEARCH_SCHEMA();
   const client = await getPool().connect();
+  let inTransaction = false;
   try {
+    await client.query("BEGIN");
+    inTransaction = true;
+    await client.query("SET LOCAL jit = off");
+
     const result = await client.query<{
       source: string;
       relation_evidence_id: string;
@@ -73,7 +78,7 @@ async function getEvidenceByRelationPksInternal(relationPks: Array<string | numb
       [normalized],
     );
 
-    return result.rows.map((row) => ({
+    const evidence = result.rows.map((row) => ({
       source: row.source,
       relationEvidencePk: row.relation_evidence_id,
       relationPk: String(row.relation_id),
@@ -82,6 +87,15 @@ async function getEvidenceByRelationPksInternal(relationPks: Array<string | numb
       objectAttributes: row.object_attributes,
       evidence: row.evidence,
     }));
+
+    await client.query("COMMIT");
+    inTransaction = false;
+    return evidence;
+  } catch (error) {
+    if (inTransaction) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    throw error;
   } finally {
     client.release();
   }

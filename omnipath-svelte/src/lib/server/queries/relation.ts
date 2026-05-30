@@ -569,13 +569,11 @@ export async function getRelationFilterOptions(): Promise<RelationFilterOptions>
     const client = await getPool().connect();
     try {
       const predicateResult = await client.query<{ category: string; predicates: string[] | null }>(
-        `SELECT category, array_agg(predicate ORDER BY predicate) AS predicates
-         FROM (
-           SELECT DISTINCT ${relationCategoryNameSql(schema, "r")} AS category, ${relationPredicateNameSql(schema, "r")} AS predicate
-           FROM ${schema}.relation r
-         ) t
-         GROUP BY category
-         ORDER BY category`,
+        `SELECT facet_category AS category, array_agg(facet_value ORDER BY facet_value) AS predicates
+         FROM ${schema}.facet_relation_bitmap
+         WHERE facet_name = 'predicate'
+         GROUP BY facet_category
+         ORDER BY facet_category`,
       );
       const sourceResult = await client.query<{ values: string[] | null }>(
         `SELECT array_agg(facet_value ORDER BY facet_value) AS values
