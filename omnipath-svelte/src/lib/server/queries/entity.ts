@@ -20,6 +20,10 @@ const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
 const INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES = 1000;
 const INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES = 5000;
 const ENTITY_SEARCH_IDENTIFIER_LIMIT = 20;
+const ENTITY_SEARCH_HYDRATION_OPTIONS = {
+  identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT,
+  includeIdentifierTotals: false,
+} as const;
 
 export type EntitySearchCursor = {
   relationCount: number;
@@ -51,18 +55,6 @@ function toEntityRow(row: {
     sources: row.sources?.filter(Boolean) ?? [],
     relationCount: Number(row.relation_count || 0),
   };
-}
-
-function entityFacetSourcesSql(schema: string, entityAlias = "e"): string {
-  return `ARRAY(
-    SELECT f.facet_value
-    FROM ${schema}.entity_bitmap_id bitmap
-    JOIN ${schema}.facet_entity_bitmap f
-      ON f.facet_name = 'source'
-     AND rb_contains(f.entity_bitmap, bitmap.bitmap_id)
-    WHERE bitmap.entity_id = ${entityAlias}.entity_id
-    ORDER BY f.facet_value
-  )`;
 }
 
 function entityTypeSql(schema: string, alias = "e"): string {
@@ -324,6 +316,87 @@ async function getIdentifierPageForEntityPks(
   }
 }
 
+async function getIdentifierPreviewForEntityPks(
+  schema: string,
+  entityPks: string[],
+  limit: number,
+): Promise<Map<string, EntityIdentifier[]>> {
+  const map = new Map<string, EntityIdentifier[]>();
+  if (entityPks.length === 0) return map;
+
+  const normalizedLimit = Math.max(1, Math.min(Math.floor(limit), 500));
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      identifier_id: string | number | null;
+      identifier_type: string;
+      identifier: string;
+    }>(
+      `WITH requested(entity_id) AS (
+         SELECT unnest($1::uuid[])
+       )
+       SELECT
+         requested.entity_id,
+         preview.identifier_id,
+         preview.identifier_type,
+         preview.identifier
+       FROM requested
+       CROSS JOIN LATERAL (
+         SELECT
+           identifier_id,
+           identifier_type,
+           identifier
+         FROM (
+           SELECT
+             i.identifier_id,
+             it.name AS identifier_type,
+             i.value AS identifier
+           FROM ${schema}.entity_identifier_lookup eil
+           JOIN ${schema}.identifier_evidence i
+             ON i.identifier_id = eil.identifier_id
+           JOIN ${schema}.vocab_identifier_type it
+             ON it.identifier_type_id = i.identifier_type_id
+           WHERE eil.entity_id = requested.entity_id
+             AND i.value <> ''
+           UNION
+           SELECT
+             NULL::uuid AS identifier_id,
+             'Name:OM:0200' AS identifier_type,
+             terms.label AS identifier
+           FROM ${schema}.entity_ontology_term terms
+           WHERE terms.term_entity_id = requested.entity_id
+             AND terms.label IS NOT NULL
+             AND terms.label <> ''
+         ) identifier_rows
+         ORDER BY ${identifierPrioritySql("identifier_type")}, identifier_type, identifier
+         LIMIT $2::integer
+       ) preview
+       ORDER BY requested.entity_id, preview.identifier_type, preview.identifier`,
+      [entityPks, normalizedLimit],
+    );
+
+    for (const row of result.rows) {
+      const entityPk = String(row.entity_id);
+      const identifiers = map.get(entityPk) ?? [];
+      identifiers.push({
+        ...(row.identifier_id === null ? {} : { id: String(row.identifier_id) }),
+        entityPk,
+        identifier: row.identifier,
+        identifierType: row.identifier_type,
+      });
+      map.set(entityPk, identifiers);
+    }
+    for (const entityPk of entityPks) {
+      if (!map.has(entityPk)) map.set(entityPk, []);
+    }
+
+    return map;
+  } finally {
+    client.release();
+  }
+}
+
 async function getOntologyHierarchyHintsForEntityPks(
   schema: string,
   entityPks: string[],
@@ -392,11 +465,20 @@ async function getOntologyHierarchyHintsForEntityPks(
 async function hydrateEntities(
   schema: string,
   rows: Array<Entity & { relationCount?: number }>,
-  options: { identifierLimit?: number } = {},
+  options: { identifierLimit?: number; includeIdentifierTotals?: boolean } = {},
 ): Promise<EntityWithIdentifiers[]> {
   const entityPks = rows.map((row) => row.entityPk);
   const ontologyHierarchyByEntityPk = await getOntologyHierarchyHintsForEntityPks(schema, entityPks);
   if (options.identifierLimit != null) {
+    if (options.includeIdentifierTotals === false) {
+      const identifiersByEntityPk = await getIdentifierPreviewForEntityPks(schema, entityPks, options.identifierLimit);
+      return rows.map((row) => ({
+        ...row,
+        identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
+        ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
+      }));
+    }
+
     const { identifiersByEntityPk, totalsByEntityPk } =
       await getIdentifierPageForEntityPks(schema, entityPks, options.identifierLimit);
     return rows.map((row) => ({
@@ -518,11 +600,9 @@ export async function searchEntities({
     return searchEntitiesByRelationCount({ schema, limit, cursor });
   }
   if (isEntityTypeOnlySearch(query, filters) && (!cursor || Number(cursor.relationCount) > 0)) {
-    return searchEntitiesByRelationCountAndFacetFilters({
+    return searchEntitiesByRelationCountAndEntityType({
       schema,
       entityTypes: normalizeStringValues(filters.entity_types || []),
-      sources: [],
-      taxonomyIds: [],
       limit,
       cursor,
     });
@@ -661,7 +741,7 @@ export async function searchEntities({
 	         ${resolutionStatusSql(schema, "page")} AS resolution_status,
 	         ${entityTypeSql(schema, "page")} AS entity_type,
 	         page.taxonomy_id,
-	         ${entityFacetSourcesSql(schema, "page")} AS sources,
+	         ARRAY[]::text[] AS sources,
 	         page.relation_count
 	       FROM page_entities page
        ORDER BY page.relation_count DESC, page.entity_id ASC`,
@@ -673,7 +753,7 @@ export async function searchEntities({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor };
   } finally {
     client.release();
   }
@@ -799,7 +879,7 @@ async function searchEntitiesByRelationCount({
          ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
-         ${entityFacetSourcesSql(schema, "e")} AS sources,
+         ARRAY[]::text[] AS sources,
          ${entitySearchCountSql("rc")}::bigint AS relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
@@ -815,13 +895,13 @@ async function searchEntitiesByRelationCount({
     const rows = result.rows.map(toEntityRow);
     if (stratified) {
       const sampledRows = selectStratifiedEntitySample(rows, limit);
-      return { entities: await hydrateEntities(schema, sampledRows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor: null };
+      return { entities: await hydrateEntities(schema, sampledRows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor: null };
     }
     const nextCursor = rows.length === limit
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor };
   } finally {
     client.release();
   }
@@ -909,7 +989,7 @@ async function searchEntitiesByRelationCountAndEntityType({
          ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
-         ${entityFacetSourcesSql(schema, "e")} AS sources,
+         ARRAY[]::text[] AS sources,
          rc.search_count AS relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity e ON e.entity_id = rc.entity_id
@@ -927,7 +1007,7 @@ async function searchEntitiesByRelationCountAndEntityType({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor };
   } finally {
     client.release();
   }
@@ -981,17 +1061,13 @@ async function searchEntitiesByRelationCountAndFacetFilters({
   const useBitmapDrivenSearch = filterBitmaps.length > 0;
   let cursorWhere = "";
   let positiveCursorWhere = "";
-  let zeroCursorWhere = "";
   if (normalizedCursor) {
     const countParam = pushParam(normalizedCursor.relationCount);
     const pkParam = pushParam(normalizedCursor.entityPk);
     const relationCountSql = useBitmapDrivenSearch ? entitySearchCountSql("rc") : "rc.search_count";
     const entityIdSql = useBitmapDrivenSearch ? "e.entity_id" : "rc.entity_id";
     cursorWhere = `AND (${relationCountSql} < ${countParam}::bigint OR (${relationCountSql} = ${countParam}::bigint AND ${entityIdSql} > ${pkParam}::uuid))`;
-    positiveCursorWhere = `WHERE (rc.search_count < ${countParam}::bigint OR (rc.search_count = ${countParam}::bigint AND entity_bitmap.entity_id > ${pkParam}::uuid))`;
-    if (normalizedCursor.relationCount === 0) {
-      zeroCursorWhere = `WHERE entity_bitmap.entity_id > ${pkParam}::uuid`;
-    }
+    positiveCursorWhere = `AND (rc.search_count < ${countParam}::bigint OR (rc.search_count = ${countParam}::bigint AND entity_bitmap.entity_id > ${pkParam}::uuid))`;
   }
   params.push(limit);
   const limitParam = `$${params.length}`;
@@ -1015,45 +1091,14 @@ async function searchEntitiesByRelationCountAndFacetFilters({
            SELECT ${bitmapIntersection(filterBitmaps)} AS bitmap
            FROM ${filterCteNames.join("\nCROSS JOIN ")}
          ),
-         relation_count_bitmap AS MATERIALIZED (
-           SELECT COALESCE(rb_build_agg(entity_bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
-           FROM ${schema}.entity_relation_counts rc
-           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
-         ),
-         positive_filter_bitmap AS MATERIALIZED (
-           SELECT rb_and(combined_filter_bitmap.bitmap, relation_count_bitmap.bitmap) AS bitmap
-           FROM combined_filter_bitmap
-           CROSS JOIN relation_count_bitmap
-         ),
-         zero_filter_bitmap AS MATERIALIZED (
-           SELECT rb_andnot(combined_filter_bitmap.bitmap, relation_count_bitmap.bitmap) AS bitmap
-           FROM combined_filter_bitmap
-           CROSS JOIN relation_count_bitmap
-         ),
          positive_page AS MATERIALIZED (
            SELECT entity_bitmap.entity_id, rc.search_count AS relation_count
-           FROM positive_filter_bitmap
-           CROSS JOIN LATERAL rb_iterate(positive_filter_bitmap.bitmap) matched(bitmap_id)
-           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.bitmap_id = matched.bitmap_id
-           JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = entity_bitmap.entity_id
+           FROM ${schema}.entity_relation_counts rc
+           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
+           CROSS JOIN combined_filter_bitmap
+           WHERE rb_contains(combined_filter_bitmap.bitmap, entity_bitmap.bitmap_id)
            ${positiveCursorWhere}
-           ORDER BY rc.search_count DESC, entity_bitmap.entity_id ASC
-           LIMIT ${limitParam}
-         ),
-         zero_page AS MATERIALIZED (
-           SELECT entity_bitmap.entity_id, 0::bigint AS relation_count
-           FROM zero_filter_bitmap
-           CROSS JOIN LATERAL rb_iterate(zero_filter_bitmap.bitmap) matched(bitmap_id)
-           JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.bitmap_id = matched.bitmap_id
-           ${zeroCursorWhere}
-           ORDER BY matched.bitmap_id ASC
-           LIMIT ${limitParam}
-         ),
-         candidate_page AS MATERIALIZED (
-           SELECT entity_id, relation_count FROM positive_page
-           UNION ALL
-           SELECT entity_id, relation_count FROM zero_page
-           ORDER BY relation_count DESC, entity_id ASC
+           ORDER BY rc.search_count DESC, rc.entity_id ASC
            LIMIT ${limitParam}
          )
          SELECT
@@ -1063,9 +1108,9 @@ async function searchEntitiesByRelationCountAndFacetFilters({
            ${resolutionStatusSql(schema, "e")} AS resolution_status,
            ${entityTypeSql(schema, "e")} AS entity_type,
            e.taxonomy_id,
-           ${entityFacetSourcesSql(schema, "e")} AS sources,
+           ARRAY[]::text[] AS sources,
            page.relation_count
-         FROM candidate_page page
+         FROM positive_page page
          JOIN ${schema}.entity e ON e.entity_id = page.entity_id
          ORDER BY page.relation_count DESC, e.entity_id ASC`,
         params,
@@ -1076,7 +1121,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
         ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
         : null;
 
-      return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
+      return { entities: await hydrateEntities(schema, rows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor };
     }
 
     const result = await client.query<{
@@ -1097,7 +1142,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
          ${resolutionStatusSql(schema, "e")} AS resolution_status,
          et.name AS entity_type,
          e.taxonomy_id,
-         ${entityFacetSourcesSql(schema, "e")} AS sources,
+         ARRAY[]::text[] AS sources,
          rc.search_count AS relation_count
        FROM ${schema}.entity_relation_counts rc
        JOIN ${schema}.entity_bitmap_id entity_bitmap ON entity_bitmap.entity_id = rc.entity_id
@@ -1117,7 +1162,7 @@ async function searchEntitiesByRelationCountAndFacetFilters({
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
 
-    return { entities: await hydrateEntities(schema, rows, { identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT }), nextCursor };
+    return { entities: await hydrateEntities(schema, rows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor };
   } finally {
     client.release();
   }
