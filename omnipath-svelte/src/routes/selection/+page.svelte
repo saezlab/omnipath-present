@@ -34,6 +34,13 @@
 	const scopeEndpointMode = $derived(scopeSettings.mode === 'intersection' ? 'both' : 'any');
 	const entityTabScopePks = $derived(Array.from(new Set([...scope.termEntityPks, ...scope.scopedEntityPks])));
 	const scopeAnnotationIds = $derived(Array.from(new Set([...selection.annotationIds, ...scope.ontologyTermIds])));
+	const ontologySelectionScope = $derived({
+		entityPks: selection.selectedEntityPks,
+		annotationTermIds: selection.annotationIds,
+		includeAssociatedEntities: scopeSettings.expandSelection,
+		includeMembersParticipants: scopeSettings.expandSelection,
+		mode: scopeSettings.mode
+	});
 	const hasEntityTabScope = $derived(entityTabScopePks.length > 0);
 	const hasRelationScope = $derived(scope.scopedEntityPks.length > 0 || scopeAnnotationIds.length > 0);
 
@@ -172,6 +179,7 @@
 					onFiltersChange={(f) => (filters = f)}
 					selectedEntityPks={entityTabScopePks}
 					selectedAnnotationIds={scopeAnnotationIds}
+					selectionScope={ontologySelectionScope}
 				/>
 			{/if}
 		{/snippet}

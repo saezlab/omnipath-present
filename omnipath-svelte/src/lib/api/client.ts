@@ -4,6 +4,13 @@ import type { EntityOntologyHierarchy } from "$lib/drizzle";
 
 export type EntitySearchCursor = { relationCount: number; entityPk: string };
 export type SelectionScopeMode = "union" | "intersection";
+export type SelectionScopeRequest = {
+  entityPks?: Array<string | number>;
+  annotationTermIds?: string[];
+  includeAssociatedEntities?: boolean;
+  includeMembersParticipants?: boolean;
+  mode?: SelectionScopeMode;
+};
 
 export async function fetchSelectionScope(params: {
   entityPks?: Array<string | number>;
@@ -250,6 +257,7 @@ export async function fetchOntologySearch(params: {
 export async function fetchScopedOntologySearch(params: {
   entityPks?: Array<string | number>;
   termIds?: string[];
+  selectionScope?: SelectionScopeRequest;
   query?: string;
   prefixes?: string[];
   ontologyIds?: string[];
@@ -262,6 +270,7 @@ export async function fetchScopedOntologySearch(params: {
     body: JSON.stringify({
       entityPks: params.entityPks || [],
       termIds: params.termIds || [],
+      selectionScope: params.selectionScope,
       query: params.query || "",
       prefixes: params.prefixes,
       ontologyIds: params.ontologyIds,
@@ -309,6 +318,7 @@ export async function fetchScopedOntologyPrefixCounts(params: {
 export async function fetchScopedOntologyIdCounts(params: {
   entityPks?: Array<string | number>;
   annotationTermIds?: string[];
+  selectionScope?: SelectionScopeRequest;
   query?: string;
 }) {
   const res = await fetch("/app-api/ontology/ontology-id-counts", {

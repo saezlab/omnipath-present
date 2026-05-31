@@ -8,7 +8,7 @@
   import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
   import * as Tooltip from '$lib/components/ui/tooltip/index.js';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-  import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologyIdCounts } from '$lib/api/client';
+  import { fetchOntologySearch, fetchScopedOntologySearch, fetchScopedOntologyIdCounts, type SelectionScopeRequest } from '$lib/api/client';
   import { getSelectionStore } from '$lib/stores/selection.svelte';
   import OntologyHierarchyDialog from './OntologyHierarchyDialog.svelte';
   import type { SearchFilters } from '$lib/types/search';
@@ -20,9 +20,10 @@
     selectedEntityIds?: string[];
     selectedEntityPks?: Array<string | number>;
     selectedAnnotationIds?: string[];
+    selectionScope?: SelectionScopeRequest;
   }
 
-  let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds }: Props = $props();
+  let { query, filters, onFiltersChange, selectedEntityIds, selectedEntityPks, selectedAnnotationIds, selectionScope }: Props = $props();
 
   const isMobile = new IsMobile();
   const selection = getSelectionStore();
@@ -50,20 +51,22 @@
   let hierarchyOpen = $state(false);
   let hierarchyTerm = $state<(typeof results)[number] | null>(null);
 
-  const isScoped = $derived(!!(selectedEntityPks?.length || selectedAnnotationIds?.length));
+  const isScoped = $derived(!!(selectionScope || selectedEntityPks?.length || selectedAnnotationIds?.length));
   const selectedOntologyIds = $derived(filters.ontology_ids || []);
 
   // Fetch ontology counts from terms associated with entities in the current scope.
   $effect(() => {
     const q = query;
+    const scope = selectionScope;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
 
     let cancelled = false;
     loadingOntologies = true;
     fetchScopedOntologyIdCounts({
-      entityPks: ePks.length > 0 ? ePks : undefined,
-      annotationTermIds: tIds.length > 0 ? tIds : undefined,
+      entityPks: scope ? undefined : ePks.length > 0 ? ePks : undefined,
+      annotationTermIds: scope ? undefined : tIds.length > 0 ? tIds : undefined,
+      selectionScope: scope,
       query: q || undefined,
     })
       .then((counts) => {
@@ -85,6 +88,7 @@
     const q = query;
     const ontologyIds = selectedOntologyIds;
     const scoped = isScoped;
+    const scope = selectionScope;
     const ePks = selectedEntityPks || [];
     const tIds = selectedAnnotationIds || [];
 
@@ -95,7 +99,15 @@
     error = null;
 
     const fetcher = scoped
-      ? fetchScopedOntologySearch({ entityPks: ePks, termIds: tIds, query: q, ontologyIds: ontologyIds.length > 0 ? ontologyIds : undefined, limit: RESULTS_PER_PAGE, offset: 0 })
+      ? fetchScopedOntologySearch({
+          entityPks: scope ? undefined : ePks,
+          termIds: scope ? undefined : tIds,
+          selectionScope: scope,
+          query: q,
+          ontologyIds: ontologyIds.length > 0 ? ontologyIds : undefined,
+          limit: RESULTS_PER_PAGE,
+          offset: 0,
+        })
       : fetchOntologySearch({ query: q, ontologyIds: ontologyIds.length > 0 ? ontologyIds : undefined, limit: RESULTS_PER_PAGE, offset: 0 });
 
     fetcher
@@ -119,8 +131,9 @@
     try {
       const page = isScoped
         ? await fetchScopedOntologySearch({
-            entityPks: selectedEntityPks || [],
-            termIds: selectedAnnotationIds || [],
+            entityPks: selectionScope ? undefined : selectedEntityPks || [],
+            termIds: selectionScope ? undefined : selectedAnnotationIds || [],
+            selectionScope,
             query,
             ontologyIds: selectedOntologyIds.length > 0 ? selectedOntologyIds : undefined,
             limit: RESULTS_PER_PAGE,

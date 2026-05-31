@@ -32,6 +32,13 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json()) as {
     entityPks?: Array<string | number>;
     termIds?: string[];
+    selectionScope?: {
+      entityPks?: Array<string | number>;
+      annotationTermIds?: string[];
+      includeAssociatedEntities?: boolean;
+      includeMembersParticipants?: boolean;
+      mode?: "union" | "intersection";
+    };
     query?: string;
     prefixes?: string[];
     ontologyIds?: string[];
@@ -42,6 +49,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const result = await searchScopedOntologyTerms({
     entityPks: body.entityPks || [],
     termIds: body.termIds || [],
+    selectionScope: body.selectionScope,
     query: body.query || "",
     prefixes: body.prefixes,
     ontologyIds: body.ontologyIds,

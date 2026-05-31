@@ -1,5 +1,6 @@
 import { getPool } from "$lib/server/db/client";
 import { toPublicEntityId } from "$lib/entity-public-id";
+import { relationCategoryEqualsSql, relationPredicateNameSql } from "$lib/server/queries/sql-fragments";
 
 export type OntologyTerm = {
   termId: string;
@@ -79,6 +80,14 @@ export type OntologyIdCount = {
   scopedCount: number;
 };
 
+export type OntologySelectionScopeInput = {
+  entityPks?: Array<string | number>;
+  annotationTermIds?: string[];
+  includeAssociatedEntities?: boolean;
+  includeMembersParticipants?: boolean;
+  mode?: "union" | "intersection";
+};
+
 function ontologyTermsQuery(schema: string): string {
   return `
     SELECT
@@ -154,6 +163,107 @@ function ontologyBitmapScopeCtes(schema: string, entityPksParam: string, termIds
   )`;
 }
 
+function ontologySelectionScopeBitmapCtes(
+  schema: string,
+  entityPksParam: string,
+  termIdsParam: string,
+  {
+    includeAssociatedEntities,
+    includeMembersParticipants,
+    mode,
+  }: {
+    includeAssociatedEntities: boolean;
+    includeMembersParticipants: boolean;
+    mode: "union" | "intersection";
+  },
+): string {
+  const entityExpansionParts = [
+    "SELECT entity_id FROM entity_seed_pks",
+    ...(includeMembersParticipants
+      ? [`SELECT r.object_entity_id AS entity_id
+          FROM ${schema}.relation r
+          JOIN entity_seed_pks seed ON seed.entity_id = r.subject_entity_id
+          WHERE ${relationPredicateNameSql(schema, "r")} IN ('has_member', 'has_participant')`]
+      : []),
+    ...(includeAssociatedEntities
+      ? [`SELECT r.object_entity_id AS entity_id
+          FROM ${schema}.relation r
+          JOIN entity_seed_pks seed ON seed.entity_id = r.subject_entity_id
+          WHERE ${relationCategoryEqualsSql(schema, "r", "association")}`]
+      : []),
+  ];
+  const scopeAgg = mode === "intersection" ? "rb_and_agg" : "rb_or_agg";
+
+  return `selected_seed_terms AS MATERIALIZED (
+    SELECT DISTINCT terms.term_entity_id, terms.term_id
+    FROM ${ontologyTermsTable(schema)}
+    WHERE terms.term_entity_id = ANY(${entityPksParam}::uuid[])
+  ),
+  requested_scope_terms AS MATERIALIZED (
+    SELECT DISTINCT term_id
+    FROM (
+      SELECT unnest(${termIdsParam}::text[]) AS term_id
+      UNION ALL
+      SELECT term_id FROM selected_seed_terms
+    ) ids
+    WHERE term_id <> ''
+  ),
+  entity_seed_pks AS MATERIALIZED (
+    SELECT seed.entity_id
+    FROM unnest(${entityPksParam}::uuid[]) AS seed(entity_id)
+    LEFT JOIN selected_seed_terms seed_terms
+      ON seed_terms.term_entity_id = seed.entity_id
+    WHERE seed_terms.term_entity_id IS NULL
+  ),
+  term_criteria AS MATERIALIZED (
+    SELECT
+      requested.term_id AS criterion_id,
+      COALESCE(rb_or_agg(bitmap.entity_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+    FROM requested_scope_terms requested
+    LEFT JOIN ${ontologyTermsTable(schema)}
+      ON terms.term_id = requested.term_id
+      OR requested.term_id = ANY(terms.term_aliases)
+    LEFT JOIN ${schema}.annotation_term_entity_bitmap bitmap
+      ON bitmap.term_entity_id = terms.term_entity_id
+    GROUP BY requested.term_id
+  ),
+  entity_seed_entities AS MATERIALIZED (
+    SELECT DISTINCT entity_id
+    FROM (${entityExpansionParts.join("\nUNION ALL\n")}) expanded_entities
+  ),
+  entity_criterion AS MATERIALIZED (
+    SELECT
+      'entity_seed' AS criterion_id,
+      COALESCE(rb_build_agg(DISTINCT bitmap.bitmap_id), rb_build(ARRAY[]::integer[])) AS bitmap
+    FROM entity_seed_entities entities
+    JOIN ${schema}.entity_bitmap_id bitmap
+      ON bitmap.entity_id = entities.entity_id
+    HAVING EXISTS (SELECT 1 FROM entity_seed_pks)
+  ),
+  selection_criteria AS MATERIALIZED (
+    SELECT criterion_id, bitmap FROM term_criteria
+    UNION ALL
+    SELECT criterion_id, bitmap FROM entity_criterion
+  ),
+  entity_scope_bitmap AS MATERIALIZED (
+    SELECT
+      CASE
+        WHEN COUNT(*) = 0 THEN rb_build(ARRAY[]::integer[])
+        ELSE COALESCE(${scopeAgg}(bitmap), rb_build(ARRAY[]::integer[]))
+      END AS bitmap
+    FROM selection_criteria
+  ),
+  relation_scope_bitmap AS MATERIALIZED (
+    SELECT COALESCE(rb_or_agg(relation_bitmap.relation_bitmap), rb_build(ARRAY[]::integer[])) AS bitmap
+    FROM entity_scope_bitmap entity_scope
+    CROSS JOIN LATERAL rb_iterate(entity_scope.bitmap) scoped(bitmap_id)
+    JOIN ${schema}.entity_bitmap_id entity_bitmap
+      ON entity_bitmap.bitmap_id = scoped.bitmap_id
+    JOIN ${schema}.entity_relation_bitmap relation_bitmap
+      ON relation_bitmap.entity_id = entity_bitmap.entity_id
+  )`;
+}
+
 function toOntologyTerm(row: OntologyTermRow): OntologyTerm {
   return {
     termId: row.term_id,
@@ -169,6 +279,20 @@ function toOntologyTerm(row: OntologyTermRow): OntologyTerm {
 
 function normalizeIdValues(values: Array<string | number> | undefined): string[] {
   return Array.from(new Set((values || []).map((value) => String(value).trim()).filter(Boolean)));
+}
+
+function normalizeSelectionScope(scope: OntologySelectionScopeInput | undefined) {
+  if (!scope) return null;
+  const entityPks = normalizeIdValues(scope.entityPks);
+  const annotationTermIds = Array.from(new Set((scope.annotationTermIds || []).map((id) => id.trim()).filter(Boolean)));
+  if (entityPks.length === 0 && annotationTermIds.length === 0) return null;
+  return {
+    entityPks,
+    annotationTermIds,
+    includeAssociatedEntities: scope.includeAssociatedEntities !== false,
+    includeMembersParticipants: scope.includeMembersParticipants !== false,
+    mode: scope.mode === "intersection" ? "intersection" as const : "union" as const,
+  };
 }
 
 function hierarchyPredicatesForOntology(ontologyId: string | null): string[] {
@@ -635,6 +759,7 @@ export async function getOntologyPrefixes(): Promise<string[]> {
 export async function searchScopedOntologyTerms({
   entityPks = [],
   termIds = [],
+  selectionScope,
   query = "",
   prefixes,
   ontologyIds,
@@ -643,15 +768,17 @@ export async function searchScopedOntologyTerms({
 }: {
   entityPks?: Array<string | number>;
   termIds?: string[];
+  selectionScope?: OntologySelectionScopeInput;
   query?: string;
   prefixes?: string[];
   ontologyIds?: string[];
   limit?: number;
   offset?: number;
 }): Promise<ScopedOntologyTerm[]> {
+  const normalizedSelectionScope = normalizeSelectionScope(selectionScope);
   const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(termIds.map((id) => id.trim()).filter(Boolean)));
-  if (normalizedEntityPks.length === 0 && normalizedTermIds.length === 0) return [];
+  if (!normalizedSelectionScope && normalizedEntityPks.length === 0 && normalizedTermIds.length === 0) return [];
 
   const normalizedPrefixes = Array.from(new Set((prefixes || []).map((prefix) => prefix.trim()).filter(Boolean)));
   const normalizedOntologyIds = Array.from(new Set((ontologyIds || []).map((id) => id.trim()).filter(Boolean)));
@@ -660,7 +787,12 @@ export async function searchScopedOntologyTerms({
 
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const params: unknown[] = [normalizedEntityPks, normalizedTermIds];
+    const params: unknown[] = normalizedSelectionScope
+      ? [normalizedSelectionScope.entityPks, normalizedSelectionScope.annotationTermIds]
+      : [normalizedEntityPks, normalizedTermIds];
+    const scopeCtes = normalizedSelectionScope
+      ? ontologySelectionScopeBitmapCtes(S, "$1", "$2", normalizedSelectionScope)
+      : ontologyBitmapScopeCtes(S, "$1", "$2");
     const whereParts: string[] = [];
 
     if (trimmedQuery) {
@@ -685,7 +817,7 @@ export async function searchScopedOntologyTerms({
     const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
 
     const result = await client.query<OntologyTermRow>(
-      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
+      `WITH ${scopeCtes}
        SELECT
          terms.*,
          scoped.annotated_entity_count,
@@ -808,21 +940,31 @@ export async function getScopedOntologyPrefixCounts({
 export async function getScopedOntologyIdCounts({
   entityPks = [],
   annotationTermIds = [],
+  selectionScope,
   query = "",
 }: {
   entityPks?: Array<string | number>;
   annotationTermIds?: string[];
+  selectionScope?: OntologySelectionScopeInput;
   query?: string;
 }): Promise<OntologyIdCount[]> {
+  const normalizedSelectionScope = normalizeSelectionScope(selectionScope);
   const normalizedEntityPks = normalizeIdValues(entityPks);
   const normalizedTermIds = Array.from(new Set(annotationTermIds.map((id) => id.trim()).filter(Boolean)));
   const trimmedQuery = query.trim();
-  const hasScope = normalizedEntityPks.length > 0 || normalizedTermIds.length > 0;
+  const hasScope = !!normalizedSelectionScope || normalizedEntityPks.length > 0 || normalizedTermIds.length > 0;
 
   const client = await getPool().connect();
   try {
     const S = process.env.OMNIPATH_PG_SCHEMA || "public";
-    const params: unknown[] = hasScope ? [normalizedEntityPks, normalizedTermIds] : [];
+    const params: unknown[] = hasScope
+      ? normalizedSelectionScope
+        ? [normalizedSelectionScope.entityPks, normalizedSelectionScope.annotationTermIds]
+        : [normalizedEntityPks, normalizedTermIds]
+      : [];
+    const scopeCtes = normalizedSelectionScope
+      ? ontologySelectionScopeBitmapCtes(S, "$1", "$2", normalizedSelectionScope)
+      : ontologyBitmapScopeCtes(S, "$1", "$2");
     const whereParts: string[] = [];
 
     if (trimmedQuery) {
@@ -849,7 +991,7 @@ export async function getScopedOntologyIdCounts({
     const whereClause = whereParts.length > 0 ? `AND ${whereParts.join(" AND ")}` : "";
 
     const result = await client.query<{ ontology_id: string | null; scoped_count: string | number }>(
-      `WITH ${ontologyBitmapScopeCtes(S, "$1", "$2")}
+      `WITH ${scopeCtes}
        SELECT terms.ontology_id, COUNT(*) AS scoped_count
        FROM ${ontologyTermsTable(S)}
        LEFT JOIN ${S}.annotation_term_entity_bitmap entity_bitmap
