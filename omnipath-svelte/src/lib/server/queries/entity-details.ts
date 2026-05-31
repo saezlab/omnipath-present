@@ -24,7 +24,12 @@ export async function getEntityDetails(
 
   const schema = SEARCH_SCHEMA();
   const client = await getPool().connect();
+  let inTransaction = false;
   try {
+    await client.query("BEGIN");
+    inTransaction = true;
+    await client.query("SET LOCAL jit = off");
+
     const interactionCountResult = await client.query<{ count: string }>(
       `SELECT count(*) AS count
        FROM ${schema}.relation r
@@ -42,21 +47,29 @@ export async function getEntityDetails(
       [entity.entityPk],
     );
     const attributeResult = await client.query<EntityAnnotationRow>(
-      `SELECT DISTINCT
+      `WITH entity_evidence_rows AS MATERIALIZED (
+         SELECT source_id, entity_evidence_id
+         FROM ${schema}.entity_evidence_resolution
+         WHERE entity_id = $1::uuid
+       ),
+       entity_annotation_keys AS MATERIALIZED (
+         SELECT DISTINCT eer.source_id, eea.annotation_key
+         FROM entity_evidence_rows eer
+         JOIN ${schema}.entity_evidence_annotation eea
+           ON eea.source_id = eer.source_id
+          AND eea.entity_evidence_id = eer.entity_evidence_id
+       )
+       SELECT DISTINCT
          a.term,
          a.value,
          a.unit,
          'entity'::text AS scope,
          ds.name AS source
-       FROM ${schema}.entity_evidence_resolution eer
-       JOIN ${schema}.entity_evidence_annotation eea
-         ON eea.source_id = eer.source_id
-        AND eea.entity_evidence_id = eer.entity_evidence_id
-       JOIN ${schema}.annotation a
-         ON a.annotation_key = eea.annotation_key
+       FROM entity_annotation_keys eak
        JOIN ${schema}.data_source ds
-         ON ds.source_id = eea.source_id
-       WHERE eer.entity_id = $1::uuid
+         ON ds.source_id = eak.source_id
+       JOIN ${schema}.annotation a
+         ON a.annotation_key = eak.annotation_key
        ORDER BY a.term, a.value NULLS LAST, ds.name NULLS LAST
        LIMIT 500`,
       [entity.entityPk],
@@ -72,7 +85,7 @@ export async function getEntityDetails(
       || attributes.find((attribute) => attribute.term.toLowerCase().includes("ncbi tax id") && attribute.value)?.value
       || entity.taxonomyId;
 
-    return {
+    const details = {
       entity: {
         ...entity,
         taxonomyId,
@@ -86,6 +99,15 @@ export async function getEntityDetails(
         predicate: row.predicate,
       })),
     };
+
+    await client.query("COMMIT");
+    inTransaction = false;
+    return details;
+  } catch (error) {
+    if (inTransaction) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    throw error;
   } finally {
     client.release();
   }
