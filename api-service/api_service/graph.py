@@ -23,6 +23,26 @@ def _connect():
     return psycopg.connect(_database_url(), row_factory=dict_row)
 
 
+def _relation_term_bitmap_table() -> str:
+    with _connect() as conn:
+        for table_name in (
+            "annotation_term_relation_bitmap",
+            "annotation_term_direct_relation_bitmap",
+        ):
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = %s
+                  AND table_name = %s
+                """,
+                (SEARCH_SCHEMA, table_name),
+            ).fetchone()
+            if row:
+                return table_name
+    return "annotation_term_direct_relation_bitmap"
+
+
 def _strings(values: list[Any] | None) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -48,6 +68,17 @@ def _ints(values: list[Any] | None) -> list[int]:
     return out
 
 
+def _ids(values: list[Any] | None) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values or []:
+        text = str(value).strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
 def _limit(value: Any, default: int = 50, maximum: int = 500) -> int:
     try:
         parsed = int(value)
@@ -66,29 +97,34 @@ def _offset(value: Any) -> int:
 
 def _entity_sources_sql(alias: str = "e") -> str:
     return f"""ARRAY(
-        SELECT DISTINCT source_value
+        SELECT DISTINCT source_name
         FROM (
-          SELECT ee.source AS source_value
+          SELECT ds.name AS source_name
           FROM {SEARCH_SCHEMA}.entity_evidence_resolution eer
           JOIN {SEARCH_SCHEMA}.entity_evidence ee ON ee.entity_evidence_id = eer.entity_evidence_id
+          JOIN {SEARCH_SCHEMA}.data_source ds ON ds.source_id = ee.source_id
           WHERE eer.entity_id = {alias}.entity_id
           UNION
-          SELECT re.source AS source_value
-          FROM {SEARCH_SCHEMA}.relation_evidence re
+          SELECT ds.name AS source_name
+          FROM {SEARCH_SCHEMA}.relation_evidence_relation rer
+          JOIN {SEARCH_SCHEMA}.relation_evidence re
+            ON re.source_id = rer.source_id
+           AND re.relation_evidence_id = rer.relation_evidence_id
+          JOIN {SEARCH_SCHEMA}.data_source ds ON ds.source_id = re.source_id
           WHERE re.subject_entity_id = {alias}.entity_id
              OR re.object_entity_id = {alias}.entity_id
         ) entity_sources
-        WHERE source_value IS NOT NULL AND source_value <> ''
-        ORDER BY source_value
+        WHERE source_name IS NOT NULL AND source_name <> ''
+        ORDER BY source_name
       )"""
 
 
 def _entity_type_sql(alias: str = "e") -> str:
-    return f"(SELECT et.name FROM {SEARCH_SCHEMA}.entity_type et WHERE et.entity_type_id = {alias}.entity_type_id)"
+    return f"(SELECT et.name FROM {SEARCH_SCHEMA}.vocab_entity_type et WHERE et.entity_type_id = {alias}.entity_type_id)"
 
 
 def _canonical_type_sql(alias: str = "e") -> str:
-    return f"(SELECT it.name FROM {SEARCH_SCHEMA}.identifier_type it WHERE it.identifier_type_id = {alias}.canonical_identifier_type_id)"
+    return f"(SELECT it.name FROM {SEARCH_SCHEMA}.vocab_identifier_type it WHERE it.identifier_type_id = {alias}.canonical_identifier_type_id)"
 
 
 def _entity_select(alias: str = "e") -> str:
@@ -103,7 +139,7 @@ def _entity_select(alias: str = "e") -> str:
 
 def _entity_to_api(row: dict[str, Any], prefix: str = "") -> dict[str, Any]:
     return {
-        "entityPk": int(row[f"{prefix}entity_id"]),
+        "entityPk": str(row[f"{prefix}entity_id"]),
         "canonicalIdentifier": row[f"{prefix}id"],
         "canonicalIdentifierType": row[f"{prefix}id_type"],
         "entityType": row[f"{prefix}entity_type"],
@@ -113,7 +149,7 @@ def _entity_to_api(row: dict[str, Any], prefix: str = "") -> dict[str, Any]:
     }
 
 
-def _identifiers_for_entity_pks(entity_pks: list[int]) -> dict[int, list[dict[str, Any]]]:
+def _identifiers_for_entity_pks(entity_pks: list[str]) -> dict[str, list[dict[str, Any]]]:
     if not entity_pks:
         return {}
     sql = f"""
@@ -127,16 +163,16 @@ def _identifiers_for_entity_pks(entity_pks: list[int]) -> dict[int, list[dict[st
           ON i.identifier_id = eil.identifier_id
         JOIN {SEARCH_SCHEMA}.vocab_identifier_type it
           ON it.identifier_type_id = i.identifier_type_id
-        WHERE eil.entity_id = ANY(%s::bigint[])
+        WHERE eil.entity_id = ANY(%s::uuid[])
           AND i.value <> ''
         UNION
         SELECT DISTINCT
           terms.term_entity_id AS entity_id,
-          NULL::bigint AS identifier_id,
+          NULL::uuid AS identifier_id,
           'Name:OM:0200' AS identifier_type,
           terms.label AS identifier
-        FROM {SEARCH_SCHEMA}.ontology_terms terms
-        WHERE terms.term_entity_id = ANY(%s::bigint[])
+        FROM {SEARCH_SCHEMA}.entity_ontology_term terms
+        WHERE terms.term_entity_id = ANY(%s::uuid[])
           AND terms.label IS NOT NULL
           AND terms.label <> ''
         ORDER BY entity_id, identifier_type, identifier
@@ -144,16 +180,16 @@ def _identifiers_for_entity_pks(entity_pks: list[int]) -> dict[int, list[dict[st
     with _connect() as conn:
         rows = conn.execute(sql, (entity_pks, entity_pks)).fetchall()
 
-    result: dict[int, list[dict[str, Any]]] = {}
+    result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        entity_pk = int(row["entity_id"])
+        entity_pk = str(row["entity_id"])
         item = {
             "entityPk": entity_pk,
             "identifier": row["identifier"],
             "identifierType": row["identifier_type"],
         }
         if row["identifier_id"] is not None:
-            item["id"] = int(row["identifier_id"])
+            item["id"] = str(row["identifier_id"])
         result.setdefault(entity_pk, []).append(item)
     return result
 
@@ -172,20 +208,22 @@ def _entity_filter_sql(filters: dict[str, Any], params: list[Any], alias: str = 
         return "%s"
 
     where: list[str] = []
-    entity_pks = _ints(filters.get("entityPks") or filters.get("entity_pks"))
+    entity_pks = _ids(filters.get("entityPks") or filters.get("entity_pks"))
     annotation_terms = _strings(filters.get("annotationTermIds") or filters.get("annotation_term_ids") or filters.get("ontology_terms"))
     entity_types = _strings(filters.get("entityTypes") or filters.get("entity_types"))
     sources = _strings(filters.get("sources"))
     taxonomy_ids = _strings(filters.get("ncbi_tax_id") or filters.get("taxonomy_ids") or filters.get("taxonomyIds"))
 
     if entity_pks:
-        where.append(f"{alias}.entity_id = ANY({push(entity_pks)}::bigint[])")
+        where.append(f"{alias}.entity_id = ANY({push(entity_pks)}::uuid[])")
     if annotation_terms:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.relation assoc
-          JOIN {SEARCH_SCHEMA}.ontology_terms terms ON terms.term_entity_id = assoc.object_entity_id
-          WHERE assoc.relation_category = 'association'
+          JOIN {SEARCH_SCHEMA}.vocab_relation_category category
+            ON category.relation_category_id = assoc.relation_category_id
+          JOIN {SEARCH_SCHEMA}.entity_ontology_term terms ON terms.term_entity_id = assoc.object_entity_id
+          WHERE category.name = 'association'
             AND assoc.subject_entity_id = {alias}.entity_id
             AND terms.term_id = ANY({push(annotation_terms)}::text[])
         )""")
@@ -193,25 +231,28 @@ def _entity_filter_sql(filters: dict[str, Any], params: list[Any], alias: str = 
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+          JOIN {SEARCH_SCHEMA}.entity_bitmap_id ebi ON ebi.entity_id = {alias}.entity_id
           WHERE f.facet_name = 'entity_type'
             AND f.facet_value = ANY({push(entity_types)}::text[])
-            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
+            AND rb_contains(f.entity_bitmap, ebi.bitmap_id)
         )""")
     if taxonomy_ids:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+          JOIN {SEARCH_SCHEMA}.entity_bitmap_id ebi ON ebi.entity_id = {alias}.entity_id
           WHERE f.facet_name = 'taxonomy_id'
             AND f.facet_value = ANY({push(taxonomy_ids)}::text[])
-            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
+            AND rb_contains(f.entity_bitmap, ebi.bitmap_id)
         )""")
     if sources:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+          JOIN {SEARCH_SCHEMA}.entity_bitmap_id ebi ON ebi.entity_id = {alias}.entity_id
           WHERE f.facet_name = 'source'
             AND f.facet_value = ANY({push(sources)}::text[])
-            AND rb_contains(f.entity_bitmap, {alias}.entity_id::integer)
+            AND rb_contains(f.entity_bitmap, ebi.bitmap_id)
         )""")
 
     return where
@@ -221,7 +262,7 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
     identifiers = _strings(payload.get("identifiers"))
     filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
     limit = _limit(payload.get("limit"), default=20, maximum=100)
-    preferred_taxonomy_ids = _strings(payload.get("preferredTaxonomyIds") or payload.get("preferred_taxonomy_ids"))
+    preferred_taxonomy_ids = _ints(payload.get("preferredTaxonomyIds") or payload.get("preferred_taxonomy_ids"))
     if not identifiers:
         return {"matches": [], "entities": []}
 
@@ -249,7 +290,7 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
             {_canonical_type_sql('e')} AS match_identifier_type,
             'canonical' AS match_kind,
             1000
-            + CASE WHEN e.taxonomy_id = ANY(%s::text[]) THEN 50 ELSE 0 END
+            + CASE WHEN e.taxonomy_id = ANY(%s::bigint[]) THEN 50 ELSE 0 END
             + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
@@ -274,7 +315,7 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
               WHEN it.name ILIKE 'Gene Name:%%' THEN 900
               ELSE 800
             END
-            + CASE WHEN e.taxonomy_id = ANY(%s::text[]) THEN 50 ELSE 0 END
+            + CASE WHEN e.taxonomy_id = ANY(%s::bigint[]) THEN 50 ELSE 0 END
             + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
@@ -321,12 +362,12 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
     for row in rows:
         rows_by_query.setdefault(str(row["query_identifier"]), []).append(row)
 
-    entities_by_pk: dict[int, dict[str, Any]] = {}
+    entities_by_pk: dict[str, dict[str, Any]] = {}
     matches: list[dict[str, Any]] = []
     for identifier in identifiers:
         candidates = sorted(
             rows_by_query.get(identifier, []),
-            key=lambda row: (-int(row["score"] or 0), str(row["taxonomy_id"] or ""), int(row["entity_id"])),
+            key=lambda row: (-int(row["score"] or 0), str(row["taxonomy_id"] or ""), str(row["entity_id"])),
         )[:limit]
         hydrated = _hydrate_entities(candidates)
         candidate_items = []
@@ -401,14 +442,14 @@ def search_entities(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def entities_by_pks(entity_pks: list[Any]) -> list[dict[str, Any]]:
-    pks = _ints(entity_pks)
+    pks = _ids(entity_pks)
     if not pks:
         return []
     sql = f"""
         SELECT {_entity_select("e")}
         FROM {SEARCH_SCHEMA}.entity e
         LEFT JOIN {SEARCH_SCHEMA}.entity_relation_counts rc ON rc.entity_id = e.entity_id
-        WHERE e.entity_id = ANY(%s::bigint[])
+        WHERE e.entity_id = ANY(%s::uuid[])
         ORDER BY e.entity_id
     """
     with _connect() as conn:
@@ -432,9 +473,9 @@ def entities_for_terms(payload: dict[str, Any]) -> dict[str, Any]:
 def _relation_select(alias: str = "r") -> str:
     return f"""{alias}.relation_id,
       {alias}.subject_entity_id,
-      {alias}.predicate,
+      rp.name AS predicate,
       {alias}.object_entity_id,
-      {alias}.relation_category,
+      rc.name AS relation_category,
       ARRAY(
         SELECT DISTINCT entity_type
         FROM (
@@ -455,22 +496,25 @@ def _relation_select(alias: str = "r") -> str:
         WHERE rer.relation_id = {alias}.relation_id
       ) AS evidence_count,
       ARRAY(
-        SELECT DISTINCT re.source
+        SELECT DISTINCT ds.name
         FROM {SEARCH_SCHEMA}.relation_evidence_relation rer
-        JOIN {SEARCH_SCHEMA}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
+        JOIN {SEARCH_SCHEMA}.relation_evidence re
+          ON re.source_id = rer.source_id
+         AND re.relation_evidence_id = rer.relation_evidence_id
+        JOIN {SEARCH_SCHEMA}.data_source ds ON ds.source_id = re.source_id
         WHERE rer.relation_id = {alias}.relation_id
-          AND re.source IS NOT NULL
-          AND re.source <> ''
-        ORDER BY re.source
+          AND ds.name IS NOT NULL
+          AND ds.name <> ''
+        ORDER BY ds.name
       ) AS sources"""
 
 
 def _relation_to_api(row: dict[str, Any], include_entities: bool) -> dict[str, Any]:
     relation = {
-        "relationPk": int(row["relation_id"]),
-        "subjectEntityPk": int(row["subject_entity_id"]),
+        "relationPk": str(row["relation_id"]),
+        "subjectEntityPk": str(row["subject_entity_id"]),
         "predicate": row["predicate"],
-        "objectEntityPk": int(row["object_entity_id"]),
+        "objectEntityPk": str(row["object_entity_id"]),
         "relationCategory": row["relation_category"],
         "participantTypes": row["participant_types"] or [],
         "evidenceCount": int(row["evidence_count"] or 0),
@@ -488,24 +532,25 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
         return "%s"
 
     where: list[str] = []
-    relation_pks = _ints(filters.get("relationPks") or filters.get("relation_pks"))
+    relation_pks = _ids(filters.get("relationPks") or filters.get("relation_pks"))
     relation_categories = _strings(filters.get("relationCategories") or filters.get("relation_categories"))
     predicates = _strings(filters.get("predicates"))
     participant_types = _strings(filters.get("participantTypes") or filters.get("participant_types") or filters.get("interactionTypes") or filters.get("interaction_types"))
-    subject_entity_pks = _ints(filters.get("subjectEntityPks") or filters.get("subject_entity_pks"))
-    object_entity_pks = _ints(filters.get("objectEntityPks") or filters.get("object_entity_pks"))
-    entity_pks = _ints(filters.get("entityPks") or filters.get("entity_pks"))
+    subject_entity_pks = _ids(filters.get("subjectEntityPks") or filters.get("subject_entity_pks"))
+    object_entity_pks = _ids(filters.get("objectEntityPks") or filters.get("object_entity_pks"))
+    entity_pks = _ids(filters.get("entityPks") or filters.get("entity_pks"))
     sources = _strings(filters.get("sources"))
     taxonomy_ids = _strings(filters.get("ncbi_tax_id") or filters.get("taxonomy_ids") or filters.get("taxonomyIds"))
     annotation_terms = _strings(filters.get("annotationTerms") or filters.get("annotation_terms") or filters.get("ontology_terms"))
     require_both = bool(filters.get("requireBothParticipants") or filters.get("require_both_participants"))
+    relation_term_bitmap_table = _relation_term_bitmap_table()
 
     if relation_pks:
-        where.append(f"r.relation_id = ANY({push(relation_pks)}::bigint[])")
+        where.append(f"r.relation_id = ANY({push(relation_pks)}::uuid[])")
     if relation_categories:
-        where.append(f"r.relation_category = ANY({push(relation_categories)}::text[])")
+        where.append(f"rc.name = ANY({push(relation_categories)}::text[])")
     if predicates:
-        where.append(f"r.predicate = ANY({push(predicates)}::text[])")
+        where.append(f"rp.name = ANY({push(predicates)}::text[])")
     if participant_types:
         where.append(f"""EXISTS (
           SELECT 1 FROM {SEARCH_SCHEMA}.entity endpoint
@@ -513,59 +558,42 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
             AND endpoint.entity_id IN (r.subject_entity_id, r.object_entity_id)
         )""")
     if subject_entity_pks:
-        where.append(f"r.subject_entity_id = ANY({push(subject_entity_pks)}::bigint[])")
+        where.append(f"r.subject_entity_id = ANY({push(subject_entity_pks)}::uuid[])")
     if object_entity_pks:
-        where.append(f"r.object_entity_id = ANY({push(object_entity_pks)}::bigint[])")
+        where.append(f"r.object_entity_id = ANY({push(object_entity_pks)}::uuid[])")
     if entity_pks:
         op = "AND" if require_both else "OR"
-        where.append(f"(r.subject_entity_id = ANY({push(entity_pks)}::bigint[]) {op} r.object_entity_id = ANY(%s::bigint[]))")
+        where.append(f"(r.subject_entity_id = ANY({push(entity_pks)}::uuid[]) {op} r.object_entity_id = ANY(%s::uuid[]))")
         params.append(entity_pks)
     if sources:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.relation_evidence_relation rer
-          JOIN {SEARCH_SCHEMA}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
+          JOIN {SEARCH_SCHEMA}.relation_evidence re
+            ON re.source_id = rer.source_id
+           AND re.relation_evidence_id = rer.relation_evidence_id
+          JOIN {SEARCH_SCHEMA}.data_source ds ON ds.source_id = re.source_id
           WHERE rer.relation_id = r.relation_id
-            AND re.source = ANY({push(sources)}::text[])
+            AND ds.name = ANY({push(sources)}::text[])
         )""")
     if taxonomy_ids:
         where.append(f"""EXISTS (
           SELECT 1
           FROM {SEARCH_SCHEMA}.facet_relation_bitmap f
+          JOIN {SEARCH_SCHEMA}.relation_bitmap_id rbi ON rbi.relation_id = r.relation_id
           WHERE f.facet_name = 'taxonomy_id'
             AND f.facet_value = ANY({push(taxonomy_ids)}::text[])
-            AND rb_contains(f.relation_bitmap, r.relation_id::integer)
+            AND rb_contains(f.relation_bitmap, rbi.bitmap_id)
         )""")
     if annotation_terms:
-        term_param = push(annotation_terms)
-        where.append(f"""r.relation_id IN (
-          WITH term_entities AS (
-            SELECT terms.term_entity_id
-            FROM {SEARCH_SCHEMA}.ontology_terms terms
-            WHERE terms.term_id = ANY({term_param}::text[])
-          ),
-          annotated_entity_ids AS (
-            SELECT DISTINCT association.subject_entity_id AS entity_id
-            FROM {SEARCH_SCHEMA}.relation association
-            JOIN term_entities term_entity ON term_entity.term_entity_id = association.object_entity_id
-            WHERE association.relation_category = 'association'
-          ),
-          directly_annotated_relation_ids AS (
-            SELECT DISTINCT ra.relation_id
-            FROM {SEARCH_SCHEMA}.relation_annotation ra
-            JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = ra.annotation_key
-            JOIN term_entities term_entity
-              ON term_entity.term_id IN (a.term, a.value)
-          )
-          SELECT relation_id FROM directly_annotated_relation_ids
-          UNION
-          SELECT subject_relation.relation_id
-          FROM {SEARCH_SCHEMA}.relation subject_relation
-          JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = subject_relation.subject_entity_id
-          UNION
-          SELECT object_relation.relation_id
-          FROM {SEARCH_SCHEMA}.relation object_relation
-          JOIN annotated_entity_ids annotated_entity ON annotated_entity.entity_id = object_relation.object_entity_id
+        where.append(f"""EXISTS (
+          SELECT 1
+          FROM {SEARCH_SCHEMA}.entity_ontology_term terms
+          JOIN {SEARCH_SCHEMA}.{relation_term_bitmap_table} bitmap
+            ON bitmap.term_entity_id = terms.term_entity_id
+          JOIN {SEARCH_SCHEMA}.relation_bitmap_id rbi ON rbi.relation_id = r.relation_id
+          WHERE terms.term_id = ANY({push(annotation_terms)}::text[])
+            AND rb_contains(bitmap.relation_bitmap, rbi.bitmap_id)
         )""")
 
     return f"WHERE {' AND '.join(where)}" if where else ""
@@ -606,12 +634,24 @@ def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
         SELECT {_relation_select("r")}
           {entity_select}
         FROM {SEARCH_SCHEMA}.relation r
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_predicate rp
+          ON rp.relation_predicate_id = r.predicate_id
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_category rc
+          ON rc.relation_category_id = r.relation_category_id
         {entity_joins}
         {where_sql}
         ORDER BY r.relation_id
         LIMIT %s OFFSET %s
     """
-    count_sql = f"SELECT count(*)::bigint AS total FROM {SEARCH_SCHEMA}.relation r {where_sql}"
+    count_sql = f"""
+        SELECT count(*)::bigint AS total
+        FROM {SEARCH_SCHEMA}.relation r
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_predicate rp
+          ON rp.relation_predicate_id = r.predicate_id
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_category rc
+          ON rc.relation_category_id = r.relation_category_id
+        {where_sql}
+    """
     with _connect() as conn:
         rows = conn.execute(sql, page_params).fetchall()
         total = conn.execute(count_sql, params).fetchone()["total"]
@@ -624,46 +664,58 @@ def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_relation(relation_id: int) -> dict[str, Any] | None:
+def get_relation(relation_id: str) -> dict[str, Any] | None:
     result = search_relations({"filters": {"relationPks": [relation_id]}, "limit": 1, "includeEntities": True})
     return result["relations"][0] if result["relations"] else None
 
 
-def relation_evidence(relation_id: int) -> dict[str, Any]:
+def relation_evidence(relation_id: str) -> dict[str, Any]:
     sql = f"""
         SELECT
-          re.source,
+          ds.name AS source,
           re.relation_evidence_id,
           rer.relation_id,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', rea.scope) ORDER BY a.annotation_key)
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', vas.name) ORDER BY a.annotation_key)
             FROM {SEARCH_SCHEMA}.relation_evidence_annotation rea
             JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = rea.annotation_key
-            WHERE rea.relation_evidence_id = re.relation_evidence_id AND rea.scope IN ('record', 'relation')
+            JOIN {SEARCH_SCHEMA}.vocab_annotation_scope vas
+              ON vas.annotation_scope_id = rea.annotation_scope_id
+            WHERE rea.source_id = re.source_id
+              AND rea.relation_evidence_id = re.relation_evidence_id
+              AND vas.name = 'relation'
           ), '[]'::jsonb) AS record_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', eea.scope) ORDER BY a.annotation_key)
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', 'subject') ORDER BY a.annotation_key)
             FROM {SEARCH_SCHEMA}.entity_evidence_annotation eea
             JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = eea.annotation_key
-            WHERE eea.entity_evidence_id = re.subject_entity_evidence_id
+            WHERE eea.source_id = re.source_id
+              AND eea.entity_evidence_id = re.subject_entity_evidence_id
           ), '[]'::jsonb) AS subject_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', eea.scope) ORDER BY a.annotation_key)
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', 'object') ORDER BY a.annotation_key)
             FROM {SEARCH_SCHEMA}.entity_evidence_annotation eea
             JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = eea.annotation_key
-            WHERE eea.entity_evidence_id = re.object_entity_evidence_id
+            WHERE eea.source_id = re.source_id
+              AND eea.entity_evidence_id = re.object_entity_evidence_id
           ), '[]'::jsonb) AS object_attributes,
           COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', rea.scope) ORDER BY a.annotation_key)
+            SELECT jsonb_agg(jsonb_build_object('term', a.term, 'value', a.value, 'unit', a.unit, 'scope', vas.name) ORDER BY a.annotation_key)
             FROM {SEARCH_SCHEMA}.relation_evidence_annotation rea
             JOIN {SEARCH_SCHEMA}.annotation a ON a.annotation_key = rea.annotation_key
-            WHERE rea.relation_evidence_id = re.relation_evidence_id
-              AND rea.scope NOT IN ('record', 'relation')
+            JOIN {SEARCH_SCHEMA}.vocab_annotation_scope vas
+              ON vas.annotation_scope_id = rea.annotation_scope_id
+            WHERE rea.source_id = re.source_id
+              AND rea.relation_evidence_id = re.relation_evidence_id
+              AND vas.name <> 'relation'
           ), '[]'::jsonb) AS evidence
         FROM {SEARCH_SCHEMA}.relation_evidence_relation rer
-        JOIN {SEARCH_SCHEMA}.relation_evidence re ON re.relation_evidence_id = rer.relation_evidence_id
+        JOIN {SEARCH_SCHEMA}.relation_evidence re
+          ON re.source_id = rer.source_id
+         AND re.relation_evidence_id = rer.relation_evidence_id
+        JOIN {SEARCH_SCHEMA}.data_source ds ON ds.source_id = re.source_id
         WHERE rer.relation_id = %s
-        ORDER BY re.source, re.relation_evidence_id
+        ORDER BY ds.name, re.relation_evidence_id
     """
     with _connect() as conn:
         rows = conn.execute(sql, (relation_id,)).fetchall()
@@ -672,8 +724,8 @@ def relation_evidence(relation_id: int) -> dict[str, Any]:
         "evidence": [
             {
                 "source": row["source"],
-                "relationEvidencePk": int(row["relation_evidence_id"]),
-                "relationPk": int(row["relation_id"]),
+                "relationEvidencePk": str(row["relation_evidence_id"]),
+                "relationPk": str(row["relation_id"]),
                 "recordAttributes": row["record_attributes"] or [],
                 "subjectAttributes": row["subject_attributes"] or [],
                 "objectAttributes": row["object_attributes"] or [],

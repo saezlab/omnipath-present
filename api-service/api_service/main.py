@@ -1,9 +1,6 @@
 """FastAPI application for API service."""
 
 import logging
-import re
-from contextlib import asynccontextmanager
-from functools import lru_cache
 
 from fastapi import Body, FastAPI, HTTPException, Query
 
@@ -23,201 +20,34 @@ from .models import (
     EntityResolveRequest,
     EntityResolveResponse,
 )
-from .registry import registry
+from .ontology_db import (
+    canonical_ontology_id,
+    direct_relatives,
+    get_term as get_term_record,
+    get_terms as get_term_records,
+    list_ontologies as list_ontology_records,
+    ontology_exists,
+    recursive_relatives,
+    search_terms as search_term_records,
+    trajectories,
+)
 from .resource_catalog import list_resources
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Preload core ontologies on startup."""
-    logger.info("Starting API service - preloading core ontologies...")
-    registry.preload_core_ontologies()
-    logger.info("Core ontologies loaded, service ready")
-    yield
-    logger.info("Shutting down API service")
-
-
 app = FastAPI(
     title="API Service",
     description="REST API for querying biological ontologies",
     version="0.1.0",
-    lifespan=lifespan,
     root_path="/api",
 )
 
 
-def get_ontology_or_404(ontology_id: str):
-    """Get ontology client or raise 404."""
-    client = registry.get(ontology_id)
-    if client is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Ontology '{ontology_id}' not found or failed to load"
-        )
-    return client
-
-
-def extract_term_info(client, term_id: str) -> TermInfo | None:
-    """Extract term info from ontology client."""
-    try:
-        term = client.get_term(term_id)
-        if term is None:
-            return None
-        return TermInfo(
-            id=term.id,
-            name=term.name,
-            definition=str(term.definition) if term.definition else None,
-            namespace=term.namespace,
-        )
-    except Exception:
-        return None
-
-
-def ontograph_node_to_tree_node(node) -> TreeNode:
-    """Convert ontograph's internal Node to our TreeNode model."""
-    return TreeNode(
-        id=node.id,
-        name=node.name,
-        distance=node.distance,
-        children=[ontograph_node_to_tree_node(c) for c in node.children.values()]
-    )
-
-
-def _normalize_search_text(value: str) -> str:
-    """Normalize text for ontology term name search."""
-    return re.sub(r"\s+", " ", value.strip().lower())
-
-
-@lru_cache(maxsize=32)
-def _get_search_documents(ontology_id: str) -> list[dict[str, object]]:
-    """Build a lightweight in-memory search index for ontology names/synonyms."""
-    client = registry.get(ontology_id)
-    if client is None:
-        return []
-
-    try:
-        pronto_ontology = client._ontology._ontology
-    except Exception:
-        return []
-    documents: list[dict[str, object]] = []
-
-    for term in pronto_ontology.terms():
-        if getattr(term, "obsolete", False):
-            continue
-
-        candidate_texts: list[str] = []
-        if term.name:
-            candidate_texts.append(str(term.name))
-
-        for synonym in getattr(term, "synonyms", ()):
-            synonym_text = getattr(synonym, "description", None) or str(synonym)
-            if synonym_text:
-                candidate_texts.append(str(synonym_text))
-
-        normalized_texts = []
-        seen = set()
-        for text in candidate_texts:
-            normalized = _normalize_search_text(text)
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            normalized_texts.append({"original": text, "normalized": normalized})
-
-        if not normalized_texts:
-            continue
-
-        documents.append(
-            {
-                "id": term.id,
-                "name": term.name,
-                "definition": str(term.definition) if term.definition else None,
-                "namespace": term.namespace,
-                "texts": normalized_texts,
-            }
-        )
-
-    return documents
-
-
-def _score_term_match(query: str, candidate: str) -> tuple[int, str] | None:
-    """Return a simple relevance score and match type for a query/candidate pair."""
-    if not query or not candidate:
-        return None
-
-    if candidate == query:
-        return 1000, "exact"
-
-    if candidate.startswith(query):
-        return 800, "prefix"
-
-    query_tokens = [token for token in query.split(" ") if token]
-    candidate_tokens = [token for token in candidate.split(" ") if token]
-
-    if query_tokens and candidate_tokens[: len(query_tokens)] == query_tokens:
-        return 700, "token-prefix"
-
-    if query_tokens and all(token in candidate_tokens for token in query_tokens):
-        return 600, "token-match"
-
-    if query in candidate:
-        return 500, "substring"
-
-    return None
-
-
-def search_terms_by_name(query: str, ontology_ids: list[str], limit: int = 10) -> list[TermSearchMatch]:
-    """Search ontology terms by name/synonym across one or more ontologies."""
-    normalized_query = _normalize_search_text(query)
-    if not normalized_query:
-        return []
-
-    matches: list[tuple[int, TermSearchMatch]] = []
-
-    for ontology_id in ontology_ids:
-        for doc in _get_search_documents(ontology_id):
-            best_score: int | None = None
-            best_match_type: str | None = None
-            best_matched_text: str | None = None
-
-            for text in doc["texts"]:
-                scored = _score_term_match(normalized_query, text["normalized"])
-                if scored is None:
-                    continue
-                score, match_type = scored
-                if best_score is None or score > best_score:
-                    best_score = score
-                    best_match_type = match_type
-                    best_matched_text = text["original"]
-
-            if best_score is None or best_match_type is None or best_matched_text is None:
-                continue
-
-            name = doc["name"] or ""
-            if _normalize_search_text(str(name)) == normalized_query:
-                best_score += 50
-
-            matches.append(
-                (
-                    best_score,
-                    TermSearchMatch(
-                        id=str(doc["id"]),
-                        name=str(doc["name"]) if doc["name"] is not None else None,
-                        definition=str(doc["definition"]) if doc["definition"] is not None else None,
-                        namespace=str(doc["namespace"]) if doc["namespace"] is not None else None,
-                        ontology_id=ontology_id,
-                        matched_text=best_matched_text,
-                        match_type=best_match_type,
-                        score=best_score,
-                    ),
-                )
-            )
-
-    matches.sort(key=lambda item: (-item[0], len(item[1].id), item[1].id))
-    return [match for _, match in matches[:limit]]
+def _ensure_term_in_ontology(ontology_id: str, term_id: str) -> None:
+    if get_term_record(term_id, ontology_id = ontology_id) is None:
+        raise HTTPException(status_code=404, detail=f"Term '{term_id}' not found")
 
 
 # --- Health ---
@@ -233,14 +63,7 @@ async def health():
 @app.get("/ontologies", response_model=OntologiesResponse)
 async def list_ontologies():
     """List all available ontologies."""
-    ontologies = [
-        OntologyInfo(
-            id=ont_id,
-            description=desc,
-            loaded=registry.is_loaded(ont_id)
-        )
-        for ont_id, desc in registry.list_available().items()
-    ]
+    ontologies = [OntologyInfo(**ontology) for ontology in list_ontology_records()]
     return OntologiesResponse(ontologies=ontologies)
 
 
@@ -278,60 +101,33 @@ def resolve_entities(request: EntityResolveRequest):
 @app.get("/{ontology_id}/term/{term_id}", response_model=TermInfo)
 async def get_term(ontology_id: str, term_id: str):
     """Get term information by ID."""
-    client = get_ontology_or_404(ontology_id)
-    term_info = extract_term_info(client, term_id)
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    term_info = get_term_record(term_id, ontology_id = ontology_id)
     if term_info is None:
         raise HTTPException(status_code=404, detail=f"Term '{term_id}' not found")
-    return term_info
+    return TermInfo(**term_info)
 
 
 @app.post("/terms", response_model=TermsResponse)
 async def get_terms_batch(request: TermsRequest):
-    """Batch lookup of terms across multiple ontologies.
-    
-    Auto-detects ontology from term prefix (GO:, MI:, KW:, etc.)
-    """
-    from .config import get_ontology_for_term
-    
-    terms: dict[str, TermInfo | None] = {}
-    
-    # Group terms by ontology
-    terms_by_ontology: dict[str, list[str]] = {}
-    for term_id in request.term_ids:
-        ontology_id = get_ontology_for_term(term_id)
-        if ontology_id:
-            terms_by_ontology.setdefault(ontology_id, []).append(term_id)
-        else:
-            # No matching ontology, term will be None
-            terms[term_id] = None
-    
-    # Look up terms in each ontology
-    for ontology_id, term_ids in terms_by_ontology.items():
-        client = registry.get(ontology_id)
-        if client is None:
-            for term_id in term_ids:
-                terms[term_id] = None
-            continue
-        for term_id in term_ids:
-            terms[term_id] = extract_term_info(client, term_id)
-    
-    return TermsResponse(terms=terms)
+    """Batch lookup of terms from the Postgres ontology tables."""
+    terms = {
+        term_id: (TermInfo(**term_info) if term_info is not None else None)
+        for term_id, term_info in get_term_records(request.term_ids).items()
+    }
+    return TermsResponse(terms = terms)
 
 
 @app.post("/terms/search", response_model=TermSearchResponse)
 async def search_terms(request: TermSearchRequest):
-    """Search ontology terms by name/synonym across all configured ontologies."""
-    ontology_ids = [
-        ont_id for ont_id in registry.list_available()
-        if registry.is_loaded(ont_id)
-    ]
-
+    """Search ontology terms by name/synonym using the Postgres ontology tables."""
     results = {
-        query: search_terms_by_name(query, ontology_ids=ontology_ids, limit=request.limit)
+        query: [TermSearchMatch(**match) for match in search_term_records(query, limit = request.limit)]
         for query in request.queries
     }
 
-    return TermSearchResponse(results=results)
+    return TermSearchResponse(results = results)
 
 
 # --- Navigation ---
@@ -339,12 +135,10 @@ async def search_terms(request: TermSearchRequest):
 @app.get("/{ontology_id}/term/{term_id}/parents")
 async def get_parents(ontology_id: str, term_id: str):
     """Get direct parents of a term."""
-    client = get_ontology_or_404(ontology_id)
-    try:
-        parents = client.get_parents(term_id)
-        return {"term_id": term_id, "parents": [str(p) for p in parents]}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    _ensure_term_in_ontology(ontology_id, term_id)
+    return {"term_id": term_id, "parents": direct_relatives(ontology_id, term_id, direction = "parents")}
 
 
 @app.get("/{ontology_id}/term/{term_id}/ancestors")
@@ -354,23 +148,19 @@ async def get_ancestors(
     depth: int | None = Query(None, description="Maximum depth to traverse")
 ):
     """Get all ancestors of a term."""
-    client = get_ontology_or_404(ontology_id)
-    try:
-        ancestors = client.get_ancestors(term_id, distance=depth)
-        return {"term_id": term_id, "ancestors": [str(a) for a in ancestors]}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    _ensure_term_in_ontology(ontology_id, term_id)
+    return {"term_id": term_id, "ancestors": recursive_relatives(ontology_id, term_id, direction = "ancestors", depth = depth)}
 
 
 @app.get("/{ontology_id}/term/{term_id}/children")
 async def get_children(ontology_id: str, term_id: str):
     """Get direct children of a term."""
-    client = get_ontology_or_404(ontology_id)
-    try:
-        children = client.get_children(term_id)
-        return {"term_id": term_id, "children": [str(c) for c in children]}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    _ensure_term_in_ontology(ontology_id, term_id)
+    return {"term_id": term_id, "children": direct_relatives(ontology_id, term_id, direction = "children")}
 
 
 @app.get("/{ontology_id}/term/{term_id}/descendants")
@@ -380,76 +170,40 @@ async def get_descendants(
     depth: int | None = Query(None, description="Maximum depth to traverse")
 ):
     """Get all descendants of a term."""
-    client = get_ontology_or_404(ontology_id)
-    try:
-        descendants = client.get_descendants(term_id, distance=depth)
-        return {"term_id": term_id, "descendants": [str(d) for d in descendants]}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    _ensure_term_in_ontology(ontology_id, term_id)
+    return {"term_id": term_id, "descendants": recursive_relatives(ontology_id, term_id, direction = "descendants", depth = depth)}
 
 
 # --- Trajectory / Hierarchy ---
 
 @app.get("/{ontology_id}/term/{term_id}/trajectories", response_model=TrajectoryResponse)
 async def get_trajectories(ontology_id: str, term_id: str):
-    """Get all trajectories (paths) from root to a term.
-    
-    Uses ontograph's get_trajectories_from_root which returns all
-    paths from root to the term (multiple paths if term has multiple parents).
-    """
-    client = get_ontology_or_404(ontology_id)
-    try:
-        trajectories = client.get_trajectories_from_root(term_id)
-        # Convert to response format
-        result = []
-        for traj in trajectories:
-            nodes = [
-                TrajectoryNode(
-                    id=node['id'],
-                    name=node.get('name'),
-                    distance=node.get('distance', 0)
-                )
-                for node in traj
-            ]
-            result.append(nodes)
-        return TrajectoryResponse(term_id=term_id, trajectories=result)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    """Get all root-to-term trajectories from the ontology relation graph."""
+    if not ontology_exists(ontology_id):
+        raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+    _ensure_term_in_ontology(ontology_id, term_id)
+    result = [
+        [TrajectoryNode(**node) for node in trajectory]
+        for trajectory in trajectories(ontology_id, term_id)
+    ]
+    return TrajectoryResponse(term_id = term_id, trajectories = result)
 
 
 @app.post("/tree", response_model=TreeResponse)
 async def get_tree(request: TermsRequest):
-    """Get merged tree for terms across multiple ontologies.
-    
-    Auto-detects ontology from term prefix (GO:, MI:, KW:, etc.)
-    Collects all trajectories for the given terms and merges them
-    into a single tree structure with shared ancestor nodes combined.
-    """
-    from .config import get_ontology_for_term
-    
-    # Group terms by ontology
-    terms_by_ontology: dict[str, list[str]] = {}
+    """Get a merged tree for terms using the canonical ontology graph in Postgres."""
+    all_trajectories: list[list[dict[str, object]]] = []
     for term_id in request.term_ids:
-        ontology_id = get_ontology_for_term(term_id)
-        if ontology_id:
-            terms_by_ontology.setdefault(ontology_id, []).append(term_id)
-    
-    # Collect trajectories from all ontologies
-    all_trajectories = []
-    for ontology_id, term_ids in terms_by_ontology.items():
-        client = registry.get(ontology_id)
-        if client is None:
+        ontology_id = canonical_ontology_id(term_id)
+        if ontology_id is None:
             continue
-        for term_id in term_ids:
-            try:
-                trajectories = client.get_trajectories_from_root(term_id)
-                all_trajectories.extend(trajectories)
-            except Exception:
-                continue
-    
+        all_trajectories.extend(trajectories(ontology_id, term_id))
+
     if not all_trajectories:
-        return TreeResponse(root=None)
-    
+        return TreeResponse(root = None)
+
     root: TreeNode | None = None
     node_index: dict[str, TreeNode] = {}
     for trajectory in all_trajectories:
@@ -471,7 +225,7 @@ async def get_tree(request: TermsRequest):
                 parent.children.append(node)
             parent = node
 
-    return TreeResponse(root=root)
+    return TreeResponse(root = root)
 
 
 # --- Graph data discovery ---
@@ -572,7 +326,7 @@ def get_relations_search(
 
 
 @app.get("/relations/{relation_id}")
-def get_relation_record(relation_id: int):
+def get_relation_record(relation_id: str):
     """Return one relation with hydrated subject and object entities."""
     from .graph import get_relation
 
@@ -583,7 +337,7 @@ def get_relation_record(relation_id: int):
 
 
 @app.get("/relations/{relation_id}/evidence")
-def get_relation_evidence(relation_id: int):
+def get_relation_evidence(relation_id: str):
     """Return evidence and annotations for a relation."""
     from .graph import relation_evidence
 

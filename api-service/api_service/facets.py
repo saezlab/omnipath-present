@@ -22,6 +22,26 @@ def _connect():
     return psycopg.connect(_database_url(), row_factory=dict_row)
 
 
+def _relation_term_bitmap_table() -> str:
+    with _connect() as conn:
+        for table_name in (
+            "annotation_term_relation_bitmap",
+            "annotation_term_direct_relation_bitmap",
+        ):
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = %s
+                  AND table_name = %s
+                """,
+                (SEARCH_SCHEMA, table_name),
+            ).fetchone()
+            if row:
+                return table_name
+    return "annotation_term_direct_relation_bitmap"
+
+
 def _strings(values: list[Any] | None) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -44,6 +64,17 @@ def _ints(values: list[Any] | None) -> list[int]:
         if parsed not in seen:
             seen.add(parsed)
             out.append(parsed)
+    return out
+
+
+def _ids(values: list[Any] | None) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values or []:
+        text = str(value).strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
     return out
 
 
@@ -106,7 +137,7 @@ def _chain_bitmaps(parts: list[str]) -> str:
 
 
 def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    entity_pks = _ints(payload.get("entityPks") or payload.get("entity_pks"))
+    entity_pks = _ids(payload.get("entityPks") or payload.get("entity_pks"))
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
     entity_types = _strings(payload.get("entityTypes") or payload.get("entity_types"))
     sources = _strings(payload.get("sources"))
@@ -124,12 +155,16 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if term_ids:
         scope_parts.append(f"""
             SELECT b.entity_bitmap AS bitmap
-            FROM {SEARCH_SCHEMA}.ontology_terms terms
+            FROM {SEARCH_SCHEMA}.entity_ontology_term terms
             JOIN {SEARCH_SCHEMA}.annotation_term_entity_bitmap b ON b.term_entity_id = terms.term_entity_id
             WHERE terms.term_id = ANY({push(term_ids)}::text[])
         """)
     if entity_pks:
-        scope_parts.append(f"SELECT rb_build({push(entity_pks)}::integer[]) AS bitmap")
+        scope_parts.append(f"""
+            SELECT rb_build_agg(ebi.bitmap_id) AS bitmap
+            FROM {SEARCH_SCHEMA}.entity_bitmap_id ebi
+            WHERE ebi.entity_id = ANY({push(entity_pks)}::uuid[])
+        """)
 
     if scope_parts:
         ctes.append(f"""
@@ -151,7 +186,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         query_lower = query.lower()
         ctes.append(f"""
             query_bitmap AS MATERIALIZED (
-                SELECT rb_build_agg(query_entities.entity_id::integer) AS bitmap
+                SELECT rb_build_agg(ebi.bitmap_id) AS bitmap
                 FROM (
                     SELECT e.entity_id
                     FROM {SEARCH_SCHEMA}.entity e
@@ -163,6 +198,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
                       ON eil.identifier_id = i.identifier_id
                     WHERE LOWER(i.value) = %s
                 ) query_entities
+                JOIN {SEARCH_SCHEMA}.entity_bitmap_id ebi ON ebi.entity_id = query_entities.entity_id
             )
         """)
         params.append(query_lower)
@@ -237,7 +273,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    entity_pks = _ints(payload.get("entityPks") or payload.get("entity_pks"))
+    entity_pks = _ids(payload.get("entityPks") or payload.get("entity_pks"))
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
     predicates = _strings(payload.get("predicates"))
     participant_types = _strings(payload.get("participantTypes") or payload.get("participant_types") or payload.get("interactionTypes") or payload.get("interaction_types"))
@@ -253,18 +289,20 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
     ctes: list[str] = []
     scope_parts: list[str] = []
     if term_ids:
+        relation_term_bitmap_table = _relation_term_bitmap_table()
         scope_parts.append(f"""
             SELECT b.relation_bitmap AS bitmap
-            FROM {SEARCH_SCHEMA}.ontology_terms terms
-            JOIN {SEARCH_SCHEMA}.annotation_term_relation_bitmap b ON b.term_entity_id = terms.term_entity_id
+            FROM {SEARCH_SCHEMA}.entity_ontology_term terms
+            JOIN {SEARCH_SCHEMA}.{relation_term_bitmap_table} b ON b.term_entity_id = terms.term_entity_id
             WHERE terms.term_id = ANY({push(term_ids)}::text[])
         """)
     if entity_pks:
         scope_parts.append(f"""
-            SELECT rb_build_agg(r.relation_id::integer) AS bitmap
+            SELECT rb_build_agg(rbi.bitmap_id) AS bitmap
             FROM {SEARCH_SCHEMA}.relation r
-            WHERE r.subject_entity_id = ANY({push(entity_pks)}::bigint[])
-               OR r.object_entity_id = ANY(%s::bigint[])
+            JOIN {SEARCH_SCHEMA}.relation_bitmap_id rbi ON rbi.relation_id = r.relation_id
+            WHERE r.subject_entity_id = ANY({push(entity_pks)}::uuid[])
+               OR r.object_entity_id = ANY(%s::uuid[])
         """)
         params.append(entity_pks)
 
@@ -371,13 +409,14 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
 
 def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
     filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
-    entity_pks = _ints(payload.get("entityPks") or payload.get("entity_pks") or filters.get("entityPks") or filters.get("entity_pks"))
+    entity_pks = _ids(payload.get("entityPks") or payload.get("entity_pks") or filters.get("entityPks") or filters.get("entity_pks"))
     term_ids = _strings(payload.get("termIds") or payload.get("term_ids") or payload.get("annotationTermIds") or payload.get("annotation_terms") or filters.get("termIds") or filters.get("term_ids") or filters.get("annotationTermIds") or filters.get("annotation_terms"))
     ontology_ids = _strings(payload.get("ontologyIds") or payload.get("ontology_ids") or filters.get("ontologyIds") or filters.get("ontology_ids"))
     sources = _strings(payload.get("sources") or filters.get("sources"))
     query = str(payload.get("query") or payload.get("q") or "").strip()
     limit = max(1, min(int(payload.get("limit") or 24), 100))
     offset = max(0, int(payload.get("offset") or 0))
+    relation_term_bitmap_table = _relation_term_bitmap_table()
 
     params: list[Any] = []
     where = ["TRUE"]
@@ -386,8 +425,10 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
         where.append(f"""ot.term_entity_id IN (
             SELECT r.object_entity_id
             FROM {SEARCH_SCHEMA}.relation r
-            WHERE r.relation_category = 'association'
-              AND r.subject_entity_id = ANY(%s::bigint[])
+            JOIN {SEARCH_SCHEMA}.vocab_relation_category rc
+              ON rc.relation_category_id = r.relation_category_id
+            WHERE rc.name = 'association'
+              AND r.subject_entity_id = ANY(%s::uuid[])
         )""")
     if term_ids:
         params.append(term_ids)
@@ -409,7 +450,7 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
             )
             OR EXISTS (
                 SELECT 1
-                FROM {SEARCH_SCHEMA}.annotation_term_relation_bitmap term_bitmap
+                FROM {SEARCH_SCHEMA}.{relation_term_bitmap_table} term_bitmap
                 JOIN {SEARCH_SCHEMA}.facet_relation_bitmap source_bitmap
                   ON source_bitmap.facet_name = 'source'
                  AND source_bitmap.facet_value = ANY(%s::text[])
@@ -426,14 +467,15 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
     sql = f"""
         SELECT ot.term_id, ot.ontology_prefix, ot.ontology_id, ot.label, ot.definition,
                ot.synonyms, ot.sources,
+               COALESCE(ot.child_count, 0) AS child_count,
                COALESCE(ae.global_count, 0) AS annotated_entity_count,
                COALESCE(ar.global_count, 0) AS annotated_relation_count,
                COALESCE(ae.global_count, 0) + COALESCE(ar.global_count, 0) AS annotated_item_count
-        FROM {SEARCH_SCHEMA}.ontology_terms ot
+        FROM {SEARCH_SCHEMA}.entity_ontology_term ot
         LEFT JOIN {SEARCH_SCHEMA}.annotation_term_entity_bitmap ae ON ae.term_entity_id = ot.term_entity_id
-        LEFT JOIN {SEARCH_SCHEMA}.annotation_term_relation_bitmap ar ON ar.term_entity_id = ot.term_entity_id
+        LEFT JOIN {SEARCH_SCHEMA}.{relation_term_bitmap_table} ar ON ar.term_entity_id = ot.term_entity_id
         WHERE {' AND '.join(where)}
-        ORDER BY annotated_item_count DESC, ot.term_id
+        ORDER BY annotated_item_count DESC, child_count DESC, ot.term_id
         LIMIT %s OFFSET %s
     """
     with _connect() as conn:

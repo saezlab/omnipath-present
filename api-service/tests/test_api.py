@@ -2,47 +2,12 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 @pytest.fixture
-def mock_registry():
-    """Create a mock registry that doesn't load real ontologies."""
-    import api_service.main  # noqa: F401
-
-    with patch("api_service.main.registry") as mock:
-        # Setup mock client
-        mock_client = MagicMock()
-        mock_term = MagicMock()
-        mock_term.id = "MI:0018"
-        mock_term.name = "two hybrid"
-        mock_term.definition = "Test definition"
-        mock_term.namespace = "PSI-MI"
-        
-        mock_client.get_term.return_value = mock_term
-        mock_client.get_parents.return_value = ["MI:0001"]
-        mock_client.get_ancestors.return_value = ["MI:0001", "MI:0000"]
-        mock_client.get_children.return_value = ["MI:0019"]
-        mock_client.get_descendants.return_value = ["MI:0019", "MI:0020"]
-        mock_client.get_trajectories_from_root.return_value = [
-            [
-                {"id": "MI:0000", "name": "root", "distance": -2},
-                {"id": "MI:0001", "name": "parent", "distance": -1},
-                {"id": "MI:0018", "name": "two hybrid", "distance": 0},
-            ]
-        ]
-        
-        mock.get.return_value = mock_client
-        mock.list_available.return_value = {"psi_mi": "PSI-MI CV"}
-        mock.is_loaded.return_value = True
-        
-        yield mock
-
-
-@pytest.fixture
-def client(mock_registry):
-    """Create test client with mocked registry."""
-    # Import after patching
+def client():
+    """Create test client."""
     from api_service.main import app
     return TestClient(app)
 
@@ -56,7 +21,10 @@ def test_health(client):
 
 def test_list_ontologies(client):
     """Test ontologies listing."""
-    response = client.get("/ontologies")
+    with patch("api_service.main.list_ontology_records") as mock_list:
+        mock_list.return_value = [{"id": "psi-mi", "description": "PSI-MI CV", "loaded": True}]
+        response = client.get("/ontologies")
+
     assert response.status_code == 200
     data = response.json()
     assert "ontologies" in data
@@ -65,23 +33,34 @@ def test_list_ontologies(client):
 
 def test_get_term(client):
     """Test single term lookup."""
-    response = client.get("/psi_mi/term/MI:0018")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record") as mock_get:
+        mock_get.return_value = {
+            "id": "MI:0018",
+            "name": "two hybrid",
+            "definition": "Test definition",
+            "namespace": "psi-mi",
+        }
+        response = client.get("/psi_mi/term/MI:0018")
+
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == "MI:0018"
     assert data["name"] == "two hybrid"
 
 
-def test_get_term_not_found(client, mock_registry):
+def test_get_term_not_found(client):
     """Test 404 for non-existent term."""
-    mock_registry.get.return_value.get_term.return_value = None
-    response = client.get("/psi_mi/term/MI:9999")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record", return_value = None):
+        response = client.get("/psi_mi/term/MI:9999")
+
     assert response.status_code == 404
 
 
 def test_get_parents(client):
     """Test parents endpoint."""
-    response = client.get("/psi_mi/term/MI:0018/parents")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record", return_value = {"id": "MI:0018"}), patch("api_service.main.direct_relatives", return_value = ["MI:0001"]):
+        response = client.get("/psi_mi/term/MI:0018/parents")
+
     assert response.status_code == 200
     data = response.json()
     assert "parents" in data
@@ -90,7 +69,9 @@ def test_get_parents(client):
 
 def test_get_ancestors(client):
     """Test ancestors endpoint."""
-    response = client.get("/psi_mi/term/MI:0018/ancestors")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record", return_value = {"id": "MI:0018"}), patch("api_service.main.recursive_relatives", return_value = ["MI:0001", "MI:0000"]):
+        response = client.get("/psi_mi/term/MI:0018/ancestors")
+
     assert response.status_code == 200
     data = response.json()
     assert "ancestors" in data
@@ -98,16 +79,21 @@ def test_get_ancestors(client):
 
 def test_get_ancestors_with_depth(client):
     """Test ancestors with depth limit."""
-    response = client.get("/psi_mi/term/MI:0018/ancestors?depth=1")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record", return_value = {"id": "MI:0018"}), patch("api_service.main.recursive_relatives", return_value = ["MI:0001"]):
+        response = client.get("/psi_mi/term/MI:0018/ancestors?depth=1")
+
     assert response.status_code == 200
 
 
 def test_batch_terms(client):
-    """Test batch term lookup with auto-detection."""
-    response = client.post(
-        "/terms",
-        json={"term_ids": ["MI:0018", "MI:0045"]}
-    )
+    """Test batch term lookup."""
+    with patch("api_service.main.get_term_records") as mock_terms:
+        mock_terms.return_value = {
+            "MI:0018": {"id": "MI:0018", "name": "two hybrid", "definition": None, "namespace": "psi-mi"},
+            "MI:0045": None,
+        }
+        response = client.post("/terms", json={"term_ids": ["MI:0018", "MI:0045"]})
+
     assert response.status_code == 200
     data = response.json()
     assert "terms" in data
@@ -131,25 +117,23 @@ def test_get_ontology_for_kegg_pathway_terms():
 
 def test_search_terms_by_name(client):
     """Test ontology term lookup by human-readable name."""
-    from api_service.main import TermSearchMatch
-
-    with patch("api_service.main.search_terms_by_name") as mock_search:
+    with patch("api_service.main.search_term_records") as mock_search:
         mock_search.return_value = [
-            TermSearchMatch(
-                id="MI:0203",
-                name="dephosphorylation reaction",
-                definition="Test definition",
-                namespace=None,
-                ontology_id="omnipath",
-                matched_text="dephosphorylation",
-                match_type="exact",
-                score=1000,
-            )
+            {
+                "id": "MI:0203",
+                "name": "dephosphorylation reaction",
+                "definition": "Test definition",
+                "namespace": "omnipath",
+                "ontology_id": "omnipath",
+                "matched_text": "dephosphorylation",
+                "match_type": "exact",
+                "score": 1000,
+            }
         ]
 
         response = client.post(
             "/terms/search",
-            json={"queries": ["dephosphorylation"], "prefixes": ["MI"], "limit": 5}
+            json={"queries": ["dephosphorylation"], "limit": 5}
         )
 
     assert response.status_code == 200
@@ -162,7 +146,16 @@ def test_search_terms_by_name(client):
 
 def test_trajectories(client):
     """Test trajectories endpoint."""
-    response = client.get("/psi_mi/term/MI:0018/trajectories")
+    with patch("api_service.main.ontology_exists", return_value = True), patch("api_service.main.get_term_record", return_value = {"id": "MI:0018"}), patch("api_service.main.trajectories") as mock_trajectories:
+        mock_trajectories.return_value = [
+            [
+                {"id": "MI:0000", "name": "root", "distance": -2},
+                {"id": "MI:0001", "name": "parent", "distance": -1},
+                {"id": "MI:0018", "name": "two hybrid", "distance": 0},
+            ]
+        ]
+        response = client.get("/psi_mi/term/MI:0018/trajectories")
+
     assert response.status_code == 200
     data = response.json()
     assert data["term_id"] == "MI:0018"
@@ -176,21 +169,28 @@ def test_trajectories(client):
 
 
 def test_tree(client):
-    """Test tree endpoint with auto-detection."""
-    response = client.post(
-        "/tree",
-        json={"term_ids": ["MI:0018"]}
-    )
+    """Test tree endpoint."""
+    with patch("api_service.main.canonical_ontology_id", return_value = "psi-mi"), patch("api_service.main.trajectories") as mock_trajectories:
+        mock_trajectories.return_value = [
+            [
+                {"id": "MI:0000", "name": "root", "distance": -2},
+                {"id": "MI:0001", "name": "parent", "distance": -1},
+                {"id": "MI:0018", "name": "two hybrid", "distance": 0},
+            ]
+        ]
+        response = client.post("/tree", json={"term_ids": ["MI:0018"]})
+
     assert response.status_code == 200
     data = response.json()
     assert "root" in data
     assert data["root"]["id"] == "MI:0000"
 
 
-def test_ontology_not_found(client, mock_registry):
+def test_ontology_not_found(client):
     """Test 404 for non-existent ontology."""
-    mock_registry.get.return_value = None
-    response = client.get("/unknown_ontology/term/X:0001")
+    with patch("api_service.main.ontology_exists", return_value = False):
+        response = client.get("/unknown_ontology/term/X:0001")
+
     assert response.status_code == 404
 
 
@@ -231,20 +231,20 @@ def test_entities_resolve_endpoint(client):
             "matches": [
                 {
                     "identifier": "TP53",
-                    "entityPks": [128747],
+                    "entityPks": ["128747"],
                     "candidates": [
                         {
-                            "entityPk": 128747,
+                            "entityPk": "128747",
                             "canonicalIdentifier": "P04637",
                             "taxonomyId": "9606",
                             "identifiers": [{"identifier": "TP53", "identifierType": "Gene Name Primary:OM:0200"}],
                         }
                     ],
                     "ambiguous": False,
-                    "bestEntityPk": 128747,
+                    "bestEntityPk": "128747",
                 }
             ],
-            "entities": [{"entityPk": 128747, "canonicalIdentifier": "P04637"}],
+            "entities": [{"entityPk": "128747", "canonicalIdentifier": "P04637"}],
         }
         response = client.post(
             "/entities/resolve",
@@ -252,7 +252,7 @@ def test_entities_resolve_endpoint(client):
         )
 
     assert response.status_code == 200
-    assert response.json()["matches"][0]["bestEntityPk"] == 128747
+    assert response.json()["matches"][0]["bestEntityPk"] == "128747"
     mock_resolve.assert_called_once_with({
         "identifiers": ["TP53"],
         "filters": {"taxonomyIds": ["9606"]},
@@ -279,12 +279,12 @@ def test_entities_search_endpoint(client):
 
 def test_entities_by_pks_endpoint(client):
     with patch("api_service.graph.entities_by_pks") as mock_lookup:
-        mock_lookup.return_value = [{"entityPk": 1, "canonicalIdentifier": "P04637"}]
-        response = client.post("/entities/by-pks", json={"entityPks": [1]})
+        mock_lookup.return_value = [{"entityPk": "1", "canonicalIdentifier": "P04637"}]
+        response = client.post("/entities/by-pks", json={"entityPks": ["1"]})
 
     assert response.status_code == 200
-    assert response.json()["entities"][0]["entityPk"] == 1
-    mock_lookup.assert_called_once_with([1])
+    assert response.json()["entities"][0]["entityPk"] == "1"
+    mock_lookup.assert_called_once_with(["1"])
 
 
 def test_ontology_entities_endpoint(client):

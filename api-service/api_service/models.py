@@ -114,10 +114,10 @@ class EntityResolveMatch(BaseModel):
     """Resolved entity PKs for one queried identifier."""
 
     identifier: str
-    entityPks: list[int] = Field(default_factory=list)
+    entityPks: list[str] = Field(default_factory=list)
     candidates: list[dict[str, Any]] = Field(default_factory=list)
     ambiguous: bool = False
-    bestEntityPk: int | None = None
+    bestEntityPk: str | None = None
 
 
 class EntityResolveResponse(BaseModel):
