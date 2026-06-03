@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from .resource_catalog import resolve_resource_filters
 
 SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
 
@@ -140,7 +141,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     entity_pks = _ids(payload.get("entityPks") or payload.get("entity_pks"))
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
     entity_types = _strings(payload.get("entityTypes") or payload.get("entity_types"))
-    sources = _strings(payload.get("sources"))
+    sources = resolve_resource_filters(_strings(payload.get("sources")))
     taxonomy_ids = _strings(payload.get("ncbi_tax_id") or payload.get("taxonomy_ids"))
     query = str(payload.get("query") or "").strip()
 
@@ -295,7 +296,7 @@ def scoped_relation_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]
     term_ids = _strings(payload.get("annotationTermIds") or payload.get("annotation_terms") or payload.get("ontology_terms"))
     predicates = _strings(payload.get("predicates"))
     participant_types = _strings(payload.get("participantTypes") or payload.get("participant_types") or payload.get("interactionTypes") or payload.get("interaction_types"))
-    sources = _strings(payload.get("sources"))
+    sources = resolve_resource_filters(_strings(payload.get("sources")))
     taxonomy_ids = _strings(payload.get("ncbi_tax_id") or payload.get("taxonomy_ids") or payload.get("taxonomyIds"))
 
     params: list[Any] = []
@@ -430,7 +431,7 @@ def search_ontology_terms(payload: dict[str, Any]) -> list[dict[str, Any]]:
     entity_pks = _ids(payload.get("entityPks") or payload.get("entity_pks") or filters.get("entityPks") or filters.get("entity_pks"))
     term_ids = _strings(payload.get("termIds") or payload.get("term_ids") or payload.get("annotationTermIds") or payload.get("annotation_terms") or filters.get("termIds") or filters.get("term_ids") or filters.get("annotationTermIds") or filters.get("annotation_terms"))
     ontology_ids = _strings(payload.get("ontologyIds") or payload.get("ontology_ids") or filters.get("ontologyIds") or filters.get("ontology_ids"))
-    sources = _strings(payload.get("sources") or filters.get("sources"))
+    sources = resolve_resource_filters(_strings(payload.get("sources") or filters.get("sources")))
     query = str(payload.get("query") or payload.get("q") or "").strip()
     limit = max(1, min(int(payload.get("limit") or 24), 100))
     offset = max(0, int(payload.get("offset") or 0))

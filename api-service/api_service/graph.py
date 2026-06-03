@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from .resource_catalog import resolve_resource_filters
 
 SEARCH_SCHEMA = os.getenv("OMNIPATH_PG_SCHEMA", "public")
 CV_TERM_ENTITY_TYPE = "Cv Term:OM:0012"
@@ -211,7 +212,7 @@ def _entity_filter_sql(filters: dict[str, Any], params: list[Any], alias: str = 
     entity_pks = _ids(filters.get("entityPks") or filters.get("entity_pks"))
     annotation_terms = _strings(filters.get("annotationTermIds") or filters.get("annotation_term_ids") or filters.get("ontology_terms"))
     entity_types = _strings(filters.get("entityTypes") or filters.get("entity_types"))
-    sources = _strings(filters.get("sources"))
+    sources = resolve_resource_filters(_strings(filters.get("sources")))
     taxonomy_ids = _strings(filters.get("ncbi_tax_id") or filters.get("taxonomy_ids") or filters.get("taxonomyIds"))
 
     if entity_pks:
@@ -539,7 +540,7 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
     subject_entity_pks = _ids(filters.get("subjectEntityPks") or filters.get("subject_entity_pks"))
     object_entity_pks = _ids(filters.get("objectEntityPks") or filters.get("object_entity_pks"))
     entity_pks = _ids(filters.get("entityPks") or filters.get("entity_pks"))
-    sources = _strings(filters.get("sources"))
+    sources = resolve_resource_filters(_strings(filters.get("sources")))
     taxonomy_ids = _strings(filters.get("ncbi_tax_id") or filters.get("taxonomy_ids") or filters.get("taxonomyIds"))
     annotation_terms = _strings(filters.get("annotationTerms") or filters.get("annotation_terms") or filters.get("ontology_terms"))
     require_both = bool(filters.get("requireBothParticipants") or filters.get("require_both_participants"))
