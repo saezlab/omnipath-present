@@ -17,13 +17,86 @@ export type EntityWithIdentifiers = Entity & {
 };
 
 const SEARCH_SCHEMA = () => process.env.OMNIPATH_PG_SCHEMA || "public";
-const INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES = 1000;
-const INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES = 5000;
 const ENTITY_SEARCH_IDENTIFIER_LIMIT = 20;
 const ENTITY_SEARCH_HYDRATION_OPTIONS = {
   identifierLimit: ENTITY_SEARCH_IDENTIFIER_LIMIT,
   includeIdentifierTotals: false,
 } as const;
+const CURATED_LANDING_ENTITY_BUCKETS: Array<{ count: number; publicIds: string[] }> = [
+  {
+    count: 5,
+    publicIds: [
+      "Uniprot:MI:1097|P00533", // EGFR
+      "Uniprot:MI:1097|P04637", // TP53
+      "Uniprot:MI:1097|P31749", // AKT1
+      "Uniprot:MI:1097|P01375", // TNF
+      "Uniprot:MI:1097|P01308", // INS
+      "Uniprot:MI:1097|P42345", // MTOR
+      "Uniprot:MI:1097|P38398", // BRCA1
+      "Uniprot:MI:1097|P15692", // VEGFA
+      "Uniprot:MI:1097|P05231", // IL6
+    ],
+  },
+  {
+    count: 5,
+    publicIds: [
+      "Standard Inchi Key:MI:1101|WQZGKKKJIJFFOK-GASJEMHNSA-N", // glucose
+      "Standard Inchi Key:MI:1101|ZKHQWZAMYRWXGA-KQYNXXCUSA-N", // ATP
+      "Standard Inchi Key:MI:1101|RYYVLZVUVIJVGH-UHFFFAOYSA-N", // caffeine
+      "Standard Inchi Key:MI:1101|HVYWMOMLDIMFJA-DPAQBDIFSA-N", // cholesterol
+      "Standard Inchi Key:MI:1101|VYFYYTLLBUKUHU-UHFFFAOYSA-N", // dopamine
+      "Standard Inchi Key:MI:1101|QZAYGJVTTNCVMB-UHFFFAOYSA-N", // serotonin
+      "Standard Inchi Key:MI:1101|OENHQHLEOONYIE-JLTXGRSLSA-N", // beta-carotene
+    ],
+  },
+  {
+    count: 3,
+    publicIds: [
+      "Reactome Stable Id:OM:0130|R-HSA-162582", // Signal Transduction
+      "Reactome Stable Id:OM:0130|R-HSA-1430728", // Metabolism
+      "Reactome Stable Id:OM:0130|R-HSA-168256", // Immune System
+      "Reactome Stable Id:OM:0130|R-HSA-69278", // Cell Cycle, Mitotic
+      "Reactome Stable Id:OM:0130|R-HSA-70171", // Glycolysis
+    ],
+  },
+  {
+    count: 2,
+    publicIds: [
+      "omnipath:reaction_member_hash|543ff312c67850e942f15d067be87710c2f5080d4ae1ae0daff518b128a6f0e3", // ATP hydrolysis
+      "omnipath:reaction_member_hash|62e41ce37d7cc04844e83adce842346206c0e338e6f570607c208f77a28ead34", // GTP hydrolysis
+      "omnipath:reaction_member_hash|27cd00010aa4e2832454e15c95810fd235ce5571adf49ca230e731003445ac33", // glutamine hydrolysis
+      "omnipath:reaction_member_hash|84531f22de0eacb60639e536f23353f669936bf8bb4eeed205838142983e51c0", // RNA elongation
+    ],
+  },
+  {
+    count: 2,
+    publicIds: [
+      "Cv Term Accession:OM:0204|HP:0001250", // Seizure
+      "Cv Term Accession:OM:0204|HP:0001249", // Intellectual disability
+      "Cv Term Accession:OM:0204|HP:0004322", // Short stature
+      "Cv Term Accession:OM:0204|HP:0001945", // Fever
+    ],
+  },
+  {
+    count: 2,
+    publicIds: [
+      "Cv Term Accession:OM:0204|GO:0005634", // nucleus
+      "Cv Term Accession:OM:0204|GO:0006915", // apoptotic process
+      "Cv Term Accession:OM:0204|GO:0005737", // cytoplasm
+      "Cv Term Accession:OM:0204|GO:0005829", // cytosol
+      "Cv Term Accession:OM:0204|GO:0005524", // ATP binding
+    ],
+  },
+  {
+    count: 1,
+    publicIds: [
+      "omnipath:unresolved_entity_key|66e832d3713b3c0b2dd4304abb5af045", // hsa04010, MAPK signaling pathway
+      "omnipath:unresolved_entity_key|e4afcce3fba592762c8f7cedc287f223", // hsa04110, cell cycle
+      "omnipath:unresolved_entity_key|3c6463cef209c4f4c53848a8b6a56214", // hsa00010, glycolysis / gluconeogenesis
+      "omnipath:unresolved_entity_key|5942446e99df6af4ceff44fd189cf636", // hsa05200, pathways in cancer
+    ],
+  },
+];
 
 export type EntitySearchCursor = {
   relationCount: number;
@@ -848,33 +921,14 @@ async function searchEntitiesByRelationCount({
   cursor?: EntitySearchCursor | null;
 }): Promise<{ entities: EntityWithIdentifiers[]; nextCursor: EntitySearchCursor | null }> {
   const normalizedCursor = normalizeEntitySearchCursor(cursor);
-  // First-page landing (no cursor, no query, no filters): stratify across
-  // entity types so the user sees a mix of chemicals, proteins,
-  // complexes, etc. Without this, the highest relation_count rows happen to
-  // cluster within a single entity_type and the landing card view ends up
-  // looking like e.g. all meat products.
-  // Keep the database work index-friendly: pull a bounded high-relation-count
-  // candidate pool, then do the round-robin sampling in process. Ordering by a
-  // partitioned row_number plus random() here forces Postgres to rank/sort the
-  // full relation-count table before it can return the first page.
-  const stratified = !normalizedCursor;
-  const queryLimit = stratified
-    ? Math.max(
-        limit,
-        Math.min(
-          Math.max(limit * 250, INITIAL_ENTITY_SAMPLE_MIN_CANDIDATES),
-          INITIAL_ENTITY_SAMPLE_MAX_CANDIDATES,
-        ),
-      )
-    : limit;
+  if (!normalizedCursor) {
+    return { entities: await getCuratedLandingEntities(schema, limit), nextCursor: null };
+  }
 
   const params: unknown[] = [];
-  let cursorWhere = "";
-  if (normalizedCursor) {
-    params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
-    cursorWhere = `AND (rc.search_count < $1::bigint OR (rc.search_count = $1::bigint AND rc.entity_id > $2::uuid))`;
-  }
-  params.push(queryLimit);
+  params.push(normalizedCursor.relationCount, normalizedCursor.entityPk);
+  const cursorWhere = `AND (rc.search_count < $1::bigint OR (rc.search_count = $1::bigint AND rc.entity_id > $2::uuid))`;
+  params.push(limit);
   const limitParam = `$${params.length}`;
 
   const client = await getPool().connect();
@@ -910,10 +964,6 @@ async function searchEntitiesByRelationCount({
     );
 
     const rows = result.rows.map(toEntityRow);
-    if (stratified) {
-      const sampledRows = selectStratifiedEntitySample(rows, limit);
-      return { entities: await hydrateEntities(schema, sampledRows, ENTITY_SEARCH_HYDRATION_OPTIONS), nextCursor: null };
-    }
     const nextCursor = rows.length === limit
       ? { relationCount: rows[rows.length - 1].relationCount || 0, entityPk: rows[rows.length - 1].entityPk }
       : null;
@@ -924,39 +974,6 @@ async function searchEntitiesByRelationCount({
   }
 }
 
-function selectStratifiedEntitySample(
-  rows: Array<Entity & { relationCount?: number }>,
-  limit: number,
-): Array<Entity & { relationCount?: number }> {
-  const groups = new Map<string, Array<Entity & { relationCount?: number }>>();
-  for (const row of rows) {
-    const key = row.entityType || "";
-    const group = groups.get(key);
-    if (group) {
-      group.push(row);
-    } else {
-      groups.set(key, [row]);
-    }
-  }
-
-  const selected: Array<Entity & { relationCount?: number }> = [];
-  const offsets = new Map<string, number>();
-  let availableTypes = Array.from(groups.keys());
-  while (selected.length < limit && availableTypes.length > 0) {
-    for (const type of shuffleCopy(availableTypes)) {
-      const offset = offsets.get(type) ?? 0;
-      const row = groups.get(type)?.[offset];
-      if (!row) continue;
-      selected.push(row);
-      offsets.set(type, offset + 1);
-      if (selected.length >= limit) break;
-    }
-    availableTypes = availableTypes.filter((type) => (offsets.get(type) ?? 0) < (groups.get(type)?.length ?? 0));
-  }
-
-  return selected;
-}
-
 function shuffleCopy<T>(values: T[]): T[] {
   const shuffled = [...values];
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
@@ -964,6 +981,75 @@ function shuffleCopy<T>(values: T[]): T[] {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
+}
+
+function selectCuratedLandingPublicIds(limit: number): string[] {
+  const selected = CURATED_LANDING_ENTITY_BUCKETS.flatMap((bucket) =>
+    shuffleCopy(bucket.publicIds).slice(0, bucket.count)
+  );
+  return selected.slice(0, Math.max(0, limit));
+}
+
+async function getCuratedLandingEntities(schema: string, limit: number): Promise<EntityWithIdentifiers[]> {
+  const publicIds = selectCuratedLandingPublicIds(limit);
+  const parsed = parsePublicEntityIds(publicIds);
+  if (parsed.length === 0) return [];
+
+  const ordinals = parsed.map((_, index) => index);
+  const identifierTypes = parsed.map((id) => id.canonicalIdentifierType);
+  const identifiers = parsed.map((id) => id.canonicalIdentifier);
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      id: string;
+      id_type: string;
+      resolution_status: string | null;
+      entity_type: string | null;
+      taxonomy_id: string | null;
+      sources: string[] | null;
+      relation_count: string | number | null;
+    }>(
+      `WITH requested(ord, id_type, id) AS (
+         SELECT *
+         FROM unnest($1::int[], $2::text[], $3::text[])
+       ),
+       matched AS (
+         SELECT
+           requested.ord,
+           ${entityBaseSelect(schema)},
+           ${entitySearchCountSql("rc")}::bigint AS relation_count,
+           ROW_NUMBER() OVER (
+             PARTITION BY requested.ord
+             ORDER BY ${entitySearchCountSql("rc")} DESC, e.entity_id ASC
+           ) AS requested_rank
+         FROM requested
+         JOIN ${schema}.entity e
+           ON ${canonicalTypeSql(schema, "e")} = requested.id_type
+          AND e.canonical_identifier = requested.id
+         LEFT JOIN ${schema}.entity_relation_counts rc ON rc.entity_id = e.entity_id
+       )
+       SELECT
+         entity_id,
+         id,
+         id_type,
+         resolution_status,
+         entity_type,
+         taxonomy_id,
+         sources,
+         relation_count
+       FROM matched
+       WHERE requested_rank = 1
+       ORDER BY ord ASC
+       LIMIT $4`,
+      [ordinals, identifierTypes, identifiers, Math.max(0, limit)],
+    );
+
+    return hydrateEntities(schema, result.rows.map(toEntityRow), ENTITY_SEARCH_HYDRATION_OPTIONS);
+  } finally {
+    client.release();
+  }
 }
 
 async function searchEntitiesByRelationCountAndEntityType({
