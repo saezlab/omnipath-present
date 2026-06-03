@@ -380,3 +380,48 @@ export async function fetchScopedRelationFacetCounts(params: {
     Array<{ facetName: string; facetValue: string; facetCategory?: string | null; scopedCount: number }>
   >;
 }
+
+// ── Statistics / query API (Milestone H) ────────────────────────────────────
+// Hand-written wrappers over the api-service /api/stats/* endpoints (reached via
+// the /api/[...path] catch-all proxy). No codegen; keep in sync with stats.py.
+
+async function fetchStats<T>(path: string): Promise<T> {
+  const res = await fetch(`/api/stats/${path}`);
+  if (!res.ok) throw new Error(`Failed to fetch stats/${path}`);
+  return res.json() as Promise<T>;
+}
+
+export interface StatsSource {
+  slug: string;
+  short: string;
+  full: string;
+  entityCount: number;
+  interactionCount: number;
+  associationCount: number;
+  identifierCount: number;
+  ontologyTermCount: number;
+}
+
+export const fetchStatsSources = () => fetchStats<StatsSource[]>("sources");
+export const fetchStatsEntityTypes = () =>
+  fetchStats<Array<{ entityType: string; count: number }>>("entity-types");
+export const fetchStatsInteractionTypes = () =>
+  fetchStats<Array<{ interactionType: string; interactionClass: string | null; count: number }>>(
+    "interaction-types",
+  );
+export const fetchStatsIdentifierTypes = () =>
+  fetchStats<Array<{ identifierType: string; count: number }>>("identifier-types");
+export const fetchStatsChemicalClasses = () =>
+  fetchStats<Array<{ chemicalClass: string; count: number }>>("chemical-classes");
+export const fetchStatsMetabolicDomains = () =>
+  fetchStats<Array<{ metabolicDomain: string; count: number }>>("metabolic-domains");
+export const fetchStatsBuildManifest = () =>
+  fetchStats<{ buildId: string; builtAt: string; partialBuild: boolean; [k: string]: unknown }>(
+    "build-manifest",
+  );
+export const fetchStatsCoverageProfile = () =>
+  fetchStats<Array<{ nResources: number; nEntities: number }>>("coverage-profile");
+export const fetchStatsResourceOverlap = (contentKind = "entity") =>
+  fetchStats<Array<{ sourceA: string; sourceB: string; overlap: number }>>(
+    `resource-overlap?contentKind=${encodeURIComponent(contentKind)}`,
+  );

@@ -242,6 +242,23 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     type_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
     source_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
     taxonomy_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
+    # Derived classification facets (chemical_class, metabolic_domain — Milestone B;
+    # structural_specificity — Milestone E). These are not filter inputs, so they
+    # are counted against the full scope (all active filters applied).
+    full_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
+    CLASSIFICATION_FACETS = ("chemical_class", "metabolic_domain", "structural_specificity")
+    classification_branches = "\n".join(
+        f"""
+        UNION ALL
+        SELECT '{facet}' AS facet_name, f.facet_value, NULL::text AS facet_category,
+               rb_cardinality(rb_and(f.entity_bitmap, {full_scope})) AS scoped_count
+        FROM {SEARCH_SCHEMA}.facet_entity_bitmap f
+        {joins_sql}
+        WHERE f.facet_name = '{facet}'
+          AND rb_cardinality(rb_and(f.entity_bitmap, {full_scope})) > 0
+        """
+        for facet in CLASSIFICATION_FACETS
+    )
 
     sql = f"""
         WITH {', '.join(ctes)}
@@ -265,6 +282,7 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
         {joins_sql}
         WHERE f.facet_name = 'taxonomy_id'
           AND rb_cardinality(rb_and(f.entity_bitmap, {taxonomy_scope})) > 0
+        {classification_branches}
         ORDER BY facet_name, scoped_count DESC
     """
     with _connect() as conn:

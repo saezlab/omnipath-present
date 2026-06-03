@@ -591,6 +591,12 @@ export async function searchEntities({
     sources?: string[];
     ncbi_tax_id?: string[];
     ontology_terms?: string[];
+    // Derived classification facets (Milestone B: chemical_class, metabolic_domain;
+    // Milestone E: structural_specificity) — kept in sync with the api-service
+    // facets.py CLASSIFICATION_FACETS list (see tests/facet-consistency).
+    chemical_classes?: string[];
+    metabolic_domains?: string[];
+    structural_specificities?: string[];
   };
   limit?: number;
   cursor?: EntitySearchCursor | null;
@@ -687,6 +693,17 @@ export async function searchEntities({
 
     const sources = normalizeStringValues(filters.sources || []);
     addFacetFilter("source_filter_bitmap", "source", sources);
+
+    // Derived classification facets — must stay in sync with the api-service
+    // facets.py CLASSIFICATION_FACETS registration (FR-026; consistency test).
+    const chemicalClasses = normalizeStringValues(filters.chemical_classes || []);
+    addFacetFilter("chemical_class_filter_bitmap", "chemical_class", chemicalClasses);
+
+    const metabolicDomains = normalizeStringValues(filters.metabolic_domains || []);
+    addFacetFilter("metabolic_domain_filter_bitmap", "metabolic_domain", metabolicDomains);
+
+    const structuralSpecificities = normalizeStringValues(filters.structural_specificities || []);
+    addFacetFilter("structural_specificity_filter_bitmap", "structural_specificity", structuralSpecificities);
 
     if (filterBitmaps.length > 0) {
       whereParts.push(`rb_contains(${bitmapIntersection(filterBitmaps)}, entity_bitmap.bitmap_id)`);

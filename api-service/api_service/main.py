@@ -247,6 +247,80 @@ def get_available_sources(domain: str | None = None):
     return {"sources": list_sources(domain)}
 
 
+# ── Statistics / query API (Milestone H) — precomputed reads, camelCase ──────
+
+
+@app.get("/stats/sources")
+def get_stats_sources():
+    """Per-resource counts in the 3-name model (slug/short/full)."""
+    from . import stats
+
+    return stats.sources()
+
+
+@app.get("/stats/entity-types")
+def get_stats_entity_types():
+    from . import stats
+
+    return stats.entity_types()
+
+
+@app.get("/stats/interaction-types")
+def get_stats_interaction_types():
+    from . import stats
+
+    return stats.interaction_types()
+
+
+@app.get("/stats/identifier-types")
+def get_stats_identifier_types():
+    from . import stats
+
+    return stats.identifier_types()
+
+
+@app.get("/stats/chemical-classes")
+def get_stats_chemical_classes():
+    from . import stats
+
+    return stats.chemical_classes()
+
+
+@app.get("/stats/metabolic-domains")
+def get_stats_metabolic_domains():
+    from . import stats
+
+    return stats.metabolic_domains()
+
+
+@app.get("/stats/build-manifest")
+def get_stats_build_manifest():
+    from . import stats
+
+    return stats.build_manifest()
+
+
+@app.get("/stats/coverage-profile")
+def get_stats_coverage_profile():
+    from . import stats
+
+    return stats.coverage_profile()
+
+
+@app.get("/stats/resource-overlap")
+def get_stats_resource_overlap(contentKind: str = "entity"):
+    from . import stats
+
+    return stats.resource_overlap(contentKind)
+
+
+@app.get("/stats/ramp-conflicts")
+def get_stats_ramp_conflicts():
+    from . import stats
+
+    return stats.ramp_conflicts()
+
+
 @app.post("/entities/search")
 def post_entities_search(payload: dict = Body(default_factory=dict)):
     """Search entities by identifier/name and optional annotation/type/source/taxon filters."""
