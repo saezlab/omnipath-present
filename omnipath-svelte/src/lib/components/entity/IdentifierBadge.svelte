@@ -13,18 +13,32 @@
 	const typeLabel = $derived(getIdentifierTypeLabel(identifierType));
 	const rootClass = $derived(
 		variant === 'compact'
-			? 'inline-flex max-w-full items-center overflow-hidden rounded-md border border-border/80 bg-background/70 text-[10px] leading-none shadow-sm'
+			? 'inline-flex h-5 max-w-full items-center overflow-hidden rounded-md border border-border/70 bg-background/80 text-[10px] leading-none shadow-xs'
 			: variant === 'subtle'
-				? 'inline-flex max-w-full items-center overflow-hidden rounded-lg border border-border/70 bg-muted/30 text-xs shadow-sm'
-				: 'inline-flex max-w-full items-center overflow-hidden rounded-lg border border-border bg-card text-xs shadow-sm'
+				? 'inline-flex h-6 max-w-full items-center overflow-hidden rounded-md border border-border/70 bg-background/80 text-xs shadow-xs'
+				: 'inline-flex h-7 max-w-full items-center overflow-hidden rounded-md border border-border/80 bg-card text-xs shadow-xs'
+	);
+	const typeClass = $derived(
+		variant === 'compact'
+			? 'flex h-full max-w-16 shrink-0 items-center truncate border-r border-border/60 bg-muted/45 px-1.5 font-medium text-muted-foreground'
+			: variant === 'subtle'
+				? 'flex h-full max-w-24 shrink-0 items-center truncate border-r border-border/60 bg-muted/45 px-2 font-medium text-muted-foreground'
+				: 'flex h-full max-w-28 shrink-0 items-center truncate border-r border-border/70 bg-muted/50 px-2.5 font-medium text-muted-foreground'
+	);
+	const valueClass = $derived(
+		variant === 'compact'
+			? 'min-w-0 truncate px-1.5 font-mono text-foreground'
+			: variant === 'subtle'
+				? 'min-w-0 truncate px-2 font-mono text-foreground'
+				: 'min-w-0 truncate px-2.5 font-mono text-foreground'
 	);
 </script>
 
 <span class={`${rootClass} ${className}`} title={`${typeLabel}: ${value}`}>
-	<span class="shrink-0 border-r border-border/70 bg-muted/60 px-2 py-1 font-medium text-muted-foreground">
+	<span class={typeClass}>
 		{typeLabel}
 	</span>
-	<span class="min-w-0 truncate px-2 py-1 font-mono text-foreground">
+	<span class={valueClass}>
 		{value}
 	</span>
 </span>

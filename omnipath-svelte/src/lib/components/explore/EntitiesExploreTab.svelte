@@ -8,21 +8,23 @@
 	import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet/index.js';
 	import EntityDetailsDialog from '$lib/components/entity/EntityDetailsDialog.svelte';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
-	import OntologyHierarchyDialog from '$lib/components/explore/OntologyHierarchyDialog.svelte';
 	import { fetchEntitiesSearch, fetchScopedEntityFacetCounts, type EntitySearchCursor } from '$lib/api/client';
 	import {
 		getEntityDisplayName,
 		getEntityPublicId,
 		getEntitySecondaryName,
 		getEntityTypeLabel,
+		getIdentifierTypeLabel,
 		getIdentifierDisplayTypeForValue,
+		isChemicalEntity,
+		isCvTermEntity,
 		isUnresolvedEntity
 	} from '$lib/entities/display';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import type { SearchFilters } from '$lib/types/search';
 	import type { EntityWithIdentifiers } from '$lib/types/entities';
-	import { getEntityTypeEmoji } from '$lib/utils/entity-types';
+	import { getEntityTypeEmoji, getEntityTypeStyle } from '$lib/utils/entity-types';
 	import { formatNumber } from '$lib/utils/format';
 
 	interface Props {
@@ -74,16 +76,6 @@
 	let scopedFacetCounts = $state<Map<string, number>>(new Map());
 	let detailsEntity = $state<EntityResult | null>(null);
 	let detailsOpen = $state(false);
-	let hierarchyTerm = $state<{
-		termId: string;
-		ontologyPrefix: string | null;
-		label: string | null;
-		definition: string | null;
-		ontologyId?: string | null;
-		synonyms?: string[];
-		sources?: string[];
-	} | null>(null);
-	let hierarchyOpen = $state(false);
 
 	const effectiveFilters = $derived({
 		...filters,
@@ -233,6 +225,11 @@
 		};
 	}
 
+	function formatTaxonomyId(value: string | null | undefined): string | null {
+		if (!value) return null;
+		return TAXONOMY_LABELS[value] ? `${TAXONOMY_LABELS[value]} (${value})` : value;
+	}
+
 	function facetNameForFilter(filterKey: 'entity_types' | 'sources' | 'ncbi_tax_id'): string {
 		if (filterKey === 'entity_types') return 'entity_type';
 		if (filterKey === 'ncbi_tax_id') return 'taxonomy_id';
@@ -284,22 +281,56 @@
 		openDetails(entity);
 	}
 
-	function openOntologyHierarchy(entity: EntityResult) {
-		const term = entity.ontologyHierarchy;
-		if (!term) return;
-		hierarchyTerm = {
-			termId: term.termId,
-			ontologyPrefix: term.ontologyPrefix,
-			label: term.label || getEntityDisplayName(entity),
-			definition: term.definition,
-			ontologyId: term.ontologyId,
+	function getEntityOntologyTerm(entity: EntityResult) {
+		if (entity.ontologyHierarchy) return entity.ontologyHierarchy;
+		if (!isCvTermEntity(entity) || !entity.canonicalIdentifier.includes(':')) return null;
+		return {
+			termId: entity.canonicalIdentifier,
+			ontologyPrefix: entity.canonicalIdentifier.split(':')[0] || null,
+			label: getEntityDisplayName(entity),
+			definition: null,
+			ontologyId: null,
+			childCount: 0,
+			parentCount: 0,
 		};
-		hierarchyOpen = true;
 	}
 
-	function shouldRenderAsIdentifierBadge(entity: EntityResult, value: string | undefined): boolean {
+	function isPlainNameIdentifierType(identifierType: string | undefined): boolean {
+		const label = getIdentifierTypeLabel(identifierType).toLowerCase();
+		const normalized = [identifierType || '', label].join(' ').toLowerCase().replace(/[_-]/g, ' ');
+		return label === 'name'
+			|| normalized.includes('gene name')
+			|| normalized.includes('gene symbol')
+			|| normalized.includes('recommended name')
+			|| normalized.includes('entry name');
+	}
+
+	function getIdentifierBadgeType(entity: EntityResult, value: string | undefined): string | undefined {
 		const text = value?.trim() || '';
-		return /^\d+$/.test(text) || (!!text && text === entity.canonicalIdentifier);
+		if (!text) return undefined;
+		const identifierType = getIdentifierDisplayTypeForValue(entity, text);
+		if (!identifierType || isPlainNameIdentifierType(identifierType)) return undefined;
+		return identifierType;
+	}
+
+	function firstHint(values: string[] | undefined): string | undefined {
+		return values?.map((value) => value.trim()).find(Boolean);
+	}
+
+	function getSpecificEntityHint(entity: EntityResult): { label: string; value: string } | null {
+		if (isChemicalEntity(entity)) {
+			const specificity = firstHint(entity.entityFacetHints?.structuralSpecificities);
+			if (specificity) return { label: 'Specificity', value: specificity };
+
+			const chemicalClass = firstHint(entity.entityFacetHints?.chemicalClasses);
+			if (chemicalClass) return { label: 'Subclass', value: chemicalClass };
+
+			const metabolicDomain = firstHint(entity.entityFacetHints?.metabolicDomains);
+			if (metabolicDomain) return { label: 'Domain', value: metabolicDomain };
+		}
+
+		const taxonomy = formatTaxonomyId(entity.taxonomyId);
+		return taxonomy ? { label: 'Taxon', value: taxonomy } : null;
 	}
 </script>
 
@@ -358,7 +389,6 @@
 {/if}
 
 <EntityDetailsDialog bind:open={detailsOpen} entity={detailsEntity} />
-<OntologyHierarchyDialog bind:open={hierarchyOpen} term={hierarchyTerm} />
 
 {#snippet filterSnippet(mobile = false)}
 	<div class={mobile ? 'space-y-6' : 'h-full overflow-hidden flex flex-col bg-transparent'}>
@@ -484,97 +514,121 @@
 	{@const publicId = getEntityPublicId(result)}
 	{@const displayName = getEntityDisplayName(result)}
 	{@const secondaryName = getEntitySecondaryName(result)}
-	{@const displayIdentifierType = shouldRenderAsIdentifierBadge(result, displayName) ? getIdentifierDisplayTypeForValue(result, displayName) : undefined}
+	{@const displayIdentifierType = getIdentifierBadgeType(result, displayName)}
+	{@const secondaryIdentifierType = getIdentifierBadgeType(result, secondaryName)}
 	{@const entityTypeLabel = getEntityTypeLabel(result)}
 	{@const selected = selection.isSelected(publicId)}
 	{@const entityTypeIcon = getEntityTypeEmoji(entityTypeLabel)}
+	{@const entityTypeStyle = getEntityTypeStyle(entityTypeLabel)}
 	{@const unresolved = isUnresolvedEntity(result)}
-	{@const ontologyHierarchy = result.ontologyHierarchy}
-	<div class="w-full max-w-md overflow-hidden rounded-lg border {unresolved ? 'border-dashed border-amber-300/90 bg-amber-50/35 dark:border-amber-700/70 dark:bg-amber-950/10' : 'border-border bg-card'}">
-		<div
-			class="flex cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-			role="button"
-			tabindex="0"
-			title="Open entity details"
-			onclick={() => openDetails(result)}
-			onkeydown={(event) => handleDetailsKeydown(event, result)}
-		>
-			{#if entityTypeIcon}
-				<span class="flex size-5 shrink-0 items-center justify-center text-base leading-none" aria-hidden="true">
-					{entityTypeIcon}
-				</span>
-			{:else}
-				<Box class="size-5 shrink-0 text-muted-foreground" />
-			{/if}
-			<div class="flex min-w-0 flex-1 items-baseline gap-2">
-				{#if displayIdentifierType}
-					<IdentifierBadge identifierType={displayIdentifierType} value={displayName} variant="subtle" class="max-w-[60%]" />
-				{:else}
-					<h3 class="truncate text-base font-medium text-foreground">
-						{displayName}
-					</h3>
-				{/if}
-				{#if secondaryName && secondaryName !== displayName}
-					<p class="truncate font-mono text-sm text-muted-foreground">
-						{secondaryName}
-					</p>
+	{@const ontologyHierarchy = getEntityOntologyTerm(result)}
+	{@const showOntologyHint = !!ontologyHierarchy}
+	{@const entitySpecificHint = getSpecificEntityHint(result)}
+	<div
+		class={`w-full max-w-md cursor-pointer overflow-hidden rounded-lg border ${
+			unresolved
+				? 'border-dashed border-amber-300/90 bg-amber-50/35 dark:border-amber-700/70 dark:bg-amber-950/10'
+				: `bg-gradient-to-br ${entityTypeStyle.bgColor} ${entityTypeStyle.borderColor}`
+		}`}
+		role="button"
+		tabindex="0"
+		onclick={() => openDetails(result)}
+		onkeydown={(event) => handleDetailsKeydown(event, result)}
+	>
+		<div class="flex items-start gap-3 px-4 py-3">
+			<div class="min-w-0 flex-1 text-left">
+				<div class="flex min-w-0 items-baseline gap-2">
+					{#if displayIdentifierType}
+						<IdentifierBadge identifierType={displayIdentifierType} value={displayName} variant="subtle" class="max-w-[60%]" />
+					{:else}
+						<h3 class="truncate text-base font-medium text-foreground" title={displayName}>
+							{displayName}
+						</h3>
+					{/if}
+					{#if !displayIdentifierType && secondaryName && secondaryName !== displayName}
+						{#if secondaryIdentifierType}
+							<IdentifierBadge identifierType={secondaryIdentifierType} value={secondaryName} variant="compact" class="max-w-[42%]" />
+						{:else}
+							<p class="truncate text-sm text-muted-foreground" title={secondaryName}>
+								{secondaryName}
+							</p>
+						{/if}
+					{/if}
+				</div>
+				{#if unresolved}
+					<span class="mt-2 inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/80 bg-amber-100/70 px-1.5 py-1 text-[10px] font-medium leading-none text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200" title="Unresolved entity">
+						<AlertTriangle class="size-3" />
+						Unresolved
+					</span>
 				{/if}
 			</div>
-			{#if (result.relationCount || 0) > 0}
-				<span class="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground" title="Associated entities or relations">
-					<Link class="size-3.5" />
-					{formatNumber(result.relationCount || 0)}
-				</span>
-			{/if}
-			{#if unresolved}
-				<span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/80 bg-amber-100/70 px-1.5 py-1 text-[10px] font-medium leading-none text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200" title="Unresolved entity">
-					<AlertTriangle class="size-3" />
-					Unresolved
-				</span>
-			{/if}
-		</div>
-		<div class="flex border-t border-border">
-			<button
-				type="button"
-				onclick={(event) => {
-					event.stopPropagation();
-					if (selected) {
-						selection.removeEntity(publicId);
-					} else {
-						selection.addEntity({
-							id: publicId,
-							entityId: publicId,
-							entityPk: result.entityPk,
-							name: displayName,
-							type: entityTypeLabel,
-							fullResult: result
-						});
-					}
-				}}
-				class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-			>
-				{#if selected}
-					<Check class="size-4" />
-					Selected
-				{:else}
-					<Plus class="size-4" />
-					Add
-				{/if}
-			</button>
-			{#if ontologyHierarchy}
-				<div class="w-px bg-border"></div>
+			<div class="flex shrink-0 items-center gap-2">
 				<button
 					type="button"
+					onkeydown={(event) => event.stopPropagation()}
 					onclick={(event) => {
 						event.stopPropagation();
-						openOntologyHierarchy(result);
+						if (selected) {
+							selection.removeEntity(publicId);
+						} else {
+							selection.addEntity({
+								id: publicId,
+								entityId: publicId,
+								entityPk: result.entityPk,
+								name: displayName,
+								type: entityTypeLabel,
+								fullResult: result
+							});
+						}
 					}}
-					class="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-					title={`Explore ${ontologyHierarchy.termId} in ontology`}
+					class={`inline-flex h-8 min-w-20 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+						selected
+							? 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+							: 'border-border bg-background/70 text-muted-foreground hover:bg-background hover:text-foreground'
+					}`}
 				>
-					<Network class="size-4" />
-					Ontology
+					{#if selected}
+						<Check class="size-3.5" />
+						Selected
+					{:else}
+						<Plus class="size-3.5" />
+						Add
+					{/if}
 				</button>
+			</div>
+		</div>
+		<div class="flex min-w-0 flex-wrap gap-1.5 px-4 pb-3">
+			<span class={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium leading-none ${entityTypeStyle.chipClass}`}>
+				{#if entityTypeIcon}
+					<span aria-hidden="true">{entityTypeIcon}</span>
+				{:else}
+					<Box class="size-3" />
+				{/if}
+				<span class="truncate">{entityTypeLabel}</span>
+			</span>
+			{#if entitySpecificHint}
+				<span class={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium leading-none ${entityTypeStyle.chipClass}`}>
+					{#if entitySpecificHint.label === 'Taxon'}
+						<span aria-hidden="true">🌿</span>
+					{/if}
+					<span>{entitySpecificHint.label}:</span>
+					<span class="truncate">{entitySpecificHint.value}</span>
+				</span>
+			{/if}
+			{#if (result.relationCount || 0) > 0}
+				<span class={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium leading-none ${entityTypeStyle.chipClass}`} title="Associated entities or relations">
+					<Link class="size-3" />
+					<span>Relations:</span>
+					<span class="tabular-nums">{formatNumber(result.relationCount || 0)}</span>
+				</span>
+			{/if}
+			{#if showOntologyHint}
+				<span
+					class={`inline-flex h-5 items-center justify-center rounded-md border px-1.5 text-[10px] font-medium leading-none ${entityTypeStyle.chipClass}`}
+					title="Click the card to see details and explore its position in the ontology"
+				>
+					<Network class="size-3" />
+				</span>
 			{/if}
 		</div>
 	</div>

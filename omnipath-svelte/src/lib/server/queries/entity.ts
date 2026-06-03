@@ -1,5 +1,5 @@
 import { getPool } from "$lib/server/db/client";
-import type { Entity, EntityIdentifier, EntityOntologyHierarchy } from "$lib/drizzle";
+import type { Entity, EntityFacetHints, EntityIdentifier, EntityOntologyHierarchy } from "$lib/drizzle";
 import { normalizeStringValues } from "$lib/entity-public-id";
 import { parsePublicEntityIds } from "$lib/server/entity-public-id";
 import {
@@ -12,6 +12,7 @@ import {
 export type EntityWithIdentifiers = Entity & {
   identifiers: EntityIdentifier[];
   ontologyHierarchy?: EntityOntologyHierarchy | null;
+  entityFacetHints?: EntityFacetHints;
   identifiersTotal?: number;
   relationCount?: number;
 };
@@ -244,28 +245,41 @@ async function getIdentifiersForEntityPks(schema: string, entityPks: string[]): 
       identifier_type: string;
       identifier: string;
     }>(
-      `SELECT DISTINCT
-         eil.entity_id,
-         i.identifier_id,
-         it.name AS identifier_type,
-         i.value AS identifier
-       FROM ${schema}.entity_identifier_lookup eil
-       JOIN ${schema}.identifier_evidence i
-         ON i.identifier_id = eil.identifier_id
-       JOIN ${schema}.vocab_identifier_type it
-         ON it.identifier_type_id = i.identifier_type_id
-       WHERE eil.entity_id = ANY($1::uuid[])
-         AND i.value <> ''
-       UNION
-       SELECT DISTINCT
-         terms.term_entity_id AS entity_id,
-         NULL::uuid AS identifier_id,
-         'Name:OM:0200' AS identifier_type,
-         terms.label AS identifier
-       FROM ${schema}.entity_ontology_term terms
-       WHERE terms.term_entity_id = ANY($1::uuid[])
-         AND terms.label IS NOT NULL
-         AND terms.label <> ''
+      `WITH identifier_rows AS (
+         SELECT
+           eil.entity_id,
+           i.identifier_id,
+           it.name AS identifier_type,
+           i.value AS identifier
+         FROM ${schema}.entity_identifier_lookup eil
+         JOIN ${schema}.identifier_evidence i
+           ON i.identifier_id = eil.identifier_id
+         JOIN ${schema}.vocab_identifier_type it
+           ON it.identifier_type_id = i.identifier_type_id
+         WHERE eil.entity_id = ANY($1::uuid[])
+           AND i.value <> ''
+         UNION ALL
+         SELECT
+           terms.term_entity_id AS entity_id,
+           NULL::uuid AS identifier_id,
+           'Name:OM:0200' AS identifier_type,
+           terms.label AS identifier
+         FROM ${schema}.entity_ontology_term terms
+         WHERE terms.term_entity_id = ANY($1::uuid[])
+           AND terms.label IS NOT NULL
+           AND terms.label <> ''
+       ),
+       deduped AS (
+         SELECT DISTINCT ON (entity_id, LOWER(identifier_type), LOWER(identifier))
+           entity_id,
+           identifier_id,
+           identifier_type,
+           identifier
+         FROM identifier_rows
+         ORDER BY entity_id, LOWER(identifier_type), LOWER(identifier), identifier_id NULLS LAST
+       )
+       SELECT entity_id, identifier_id, identifier_type, identifier
+       FROM deduped
        ORDER BY entity_id, identifier_type, identifier`,
       [entityPks],
     );
@@ -330,7 +344,7 @@ async function getIdentifierPageForEntityPks(
          JOIN ${schema}.vocab_identifier_type it
            ON it.identifier_type_id = i.identifier_type_id
          WHERE i.value <> ''
-         UNION
+         UNION ALL
          SELECT
            requested.entity_id,
            NULL::uuid AS identifier_id,
@@ -342,6 +356,15 @@ async function getIdentifierPageForEntityPks(
          WHERE terms.label IS NOT NULL
            AND terms.label <> ''
        ),
+       deduped AS (
+         SELECT DISTINCT ON (entity_id, LOWER(identifier_type), LOWER(identifier))
+           entity_id,
+           identifier_id,
+           identifier_type,
+           identifier
+         FROM identifier_rows
+         ORDER BY entity_id, LOWER(identifier_type), LOWER(identifier), identifier_id NULLS LAST
+       ),
        ranked AS (
          SELECT
            *,
@@ -350,7 +373,7 @@ async function getIdentifierPageForEntityPks(
              PARTITION BY entity_id
              ORDER BY ${identifierPrioritySql("identifier_type")}, identifier_type, identifier
            ) AS identifier_rank
-         FROM identifier_rows
+         FROM deduped
        )
        SELECT
          entity_id,
@@ -408,44 +431,55 @@ async function getIdentifierPreviewForEntityPks(
     }>(
       `WITH requested(entity_id) AS (
          SELECT unnest($1::uuid[])
-       )
-       SELECT
-         requested.entity_id,
-         preview.identifier_id,
-         preview.identifier_type,
-         preview.identifier
-       FROM requested
-       CROSS JOIN LATERAL (
+       ),
+       identifier_rows AS (
          SELECT
+           requested.entity_id,
+           i.identifier_id,
+           it.name AS identifier_type,
+           i.value AS identifier
+         FROM requested
+         JOIN ${schema}.entity_identifier_lookup eil
+           ON eil.entity_id = requested.entity_id
+         JOIN ${schema}.identifier_evidence i
+           ON i.identifier_id = eil.identifier_id
+         JOIN ${schema}.vocab_identifier_type it
+           ON it.identifier_type_id = i.identifier_type_id
+         WHERE i.value <> ''
+         UNION ALL
+         SELECT
+           requested.entity_id,
+           NULL::uuid AS identifier_id,
+           'Name:OM:0200' AS identifier_type,
+           terms.label AS identifier
+         FROM requested
+         JOIN ${schema}.entity_ontology_term terms
+           ON terms.term_entity_id = requested.entity_id
+         WHERE terms.label IS NOT NULL
+           AND terms.label <> ''
+       ),
+       deduped AS (
+         SELECT DISTINCT ON (entity_id, LOWER(identifier_type), LOWER(identifier))
+           entity_id,
            identifier_id,
            identifier_type,
            identifier
-         FROM (
-           SELECT
-             i.identifier_id,
-             it.name AS identifier_type,
-             i.value AS identifier
-           FROM ${schema}.entity_identifier_lookup eil
-           JOIN ${schema}.identifier_evidence i
-             ON i.identifier_id = eil.identifier_id
-           JOIN ${schema}.vocab_identifier_type it
-             ON it.identifier_type_id = i.identifier_type_id
-           WHERE eil.entity_id = requested.entity_id
-             AND i.value <> ''
-           UNION
-           SELECT
-             NULL::uuid AS identifier_id,
-             'Name:OM:0200' AS identifier_type,
-             terms.label AS identifier
-           FROM ${schema}.entity_ontology_term terms
-           WHERE terms.term_entity_id = requested.entity_id
-             AND terms.label IS NOT NULL
-             AND terms.label <> ''
-         ) identifier_rows
-         ORDER BY ${identifierPrioritySql("identifier_type")}, identifier_type, identifier
-         LIMIT $2::integer
-       ) preview
-       ORDER BY requested.entity_id, preview.identifier_type, preview.identifier`,
+         FROM identifier_rows
+         ORDER BY entity_id, LOWER(identifier_type), LOWER(identifier), identifier_id NULLS LAST
+       ),
+       ranked AS (
+         SELECT
+           *,
+           ROW_NUMBER() OVER (
+             PARTITION BY entity_id
+             ORDER BY ${identifierPrioritySql("identifier_type")}, identifier_type, identifier
+           ) AS identifier_rank
+         FROM deduped
+       )
+       SELECT entity_id, identifier_id, identifier_type, identifier
+       FROM ranked
+       WHERE identifier_rank <= $2::integer
+       ORDER BY entity_id, identifier_type, identifier`,
       [entityPks, normalizedLimit],
     );
 
@@ -535,6 +569,55 @@ async function getOntologyHierarchyHintsForEntityPks(
   }
 }
 
+async function getEntityFacetHintsForEntityPks(
+  schema: string,
+  entityPks: string[],
+): Promise<Map<string, EntityFacetHints>> {
+  const map = new Map<string, EntityFacetHints>();
+  if (entityPks.length === 0) return map;
+
+  const client = await getPool().connect();
+  try {
+    const result = await client.query<{
+      entity_id: string | number;
+      facet_name: string;
+      facet_value: string;
+    }>(
+      `SELECT
+         bitmap.entity_id,
+         f.facet_name,
+         f.facet_value
+       FROM ${schema}.entity_bitmap_id bitmap
+       JOIN ${schema}.facet_entity_bitmap f
+         ON f.facet_name = ANY($2::text[])
+        AND rb_contains(f.entity_bitmap, bitmap.bitmap_id)
+       WHERE bitmap.entity_id = ANY($1::uuid[])
+       ORDER BY bitmap.entity_id, f.facet_name, f.facet_value`,
+      [entityPks, ["chemical_class", "metabolic_domain", "structural_specificity"]],
+    );
+
+    for (const row of result.rows) {
+      const entityPk = String(row.entity_id);
+      const hints = map.get(entityPk) ?? {
+        chemicalClasses: [],
+        metabolicDomains: [],
+        structuralSpecificities: [],
+      };
+      if (row.facet_name === "chemical_class" && !hints.chemicalClasses.includes(row.facet_value)) {
+        hints.chemicalClasses.push(row.facet_value);
+      } else if (row.facet_name === "metabolic_domain" && !hints.metabolicDomains.includes(row.facet_value)) {
+        hints.metabolicDomains.push(row.facet_value);
+      } else if (row.facet_name === "structural_specificity" && !hints.structuralSpecificities.includes(row.facet_value)) {
+        hints.structuralSpecificities.push(row.facet_value);
+      }
+      map.set(entityPk, hints);
+    }
+    return map;
+  } finally {
+    client.release();
+  }
+}
+
 async function hydrateEntities(
   schema: string,
   rows: Array<Entity & { relationCount?: number }>,
@@ -542,6 +625,7 @@ async function hydrateEntities(
 ): Promise<EntityWithIdentifiers[]> {
   const entityPks = rows.map((row) => row.entityPk);
   const ontologyHierarchyByEntityPk = await getOntologyHierarchyHintsForEntityPks(schema, entityPks);
+  const entityFacetHintsByEntityPk = await getEntityFacetHintsForEntityPks(schema, entityPks);
   if (options.identifierLimit != null) {
     if (options.includeIdentifierTotals === false) {
       const identifiersByEntityPk = await getIdentifierPreviewForEntityPks(schema, entityPks, options.identifierLimit);
@@ -549,6 +633,7 @@ async function hydrateEntities(
         ...row,
         identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
         ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
+        entityFacetHints: entityFacetHintsByEntityPk.get(row.entityPk),
       }));
     }
 
@@ -558,6 +643,7 @@ async function hydrateEntities(
       ...row,
       identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
       ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
+      entityFacetHints: entityFacetHintsByEntityPk.get(row.entityPk),
       identifiersTotal: totalsByEntityPk.get(row.entityPk) ?? 0,
     }));
   }
@@ -567,6 +653,7 @@ async function hydrateEntities(
     ...row,
     identifiers: identifiersByEntityPk.get(row.entityPk) ?? [],
     ontologyHierarchy: ontologyHierarchyByEntityPk.get(row.entityPk) ?? null,
+    entityFacetHints: entityFacetHintsByEntityPk.get(row.entityPk),
     identifiersTotal: identifiersByEntityPk.get(row.entityPk)?.length ?? 0,
   }));
 }

@@ -10,6 +10,13 @@ export type Entity = {
   entityAttributes: unknown;
   sources: string[];
   relationCount?: number;
+  entityFacetHints?: EntityFacetHints;
+};
+
+export type EntityFacetHints = {
+  chemicalClasses: string[];
+  metabolicDomains: string[];
+  structuralSpecificities: string[];
 };
 
 export type EntityOntologyHierarchy = {

@@ -1,10 +1,13 @@
 <script lang="ts">
-	import { ExternalLink } from '@lucide/svelte';
+	import { ExternalLink, Network } from '@lucide/svelte';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Table from '$lib/components/ui/table/index.js';
+	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import IdentifierBadge from '$lib/components/entity/IdentifierBadge.svelte';
 	import MoleculeStructure from '$lib/components/entity/MoleculeStructure.svelte';
+	import OntologyHierarchyBrowser from '$lib/components/explore/OntologyHierarchyBrowser.svelte';
 	import {
 		getAllowedEntityDescriptions,
 		getEntityDisplayName,
@@ -15,6 +18,7 @@
 		getEntityTypeLabel,
 		getIdentifierTypeLabel,
 		isChemicalEntity,
+		isCvTermEntity,
 		type EntityLike
 	} from '$lib/entities/display';
 
@@ -31,15 +35,31 @@
 		source: string;
 	};
 
-	type AnnotationGroup = {
-		label: string;
-		values: string[];
-		sources: string[];
-	};
-
 	type EntityIdentifierLike = {
 		key: string;
 		value: string;
+	};
+
+	type IdentifierRow = {
+		section: 'Name' | 'Synonym' | 'Identifier';
+		type: string;
+		value: string;
+		href: string | null;
+	};
+
+	type IdentifierGroup = {
+		type: string;
+		rows: IdentifierRow[];
+	};
+
+	type EntityOntologyHierarchyLike = {
+		termId: string;
+		ontologyPrefix: string | null;
+		label: string | null;
+		definition: string | null;
+		ontologyId?: string | null;
+		childCount?: number;
+		parentCount?: number;
 	};
 
 	let { open = $bindable(false), entity }: Props = $props();
@@ -52,12 +72,14 @@
 
 	function normalizeIdentifierEntries(entityLike: EntityLike | null | undefined): EntityIdentifierLike[] {
 		if (!entityLike) return [];
-		return getEntityIdentifiers(entityLike).flatMap((identifier) => {
+		const identifiers = new Map<string, EntityIdentifierLike>();
+		for (const identifier of getEntityIdentifiers(entityLike)) {
 			const key = identifier.key?.trim();
 			const value = identifier.value?.trim();
-			if (!key || !value) return [];
-			return [{ key, value }];
-		});
+			if (!key || !value) continue;
+			identifiers.set(`${key.toLowerCase()}\u0000${value.toLowerCase()}`, { key, value });
+		}
+		return Array.from(identifiers.values());
 	}
 
 	function mergeEntityDetails(
@@ -78,7 +100,7 @@
 		const identifiers = new Map<string, EntityIdentifierLike>();
 		for (const entityLike of [fallbackEntity, previousEntity, nextEntity]) {
 			for (const identifier of normalizeIdentifierEntries(entityLike)) {
-				identifiers.set(`${identifier.key}\u0000${identifier.value}`, identifier);
+				identifiers.set(`${identifier.key.toLowerCase()}\u0000${identifier.value.toLowerCase()}`, identifier);
 			}
 		}
 
@@ -231,7 +253,7 @@
 	}
 
 	function normalizeAnnotationRows(attributes: unknown[]): AnnotationRow[] {
-		return attributes.flatMap((attribute) => {
+		const rows = attributes.flatMap((attribute) => {
 			if (typeof attribute !== 'object' || attribute === null || !('term' in attribute)) return [];
 			const row = attribute as { term?: unknown; value?: unknown; unit?: unknown; source?: unknown };
 			const term = typeof row.term === 'string' ? row.term.trim() : '';
@@ -243,6 +265,12 @@
 			if (label.toLowerCase() === 'amino acid sequence') return [];
 			return [{ term, label, value, unit, source }];
 		});
+
+		const uniqueRows = new Map<string, AnnotationRow>();
+		for (const row of rows) {
+			uniqueRows.set(`${row.term.toLowerCase()}\u0000${row.value.toLowerCase()}\u0000${row.unit.toLowerCase()}\u0000${row.source.toLowerCase()}`, row);
+		}
+		return Array.from(uniqueRows.values());
 	}
 
 	function isPubmedAnnotation(row: AnnotationRow) {
@@ -262,29 +290,13 @@
 		return [...rows].sort((a, b) => annotationSortRank(a.label) - annotationSortRank(b.label) || a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
 	}
 
-	function groupAnnotationsByLabel(rows: AnnotationRow[]): AnnotationGroup[] {
-		const groups = new Map<string, AnnotationGroup>();
+	function formatAnnotationValue(row: AnnotationRow): string {
+		const rawValue = row.value ? `${row.value}${row.unit ? ` ${row.unit}` : ''}` : '';
+		if (!rawValue) return 'No value';
 
-		for (const row of rows) {
-			const key = row.label.toLowerCase();
-			const group = groups.get(key) ?? {
-				label: row.label,
-				values: [],
-				sources: []
-			};
-			const value = row.value ? `${row.value}${row.unit ? ` ${row.unit}` : ''}` : '';
-			if (value && !group.values.includes(value)) group.values.push(value);
-			if (row.source && !group.sources.includes(row.source)) group.sources.push(row.source);
-			groups.set(key, group);
-		}
-
-		return Array.from(groups.values()).sort(
-			(a, b) => annotationSortRank(a.label) - annotationSortRank(b.label) || a.label.localeCompare(b.label)
-		).map((group) => ({
-			...group,
-			values: [...group.values].sort((a, b) => a.localeCompare(b)),
-			sources: [...group.sources].sort((a, b) => a.localeCompare(b))
-		}));
+		const withoutPrefix = rawValue.replace(new RegExp(`^${row.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'i'), '');
+		const cleaned = cleanDescriptionText(withoutPrefix);
+		return cleaned || rawValue;
 	}
 
 	function pubmedIdsFromAnnotations(rows: AnnotationRow[]): string[] {
@@ -309,37 +321,188 @@
 	function getEntityIdentifierTotal(entity: EntityLike): number {
 		const total = (entity as { identifiersTotal?: unknown }).identifiersTotal;
 		const numericTotal = Number(total);
-		return Number.isFinite(numericTotal) ? numericTotal : getEntityIdentifiers(entity).length;
+		return Number.isFinite(numericTotal) ? numericTotal : normalizeIdentifierEntries(entity).length;
+	}
+
+	function identifierTypeText(identifier: EntityIdentifierLike): string {
+		return `${identifier.key} ${getIdentifierTypeLabel(identifier.key)}`.toLowerCase().replace(/[_-]/g, ' ');
+	}
+
+	function identifierNameSection(identifier: EntityIdentifierLike): 'Name' | 'Synonym' | null {
+		const text = identifierTypeText(identifier);
+		if (text.includes('synonym')) return 'Synonym';
+		if (text.includes('gene name primary')) return 'Name';
+		if (text.includes('recommended name')) return 'Name';
+		if (text.includes('entry name')) return 'Name';
+		if (getIdentifierTypeLabel(identifier.key).toLowerCase() === 'name') return 'Name';
+		return null;
+	}
+
+	function getIdentifierRows(identifiers: EntityIdentifierLike[]): IdentifierRow[] {
+		const nameSynonymRows = new Map<string, IdentifierRow>();
+		const identifierRows: IdentifierRow[] = [];
+
+		for (const identifier of identifiers) {
+			const section = identifierNameSection(identifier);
+			const type = getIdentifierTypeLabel(identifier.key);
+			if (section) {
+				const key = `${section}\u0000${type.toLowerCase()}\u0000${identifier.value.toLowerCase()}`;
+				nameSynonymRows.set(key, { section, type, value: identifier.value, href: null });
+			} else {
+				identifierRows.push({
+					section: 'Identifier',
+					type,
+					value: identifier.value,
+					href: identifiersOrgHref(identifier.key, identifier.value),
+				});
+			}
+		}
+
+		return [
+			...Array.from(nameSynonymRows.values()).sort((a, b) =>
+				a.section.localeCompare(b.section) || a.type.localeCompare(b.type) || a.value.localeCompare(b.value)
+			),
+			...identifierRows.sort((a, b) => a.type.localeCompare(b.type) || a.value.localeCompare(b.value)),
+		];
+	}
+
+	function identifierSectionRank(section: IdentifierRow['section']): number {
+		if (section === 'Name') return 0;
+		if (section === 'Synonym') return 1;
+		return 2;
+	}
+
+	function getIdentifierGroups(rows: IdentifierRow[]): IdentifierGroup[] {
+		const groups = new Map<string, IdentifierGroup>();
+		for (const row of rows) {
+			const group = groups.get(row.type) ?? { type: row.type, rows: [] };
+			group.rows.push(row);
+			groups.set(row.type, group);
+		}
+
+		return Array.from(groups.values())
+			.map((group) => ({
+				...group,
+				rows: group.rows.sort((a, b) =>
+					identifierSectionRank(a.section) - identifierSectionRank(b.section)
+					|| a.value.localeCompare(b.value)
+				),
+			}))
+			.sort((a, b) =>
+				Math.min(...a.rows.map((row) => identifierSectionRank(row.section)))
+				- Math.min(...b.rows.map((row) => identifierSectionRank(row.section)))
+				|| a.type.localeCompare(b.type)
+			);
+	}
+
+	function compactIdentifier(identifierType: string, value: string): string | null {
+		const trimmedValue = value.trim();
+		if (!trimmedValue) return null;
+		if (/^[A-Za-z][A-Za-z0-9_.-]*:\S+$/.test(trimmedValue)) return trimmedValue;
+
+		const text = `${identifierType} ${getIdentifierTypeLabel(identifierType)}`.toLowerCase();
+		const namespace = text.includes('uniprot')
+			? 'uniprot'
+			: text.includes('chebi')
+				? 'chebi'
+				: text.includes('chembl')
+					? 'chembl.compound'
+					: text.includes('hmdb')
+						? 'hmdb'
+						: text.includes('pubchem')
+							? 'pubchem.compound'
+							: text.includes('ensembl')
+								? 'ensembl'
+								: text.includes('hgnc')
+									? 'hgnc'
+									: text.includes('entrez') || text.includes('ncbi gene')
+										? 'ncbigene'
+										: text.includes('taxonomy') || text.includes('tax id')
+											? 'taxonomy'
+											: text.includes('reactome')
+												? 'reactome'
+												: text.includes('interpro')
+													? 'interpro'
+													: null;
+
+		return namespace ? `${namespace}:${trimmedValue}` : null;
+	}
+
+	function identifiersOrgHref(identifierType: string, value: string): string | null {
+		const compactId = compactIdentifier(identifierType, value);
+		if (!compactId) return null;
+		const separatorIndex = compactId.indexOf(':');
+		if (separatorIndex === -1) return `https://identifiers.org/${encodeURIComponent(compactId)}`;
+		const namespace = compactId.slice(0, separatorIndex);
+		const localId = compactId.slice(separatorIndex + 1);
+		return `https://identifiers.org/${encodeURIComponent(namespace)}:${encodeURIComponent(localId)}`;
+	}
+
+	function getOntologyHierarchy(entityLike: EntityLike): EntityOntologyHierarchyLike | null {
+		const hierarchy = (entityLike as { ontologyHierarchy?: unknown }).ontologyHierarchy;
+		if (!hierarchy || typeof hierarchy !== 'object') {
+			if (!isCvTermEntity(entityLike) || !entityLike.canonicalIdentifier.includes(':')) return null;
+			return {
+				termId: entityLike.canonicalIdentifier,
+			ontologyPrefix: entityLike.canonicalIdentifier.split(':')[0] || null,
+			label: getEntityDisplayName(entityLike),
+			definition: null,
+			ontologyId: null,
+			childCount: 0,
+			parentCount: 0,
+		};
+	}
+		const row = hierarchy as Partial<EntityOntologyHierarchyLike>;
+		if (!row.termId) return null;
+		return {
+			termId: row.termId,
+			ontologyPrefix: row.ontologyPrefix ?? null,
+			label: row.label ?? null,
+			definition: row.definition ?? null,
+			ontologyId: row.ontologyId ?? null,
+			childCount: Number(row.childCount || 0),
+			parentCount: Number(row.parentCount || 0),
+		};
 	}
 
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-2xl">
+	<DialogContent class="grid max-h-[88vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-5xl">
 		{#if entity}
 			{@const detailEntity = hydratedEntity ?? entity}
 			{@const detailSections = getDescriptionSections(detailEntity)}
-			{@const detailIdentifiers = getEntityIdentifiers(detailEntity)}
-			{@const visibleDetailIdentifiers = detailIdentifiers.slice(0, identifierLimit)}
+			{@const detailIdentifiers = normalizeIdentifierEntries(detailEntity)}
+			{@const detailIdentifierRows = getIdentifierRows(detailIdentifiers)}
+			{@const detailIdentifierGroups = getIdentifierGroups(detailIdentifierRows)}
 			{@const detailIdentifierTotal = getEntityIdentifierTotal(detailEntity)}
 			{@const detailSmiles = getEntitySmiles(detailEntity)}
 			{@const primaryIdentifierBadge = getEntityPrimaryIdentifierBadge(detailEntity)}
 			{@const detailTaxonomy = formatTaxonomyId(detailEntity.taxonomyId)}
+			{@const ontologyHierarchy = getOntologyHierarchy(detailEntity)}
 			{@const showChemicalStructure = isChemicalEntity(detailEntity) && detailSmiles}
 			{@const detailAttributes = Array.isArray(detailEntity.entityAttributes) ? detailEntity.entityAttributes : []}
 			{@const detailAnnotationRows = normalizeAnnotationRows(detailAttributes)}
 			{@const detailPubmedIds = pubmedIdsFromAnnotations(detailAnnotationRows)}
-			{@const detailNonPubmedAnnotations = groupAnnotationsByLabel(sortAnnotations(detailAnnotationRows.filter((row) => !isPubmedAnnotation(row))))}
+			{@const detailNonPubmedAnnotations = sortAnnotations(detailAnnotationRows.filter((row) => !isPubmedAnnotation(row)))}
+			{@const showOntologyTabs = !!ontologyHierarchy}
 			<DialogHeader>
 				<DialogTitle>{getEntityDisplayName(detailEntity)}</DialogTitle>
 			</DialogHeader>
-			<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
+			{#snippet detailContent()}
+				<div class="min-h-0 space-y-5 overflow-y-auto pr-2 overscroll-contain">
 				<div class="flex flex-wrap items-center gap-2">
 					<Badge variant="secondary">{getEntityTypeLabel(detailEntity)}</Badge>
 					{#if detailTaxonomy}
 						<Badge variant="outline">Taxon: {detailTaxonomy}</Badge>
 					{/if}
 					<IdentifierBadge identifierType={primaryIdentifierBadge.key} value={primaryIdentifierBadge.value} variant="subtle" />
+					{#if ontologyHierarchy}
+						<Badge variant="outline" class="gap-1.5">
+							<Network class="size-3.5" />
+							{ontologyHierarchy.termId}
+						</Badge>
+					{/if}
 				</div>
 				{#if loadingDetails && !hydratedEntity}
 					<p class="text-sm text-muted-foreground">Loading annotations...</p>
@@ -373,28 +536,31 @@
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 							Annotations
 						</h3>
-						<div class="grid min-w-0 gap-2">
-							{#each detailNonPubmedAnnotations as annotation}
-								<div class="min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/10 px-3 py-2 text-sm">
-									<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
-										<div class="truncate font-medium text-foreground">{annotation.label}</div>
-										{#if annotation.sources.length > 0}
-											<div class="flex min-w-0 flex-wrap justify-end gap-1">
-												{#each annotation.sources as source}
-													<Badge variant="secondary" class="max-w-32 truncate text-[10px]">{source}</Badge>
-												{/each}
-											</div>
-										{/if}
-									</div>
-									{#if annotation.values.length > 0}
-										<div class="mt-2 max-h-32 max-w-full space-y-1 overflow-auto">
-											{#each annotation.values as value}
-												<div class="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">{value}</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/each}
+						<div class="max-h-72 overflow-auto rounded-lg border bg-background">
+							<Table.Root>
+								<Table.Header class="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+									<Table.Row>
+										<Table.Head class="w-48">Annotation</Table.Head>
+										<Table.Head>Value</Table.Head>
+										<Table.Head class="w-36">Source</Table.Head>
+									</Table.Row>
+								</Table.Header>
+								<Table.Body>
+									{#each detailNonPubmedAnnotations as annotation}
+										<Table.Row>
+											<Table.Cell class="whitespace-normal align-top font-medium text-foreground">
+												{annotation.label}
+											</Table.Cell>
+											<Table.Cell class="max-w-lg whitespace-normal break-words align-top text-foreground">
+												{formatAnnotationValue(annotation)}
+											</Table.Cell>
+											<Table.Cell class="whitespace-normal align-top text-muted-foreground">
+												{annotation.source || 'Unknown'}
+											</Table.Cell>
+										</Table.Row>
+									{/each}
+								</Table.Body>
+							</Table.Root>
 						</div>
 					</div>
 				{/if}
@@ -403,37 +569,87 @@
 						<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 							Publications ({detailPubmedIds.length})
 						</summary>
-						<div class="mt-3 flex min-w-0 flex-wrap gap-1.5">
-							{#each detailPubmedIds as pubmedId}
-								{@const pubmedSources = sourcesForPubmedId(detailAnnotationRows, pubmedId)}
-								<a
-									href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
-									target="_blank"
-									rel="noreferrer"
-									class="inline-flex max-w-full items-center gap-1 rounded-lg border bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
-									title={pubmedSources.length ? `Sources: ${pubmedSources.join(', ')}` : undefined}
-								>
-									PMID:{pubmedId}
-									<ExternalLink class="size-3" />
-									{#if pubmedSources.length > 0}
-										<span class="max-w-24 truncate text-muted-foreground">{pubmedSources.join(', ')}</span>
-									{/if}
-								</a>
-							{/each}
+						<div class="mt-3 max-h-56 overflow-auto rounded-md border bg-background">
+							<Table.Root>
+								<Table.Header class="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+									<Table.Row>
+										<Table.Head class="w-40">PubMed ID</Table.Head>
+										<Table.Head>Sources</Table.Head>
+									</Table.Row>
+								</Table.Header>
+								<Table.Body>
+									{#each detailPubmedIds as pubmedId}
+										{@const pubmedSources = sourcesForPubmedId(detailAnnotationRows, pubmedId)}
+										<Table.Row>
+											<Table.Cell class="align-top">
+												<a
+													href={`https://pubmed.ncbi.nlm.nih.gov/${pubmedId}/`}
+													target="_blank"
+													rel="noreferrer"
+													class="inline-flex items-center gap-1 font-mono text-primary underline-offset-4 hover:underline"
+												>
+													PMID:{pubmedId}
+													<ExternalLink class="size-3" />
+												</a>
+											</Table.Cell>
+											<Table.Cell class="whitespace-normal break-words align-top text-muted-foreground">
+												{pubmedSources.length ? pubmedSources.join(', ') : 'Unknown'}
+											</Table.Cell>
+										</Table.Row>
+									{/each}
+								</Table.Body>
+							</Table.Root>
 						</div>
 					</details>
 				{/if}
-				{#if detailIdentifiers.length > 0}
+				{#if detailIdentifierRows.length > 0 || detailIdentifierTotal > detailIdentifiers.length}
 					<details class="group rounded-lg border bg-muted/5 px-3 py-2">
 						<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 							Identifiers ({detailIdentifierTotal})
 						</summary>
-						<div class="mt-3 flex flex-wrap gap-2">
-							{#each visibleDetailIdentifiers as identifier}
-								<IdentifierBadge identifierType={identifier.key} value={identifier.value} />
-							{/each}
-						</div>
-						{#if detailIdentifierTotal > visibleDetailIdentifiers.length}
+						{#if detailIdentifierRows.length > 0}
+							<div class="mt-3 max-h-72 overflow-auto rounded-md border bg-background">
+								<Table.Root>
+									<Table.Header class="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+										<Table.Row>
+											<Table.Head>Value</Table.Head>
+										</Table.Row>
+									</Table.Header>
+									<Table.Body>
+										{#each detailIdentifierGroups as group}
+											<Table.Row class="bg-muted/45 hover:bg-muted/45">
+												<Table.Cell class="whitespace-normal py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+													<div class="flex items-center justify-between gap-3">
+														<span>{group.type}</span>
+														<span class="font-normal tabular-nums">{group.rows.length}</span>
+													</div>
+												</Table.Cell>
+											</Table.Row>
+											{#each group.rows as row}
+												<Table.Row>
+												<Table.Cell class={`max-w-lg whitespace-normal align-top text-foreground ${row.section === 'Identifier' ? 'break-all font-mono' : 'break-words font-medium'}`}>
+													{#if row.href}
+														<a
+															href={row.href}
+															target="_blank"
+															rel="noreferrer"
+															class="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+														>
+															{row.value}
+															<ExternalLink class="size-3 shrink-0" />
+														</a>
+													{:else}
+														{row.value}
+													{/if}
+												</Table.Cell>
+											</Table.Row>
+											{/each}
+										{/each}
+									</Table.Body>
+								</Table.Root>
+							</div>
+						{/if}
+						{#if detailIdentifierTotal > detailIdentifiers.length}
 							<Button
 								variant="ghost"
 								size="sm"
@@ -446,7 +662,28 @@
 						{/if}
 					</details>
 				{/if}
-			</div>
+				</div>
+			{/snippet}
+
+			{#if showOntologyTabs}
+				<Tabs.Root value="ontology" class="min-h-0 overflow-hidden">
+					<Tabs.List class="mb-2">
+						<Tabs.Trigger value="ontology">
+							<Network class="size-4" />
+							Ontology
+						</Tabs.Trigger>
+						<Tabs.Trigger value="details">Details</Tabs.Trigger>
+					</Tabs.List>
+					<Tabs.Content value="ontology" class="min-h-0 overflow-auto">
+						<OntologyHierarchyBrowser term={ontologyHierarchy} />
+					</Tabs.Content>
+					<Tabs.Content value="details" class="min-h-0 overflow-hidden">
+						{@render detailContent()}
+					</Tabs.Content>
+				</Tabs.Root>
+			{:else}
+				{@render detailContent()}
+			{/if}
 		{/if}
 	</DialogContent>
 </Dialog>

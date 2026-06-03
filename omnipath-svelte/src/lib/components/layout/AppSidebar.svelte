@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { mode, setMode } from 'mode-watcher';
-	import { BookOpenText, Database, ExternalLink, ListChecks, MessageSquare, Moon, Search, Sun } from '@lucide/svelte';
+	import { BookOpenText, Database, ExternalLink, Info, ListChecks, MessageSquare, Moon, Search, Sun } from '@lucide/svelte';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import {
 		Sidebar,
@@ -18,6 +18,7 @@
 		SidebarSeparator
 	} from '$lib/components/ui/sidebar/index.js';
 	import { useSidebarContent } from '$lib/stores/sidebar.svelte.js';
+	import { getUiPreferences } from '$lib/stores/ui-preferences.svelte';
 
 	const navigationItems = [
 		{ title: 'Explore', url: '/explore', icon: Search },
@@ -28,6 +29,7 @@
 	];
 
 	const sidebarContent = useSidebarContent();
+	const uiPreferences = getUiPreferences();
 	let darkMode = $state(false);
 
 	$effect(() => {
@@ -102,7 +104,18 @@
 	</SidebarContent>
 
 	<SidebarFooter class="border-t">
-		<div class="flex items-center justify-center px-4 py-2">
+		<div class="space-y-3 px-4 py-3">
+			<label class="flex items-center justify-between gap-3">
+				<span class="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+					<Info class="h-3.5 w-3.5" />
+					<span>Page explanations</span>
+				</span>
+				<Switch
+					size="sm"
+					checked={uiPreferences.showExplanations}
+					onCheckedChange={(checked) => uiPreferences.setShowExplanations(checked)}
+				/>
+			</label>
 			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-1">
 					<Sun class="h-3 w-3 text-muted-foreground" />

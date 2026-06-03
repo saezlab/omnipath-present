@@ -1,6 +1,6 @@
 import type { SearchFilters } from "$lib/types/search";
 import type { InteractionDetailsData, InteractionListRow } from "$lib/types/interactions";
-import type { EntityOntologyHierarchy } from "$lib/drizzle";
+import type { EntityFacetHints, EntityOntologyHierarchy } from "$lib/drizzle";
 
 export type EntitySearchCursor = { relationCount: number; entityPk: string };
 export type SelectionScopeMode = "union" | "intersection";
@@ -70,6 +70,7 @@ export async function fetchEntitiesSearch(params: {
         sources: string[];
         relationCount?: number;
         ontologyHierarchy?: EntityOntologyHierarchy | null;
+        entityFacetHints?: EntityFacetHints;
         identifiersTotal?: number;
         identifiers: Array<{
           id?: string;
@@ -104,6 +105,7 @@ export async function fetchEntitiesSearch(params: {
       sources: string[];
       relationCount?: number;
       ontologyHierarchy?: EntityOntologyHierarchy | null;
+      entityFacetHints?: EntityFacetHints;
       identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
@@ -187,6 +189,7 @@ export async function fetchEntitiesByPublicIds(publicIds: string[]) {
       sources: string[];
       relationCount?: number;
       ontologyHierarchy?: EntityOntologyHierarchy | null;
+      entityFacetHints?: EntityFacetHints;
       identifiersTotal?: number;
       identifiers: Array<{
         id?: string;
@@ -216,6 +219,7 @@ export async function fetchEntitiesByPks(pks: Array<string | number>) {
     sources: string[];
     relationCount?: number;
     ontologyHierarchy?: EntityOntologyHierarchy | null;
+    entityFacetHints?: EntityFacetHints;
     identifiersTotal?: number;
     identifiers: Array<{ id?: string; entityPk: string; identifier: string; identifierType: string }>;
   }> };

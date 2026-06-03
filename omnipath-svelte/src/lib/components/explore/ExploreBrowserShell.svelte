@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Search } from '@lucide/svelte';
+	import { Info, Search } from '@lucide/svelte';
+	import { getUiPreferences } from '$lib/stores/ui-preferences.svelte';
 
 	interface Props {
 		query: string;
@@ -14,6 +15,9 @@
 		searchInputRef?: HTMLInputElement | null;
 		footerCta?: import('svelte').Snippet;
 		summarySlot?: import('svelte').Snippet;
+		explanationTitle?: string;
+		explanationText?: string;
+		explanationFacts?: string[];
 	}
 
 	let {
@@ -27,8 +31,13 @@
 		searchPlaceholder,
 		searchInputRef = $bindable(null),
 		footerCta,
-		summarySlot
+		summarySlot,
+		explanationTitle = '',
+		explanationText = '',
+		explanationFacts = []
 	}: Props = $props();
+
+	const uiPreferences = getUiPreferences();
 
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === 'Enter') {
@@ -92,6 +101,29 @@
 
 		{#if summarySlot}
 			{@render summarySlot()}
+		{/if}
+
+		{#if uiPreferences.showExplanations && explanationText}
+			<div class="rounded-lg border bg-muted/25 px-4 py-3">
+				<div class="flex gap-3">
+					<Info class="mt-0.5 size-4 shrink-0 text-primary" />
+					<div class="min-w-0 space-y-1.5">
+						{#if explanationTitle}
+							<h2 class="text-sm font-semibold leading-5 text-foreground">{explanationTitle}</h2>
+						{/if}
+						<p class="text-sm leading-6 text-muted-foreground">{explanationText}</p>
+						{#if explanationFacts.length > 0}
+							<div class="flex flex-wrap gap-1.5">
+								{#each explanationFacts as fact}
+									<span class="rounded-md border bg-background/70 px-2 py-0.5 text-xs text-muted-foreground">
+										{fact}
+									</span>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
 		{/if}
 	</div>
 
