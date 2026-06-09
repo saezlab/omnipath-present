@@ -24,6 +24,11 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile
+    # Survive docker daemon/host restarts like api-service + svelte do —
+    # without this the postgres container is not auto-restarted on a daemon
+    # restart (api/svelte are), so the stack comes back DB-less and the web app
+    # 500s on every query ("failed to resolve host 'postgres'").
+    restart: unless-stopped
     environment:
       POSTGRES_DB: omnipath
       POSTGRES_USER: omnipath
