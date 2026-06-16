@@ -602,6 +602,16 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
 
 def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
     filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else payload
+    # Selectable level (T034): when a chemical structural level is requested,
+    # serve the collapsed edges from the materialised resolution-level table.
+    chemical_level = (
+        payload.get("chemicalLevel")
+        or payload.get("chemical_level")
+        or filters.get("chemicalLevel")
+        or filters.get("chemical_level")
+    )
+    if chemical_level:
+        return _search_chemical_level_relations(payload, filters, str(chemical_level))
     limit = _limit(payload.get("limit"), default=50)
     offset = _offset(payload.get("offset"))
     include_entities = payload.get("includeEntities", True) is not False
@@ -662,6 +672,262 @@ def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
         "total": int(total or 0),
         "limit": limit,
         "offset": offset,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Selectable levels (spec-003 T034/T035)
+#
+# A "selectable level" picks how endpoints of a relation are projected. There
+# are two axes of one shared concept:
+#   * chemical_structure — the InChIKey structural-specificity level
+#     (connectivity / stereo_isotope_tautomer / full), served from the
+#     pre-materialised ``chemical_resolution_relation`` (no request-time GROUP
+#     BY). This is the chemical instance of the level mechanism (T034).
+#   * entity_layout — the gene↔protein↔state representation axis (T035). 'entity'
+#     (the base graph) is implemented today; gene/protein/state re-projection is
+#     the remaining build, registered here so both axes share one concept.
+# ---------------------------------------------------------------------------
+
+ENTITY_LAYOUTS = ("entity", "gene", "protein", "state")
+DEFAULT_ENTITY_LAYOUT = "entity"
+
+
+def _chemical_level_names() -> list[str]:
+    """Names of the materialised chemical structural levels, coarse → fine."""
+    with _connect() as conn:
+        exists = conn.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = 'chemical_resolution_level'
+            """,
+            (SEARCH_SCHEMA,),
+        ).fetchone()
+        if not exists:
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT name FROM {SEARCH_SCHEMA}.chemical_resolution_level
+            ORDER BY specificity_rank
+            """
+        ).fetchall()
+    return [row["name"] for row in rows]
+
+
+def selectable_levels() -> dict[str, Any]:
+    """Discovery: the two axes of the shared selectable-level mechanism."""
+    chemical = []
+    with _connect() as conn:
+        exists = conn.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = 'chemical_resolution_level'
+            """,
+            (SEARCH_SCHEMA,),
+        ).fetchone()
+        if exists:
+            chemical = [
+                dict(row)
+                for row in conn.execute(
+                    f"""
+                    SELECT name, inchikey_prefix_length, specificity_rank,
+                           description
+                    FROM {SEARCH_SCHEMA}.chemical_resolution_level
+                    ORDER BY specificity_rank
+                    """
+                ).fetchall()
+            ]
+    return {
+        "chemicalStructure": {
+            "param": "chemicalLevel",
+            "default": None,
+            "served_from": "chemical_resolution_relation",
+            "levels": chemical,
+        },
+        "entityLayout": {
+            "param": "outputLayout",
+            "default": DEFAULT_ENTITY_LAYOUT,
+            "layouts": list(ENTITY_LAYOUTS),
+            "implemented": [DEFAULT_ENTITY_LAYOUT],
+        },
+    }
+
+
+def _normalize_output_layout(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in ENTITY_LAYOUTS else DEFAULT_ENTITY_LAYOUT
+
+
+def _chemical_level_select() -> str:
+    """SELECT list for a projected chemical-level edge (mirrors _relation_select).
+
+    The collapsed edge has no single ``relation_id``; synthesise a stable uuid
+    from (level, subject, predicate, object) so it has a deterministic pk. The
+    member count is the evidence count; provenance is the union ``source_ids``.
+    """
+    return f"""
+      md5(
+        cr.level_id::text || ':' || cr.subject_entity_id::text || ':' ||
+        cr.predicate_id::text || ':' || cr.object_entity_id::text
+      )::uuid AS relation_id,
+      cr.subject_entity_id,
+      rp.name AS predicate,
+      cr.object_entity_id,
+      rc.name AS relation_category,
+      ARRAY(
+        SELECT DISTINCT entity_type
+        FROM (
+          SELECT {_entity_type_sql('subject')} AS entity_type
+          FROM {SEARCH_SCHEMA}.entity subject
+          WHERE subject.entity_id = cr.subject_entity_id
+          UNION
+          SELECT {_entity_type_sql('object')} AS entity_type
+          FROM {SEARCH_SCHEMA}.entity object
+          WHERE object.entity_id = cr.object_entity_id
+        ) participant_types
+        WHERE entity_type IS NOT NULL
+        ORDER BY entity_type
+      ) AS participant_types,
+      cr.member_relation_count::bigint AS evidence_count,
+      ARRAY(
+        SELECT DISTINCT ds.name
+        FROM {SEARCH_SCHEMA}.data_source ds
+        WHERE ds.source_id = ANY(cr.source_ids)
+          AND ds.name IS NOT NULL AND ds.name <> ''
+        ORDER BY ds.name
+      ) AS sources"""
+
+
+def _chemical_level_where(filters: dict[str, Any], params: list[Any]) -> str:
+    """WHERE for the chemical-level path (cr.*; source filter via source_ids).
+
+    Supports predicate / relation-category / subject-object-entity-pk / source
+    filters. Taxonomy & annotation-term facets key on base ``relation_id`` and
+    are not applied to projected edges (documented behaviour).
+    """
+
+    def push(value: Any) -> str:
+        params.append(value)
+        return "%s"
+
+    where: list[str] = []
+    relation_categories = _strings(filters.get("relationCategories") or filters.get("relation_categories"))
+    predicates = _strings(filters.get("predicates"))
+    subject_entity_pks = _ids(filters.get("subjectEntityPks") or filters.get("subject_entity_pks"))
+    object_entity_pks = _ids(filters.get("objectEntityPks") or filters.get("object_entity_pks"))
+    entity_pks = _ids(filters.get("entityPks") or filters.get("entity_pks"))
+    sources = resolve_resource_filters(_strings(filters.get("sources")))
+    require_both = bool(filters.get("requireBothParticipants") or filters.get("require_both_participants"))
+
+    if relation_categories:
+        where.append(f"rc.name = ANY({push(relation_categories)}::text[])")
+    if predicates:
+        where.append(f"rp.name = ANY({push(predicates)}::text[])")
+    if subject_entity_pks:
+        where.append(f"cr.subject_entity_id = ANY({push(subject_entity_pks)}::uuid[])")
+    if object_entity_pks:
+        where.append(f"cr.object_entity_id = ANY({push(object_entity_pks)}::uuid[])")
+    if entity_pks:
+        op = "AND" if require_both else "OR"
+        where.append(f"(cr.subject_entity_id = ANY({push(entity_pks)}::uuid[]) {op} cr.object_entity_id = ANY(%s::uuid[]))")
+        params.append(entity_pks)
+    if sources:
+        where.append(f"""cr.source_ids && (
+          SELECT coalesce(array_agg(ds.source_id), '{{}}'::bigint[])
+          FROM {SEARCH_SCHEMA}.data_source ds
+          WHERE ds.name = ANY({push(sources)}::text[])
+        )""")
+
+    return f"AND {' AND '.join(where)}" if where else ""
+
+
+def _search_chemical_level_relations(
+    payload: dict[str, Any],
+    filters: dict[str, Any],
+    level: str,
+) -> dict[str, Any]:
+    """Serve relations at a chemical structural level from the materialised
+    ``chemical_resolution_relation`` table (T034)."""
+    available = _chemical_level_names()
+    if level not in available:
+        return {
+            "relations": [],
+            "total": 0,
+            "limit": _limit(payload.get("limit"), default=50),
+            "offset": _offset(payload.get("offset")),
+            "chemicalLevel": level,
+            "outputLayout": _normalize_output_layout(payload.get("outputLayout") or filters.get("outputLayout")),
+            "error": f"unknown chemicalLevel '{level}'; available: {available}",
+        }
+
+    limit = _limit(payload.get("limit"), default=50)
+    offset = _offset(payload.get("offset"))
+    include_entities = payload.get("includeEntities", True) is not False
+    output_layout = _normalize_output_layout(payload.get("outputLayout") or filters.get("outputLayout"))
+
+    params: list[Any] = [level]
+    where_sql = _chemical_level_where(filters, params)
+    page_params = [*params, limit, offset]
+
+    entity_select = ""
+    entity_joins = ""
+    if include_entities:
+        entity_select = f""",
+          subject.entity_id AS subject_entity_id,
+          subject.canonical_identifier AS subject_id,
+          {_canonical_type_sql('subject')} AS subject_id_type,
+          {_entity_type_sql('subject')} AS subject_entity_type,
+          subject.taxonomy_id AS subject_taxonomy_id,
+          ARRAY[]::text[] AS subject_sources,
+          0::bigint AS subject_relation_count,
+          object.entity_id AS object_entity_id,
+          object.canonical_identifier AS object_id,
+          {_canonical_type_sql('object')} AS object_id_type,
+          {_entity_type_sql('object')} AS object_entity_type,
+          object.taxonomy_id AS object_taxonomy_id,
+          ARRAY[]::text[] AS object_sources,
+          0::bigint AS object_relation_count"""
+        entity_joins = f"""
+          JOIN {SEARCH_SCHEMA}.entity subject ON subject.entity_id = cr.subject_entity_id
+          JOIN {SEARCH_SCHEMA}.entity object ON object.entity_id = cr.object_entity_id"""
+
+    sql = f"""
+        SELECT {_chemical_level_select()}
+          {entity_select}
+        FROM {SEARCH_SCHEMA}.chemical_resolution_relation cr
+        JOIN {SEARCH_SCHEMA}.chemical_resolution_level l
+          ON l.level_id = cr.level_id AND l.name = %s
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_predicate rp
+          ON rp.relation_predicate_id = cr.predicate_id
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_category rc
+          ON rc.relation_category_id = cr.relation_category_id
+        {entity_joins}
+        WHERE true {where_sql}
+        ORDER BY cr.subject_entity_id, cr.predicate_id, cr.object_entity_id
+        LIMIT %s OFFSET %s
+    """
+    count_sql = f"""
+        SELECT count(*)::bigint AS total
+        FROM {SEARCH_SCHEMA}.chemical_resolution_relation cr
+        JOIN {SEARCH_SCHEMA}.chemical_resolution_level l
+          ON l.level_id = cr.level_id AND l.name = %s
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_predicate rp
+          ON rp.relation_predicate_id = cr.predicate_id
+        LEFT JOIN {SEARCH_SCHEMA}.vocab_relation_category rc
+          ON rc.relation_category_id = cr.relation_category_id
+        WHERE true {where_sql}
+    """
+    with _connect() as conn:
+        rows = conn.execute(sql, page_params).fetchall()
+        total = conn.execute(count_sql, params).fetchone()["total"]
+
+    return {
+        "relations": [_relation_to_api(row, include_entities) for row in rows],
+        "total": int(total or 0),
+        "limit": limit,
+        "offset": offset,
+        "chemicalLevel": level,
+        "outputLayout": output_layout,
     }
 
 

@@ -380,10 +380,17 @@ def get_relations_search(
     relationCategories: str | None = None,
     annotationTerms: str | None = None,
     requireBothParticipants: bool = False,
+    chemicalLevel: str | None = None,
+    outputLayout: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ):
-    """Search relations using query parameters."""
+    """Search relations using query parameters.
+
+    ``chemicalLevel`` (connectivity / stereo_isotope_tautomer / full) serves the
+    collapsed chemical-resolution-level edges; ``outputLayout`` selects the
+    entity-representation axis (default ``entity``). See ``GET /levels``.
+    """
     from .graph import search_relations
 
     return search_relations({
@@ -394,9 +401,19 @@ def get_relations_search(
             "annotationTerms": [value for value in (annotationTerms or "").split(",") if value],
             "requireBothParticipants": requireBothParticipants,
         },
+        "chemicalLevel": chemicalLevel,
+        "outputLayout": outputLayout,
         "limit": limit,
         "offset": offset,
     })
+
+
+@app.get("/levels")
+def get_selectable_levels():
+    """The selectable-level mechanism: chemical structural levels + entity layouts."""
+    from .graph import selectable_levels
+
+    return selectable_levels()
 
 
 @app.get("/relations/{relation_id}")
