@@ -292,7 +292,6 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
             'canonical' AS match_kind,
             1000
             + CASE WHEN e.taxonomy_id = ANY(%s::bigint[]) THEN 50 ELSE 0 END
-            + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
             {_entity_sources_sql("e")} AS sources
@@ -317,7 +316,6 @@ def resolve_entities(payload: dict[str, Any]) -> dict[str, Any]:
               ELSE 800
             END
             + CASE WHEN e.taxonomy_id = ANY(%s::bigint[]) THEN 50 ELSE 0 END
-            + CASE WHEN {_entity_type_sql('e')} = 'Protein:MI:0326' THEN 10 ELSE 0 END
             + LEAST(COALESCE(rc.relation_count, 0), 1000)::int / 100 AS score,
             COALESCE(rc.relation_count, 0)::bigint AS relation_count,
             {_entity_sources_sql("e")} AS sources
