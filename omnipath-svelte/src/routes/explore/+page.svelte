@@ -8,7 +8,6 @@
 	import SelectionSheet from '$lib/components/selection/SelectionSheet.svelte';
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import type { SearchFilters } from '$lib/types/search';
-	import { formatNumber } from '$lib/utils/format';
 
 	const selection = getSelectionStore();
 
@@ -73,35 +72,12 @@
 	});
 
 	const searchPlaceholder = $derived(tab === 'relations' ? 'Search relations…' : 'Search entities…');
-	const activeEntityFilterCount = $derived(countActiveFilters(entityFilters));
-	const activeRelationFilterCount = $derived(countActiveFilters(interactionFilters));
-	const explanationTitle = $derived(tab === 'relations' ? 'Global relation search' : 'Global entity search');
+	const explanationTitle = $derived(tab === 'relations' ? 'Search relations' : 'Search entities');
 	const explanationText = $derived(
 		tab === 'relations'
-			? 'Explore interactions and associations between entities. Search text resolves to matching endpoint entities; relation filters then narrow source-target rows by evidence, participant, predicate, and data-source context.'
-			: 'Search the OmniPath entity index for genes, proteins, chemicals, complexes, pathways, and other biological objects. Facets narrow results by entity type, taxonomy, and data source; cards expose identifiers, relation counts, and hierarchy links where available.'
+			? 'Relations connect two entities through an interaction or association. Search and filter them by participant, type, or source.'
+			: 'Entities are biological objects such as genes, proteins, chemicals, complexes, and pathways. Search and filter the full index.'
 	);
-	const explanationFacts = $derived(
-		tab === 'relations'
-			? [
-					query.trim() ? `Query: ${query.trim()}` : 'No query text',
-					activeRelationFilterCount > 0 ? `${formatNumber(activeRelationFilterCount)} relation filters` : 'No relation filters',
-					activeEntityFilterCount > 0 ? `${formatNumber(activeEntityFilterCount)} endpoint match filters` : 'No endpoint match filters'
-				]
-			: [
-					query.trim() ? `Query: ${query.trim()}` : 'No query text',
-					activeEntityFilterCount > 0 ? `${formatNumber(activeEntityFilterCount)} entity filters` : 'No entity filters',
-					selection.totalSelectionCount > 0 ? `${formatNumber(selection.totalSelectionCount)} selected` : 'Selection empty'
-				]
-	);
-
-	function countActiveFilters(filters: SearchFilters) {
-		return Object.entries(filters).reduce((count, [, value]) => {
-			if (Array.isArray(value)) return count + value.length;
-			if (value !== null && value !== undefined) return count + 1;
-			return count;
-		}, 0);
-	}
 </script>
 
 <svelte:window />
@@ -120,7 +96,6 @@
 	searchPlaceholder={searchPlaceholder}
 	explanationTitle={explanationTitle}
 	explanationText={explanationText}
-	explanationFacts={explanationFacts}
 	bind:searchInputRef={inputRef}
 >
 	{#snippet content()}

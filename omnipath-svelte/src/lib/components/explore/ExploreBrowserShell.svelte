@@ -17,7 +17,6 @@
 		summarySlot?: import('svelte').Snippet;
 		explanationTitle?: string;
 		explanationText?: string;
-		explanationFacts?: string[];
 	}
 
 	let {
@@ -33,8 +32,7 @@
 		footerCta,
 		summarySlot,
 		explanationTitle = '',
-		explanationText = '',
-		explanationFacts = []
+		explanationText = ''
 	}: Props = $props();
 
 	const uiPreferences = getUiPreferences();
@@ -112,15 +110,6 @@
 							<h2 class="text-sm font-semibold leading-5 text-foreground">{explanationTitle}</h2>
 						{/if}
 						<p class="text-sm leading-6 text-muted-foreground">{explanationText}</p>
-						{#if explanationFacts.length > 0}
-							<div class="flex flex-wrap gap-1.5">
-								{#each explanationFacts as fact}
-									<span class="rounded-md border bg-background/70 px-2 py-0.5 text-xs text-muted-foreground">
-										{fact}
-									</span>
-								{/each}
-							</div>
-						{/if}
 					</div>
 				</div>
 			</div>

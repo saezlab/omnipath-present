@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FlaskConical, Dna, CircleDot, Waypoints, Shapes, HelpCircle, Tags, AlertTriangle } from '@lucide/svelte';
+  import { FlaskConical, Dna, CircleDot, Waypoints, Waves, Shapes, HelpCircle, Tags, AlertTriangle } from '@lucide/svelte';
   import { getEntityTypeStyle } from '$lib/utils/entity-types';
 
   const entityTypeIcons: Record<string, typeof CircleDot> = {
@@ -10,6 +10,7 @@
     drug: FlaskConical,
     lipid: FlaskConical,
     gene: Dna,
+    mirna: Waves,
     complex: Shapes,
     pathway: Waypoints,
     reaction: Waypoints,

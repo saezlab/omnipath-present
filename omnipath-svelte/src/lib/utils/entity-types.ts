@@ -6,6 +6,8 @@ export const entityTypeEmojis: Record<string, string> = {
     'Lipid': '💧',
     'Cv_term': '🏷️',
     'Protein': '🧬',
+    'Gene': '🧬',
+    'Mirna': '〰️',
     'Reaction': '⚗️',
     'Complex': '🧩',
     'Pathway': '🛣️',

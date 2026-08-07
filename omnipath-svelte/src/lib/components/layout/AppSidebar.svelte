@@ -108,7 +108,7 @@
 			<label class="flex items-center justify-between gap-3">
 				<span class="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
 					<Info class="h-3.5 w-3.5" />
-					<span>Page explanations</span>
+					<span>Explanations</span>
 				</span>
 				<Switch
 					size="sm"

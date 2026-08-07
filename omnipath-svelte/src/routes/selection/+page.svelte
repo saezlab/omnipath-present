@@ -12,7 +12,6 @@
 	import { getSelectionStore } from '$lib/stores/selection.svelte';
 	import { getSelectionScope, getSelectionScopeSettings } from '$lib/stores/selection-scope.svelte';
 	import type { SearchFilters } from '$lib/types/search';
-	import { formatNumber } from '$lib/utils/format';
 
 	const selection = getSelectionStore();
 	const scopeSettings = getSelectionScopeSettings();
@@ -97,45 +96,22 @@
 				? hasEntityTabScope || scopeAnnotationIds.length > 0
 				: hasEntityTabScope
 	);
-	const activeFilterCount = $derived(countActiveFilters(filters));
-	const selectionSummary = $derived(
-		`${formatNumber(selection.selectedEntities.length)} entities, ${formatNumber(selection.selectedAnnotations.length)} CV terms`
-	);
-	const scopeSummary = $derived(
-		scope.isLoading
-			? 'Resolving scope'
-			: `${formatNumber(entityTabScopePks.length)} scoped entities, ${formatNumber(scopeAnnotationIds.length)} terms`
-	);
 	const explanationTitle = $derived(
 		tab === 'relations'
-			? 'Relations in your selection scope'
+			? 'Selected relations'
 			: tab === 'ontology'
-				? 'Ontology terms connected to your selection'
-				: 'Entities in your selection scope'
+				? 'Selected ontology terms'
+				: 'Selected entities'
 	);
 	const explanationText = $derived(
 		tab === 'relations'
 			? scopeSettings.mode === 'intersection'
-				? 'The current selection is applied as an active scope. Intersection mode focuses relations on the overlap of selected entities and ontology-derived annotations, helping refine a subset before inspecting source-target evidence.'
-				: 'The current selection is applied as an active scope. Union mode keeps relations connected to any selected entity or ontology term, so you can move from a broad selected context toward more specific evidence.'
+				? 'Relations connect two entities through an interaction or association. This view shows relations shared by the selected items.'
+				: 'Relations connect two entities through an interaction or association. This view shows relations linked to any selected item.'
 			: tab === 'ontology'
-				? 'Browse ontology and hierarchy terms associated with the scoped subset. Shared terms can be added back to the selection, then combined with intersection mode to focus on matching entities, relations, or annotations.'
-				: 'Your selected entities and ontology terms define this scoped entity set. Search and facets refine only the selected, annotation-matched, or associated entities before you continue to relations or ontology summaries.'
+				? 'Ontology terms are standardized concepts used to describe and group biological data. This view shows terms linked to your selection.'
+				: 'Entities are biological objects such as genes, proteins, chemicals, complexes, and pathways. This view shows entities matching your selection.'
 	);
-	const explanationFacts = $derived([
-		`Selection: ${selectionSummary}`,
-		`Scope: ${scopeSummary}`,
-		scopeSettings.mode === 'intersection' ? 'Operator: intersection' : 'Operator: union',
-		activeFilterCount > 0 ? `${formatNumber(activeFilterCount)} active filters` : 'No filters'
-	]);
-
-	function countActiveFilters(activeFilters: SearchFilters) {
-		return Object.entries(activeFilters).reduce((count, [, value]) => {
-			if (Array.isArray(value)) return count + value.length;
-			if (value !== null && value !== undefined) return count + 1;
-			return count;
-		}, 0);
-	}
 </script>
 
 {#if !(tab === 'relations' && scope.isLoading) && isSelectionEmpty}
@@ -144,7 +120,7 @@
 			<CardContent class="space-y-4 py-12 text-center">
 				<h1 class="text-2xl font-semibold">Selection is empty</h1>
 				<p class="text-muted-foreground">
-					Use Explore to add entities or ontology terms. Selection will scope entities and relations to that shared subset.
+					Add entities or terms from Explore.
 				</p>
 				{#if selection.selectedAnnotations.length > 0}
 					<div class="flex flex-wrap justify-center gap-2">
@@ -176,7 +152,6 @@
 				: 'Search scoped entities…'}
 		explanationTitle={explanationTitle}
 		explanationText={explanationText}
-		explanationFacts={explanationFacts}
 		bind:searchInputRef={inputRef}
 	>
 		{#snippet content()}
@@ -193,7 +168,7 @@
 						<CardContent class="space-y-3 py-10 text-center">
 							<h2 class="text-xl font-semibold">{tab === 'relations' ? 'No relation scope' : tab === 'ontology' ? 'No ontology scope' : 'No entities in scope'}</h2>
 							<p class="text-sm text-muted-foreground">
-								Change the scope options or add an explicit entity to the selection.
+								Adjust the scope or add an entity.
 							</p>
 						</CardContent>
 					</Card>

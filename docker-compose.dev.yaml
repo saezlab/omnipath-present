@@ -61,6 +61,7 @@ services:
             ONTOLOGY_CACHE_DIR: /app/cache
             OMNIPATH_GOLD_ROOT: /gold
             DATABASE_URL: postgresql://omnipath:omnipath@omnipathv2-postgres:5432/omnipath
+            OMNIPATH_PG_SCHEMA: ${OMNIPATH_PG_SCHEMA:-public}
         ports:
             - "8081:8081"
         volumes:
