@@ -437,6 +437,118 @@ def get_relation_evidence(relation_id: str):
         raise HTTPException(status_code=404, detail=f"Relation '{relation_id}' evidence not found")
     return result
 
+# ── General interactions API (cycle 008) — the fact-table surface ───────────
+# Separate from the /relations block above, which keeps serving the canonical
+# graph. Scaffold: the routes are wired, the queries land in a later phase.
+
+
+@app.post("/interactions")
+def post_interactions(payload: dict = Body(default_factory=dict)):
+    """Query the interactions fact table by resource, type, organism or dataset."""
+    from . import interactions
+
+    return interactions.search(payload)
+
+
+@app.get("/interactions")
+def get_interactions(
+    resources: str | None = None,
+    interaction_types: str | None = None,
+    organism: str | None = None,
+    datasets: str | None = None,
+    attributes: str | None = None,
+    by_resource: bool = False,
+    view: str = "gene",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Query the interactions fact table using query parameters."""
+    from . import interactions
+
+    return interactions.search({
+        "filters": {
+            "resources": resources,
+            "interaction_types": interaction_types,
+            "organism": organism,
+            "datasets": datasets,
+        },
+        "attributes": attributes,
+        "by_resource": by_resource,
+        "view": view,
+        "limit": limit,
+        "offset": offset,
+    })
+
+
+@app.get("/interactions/parameter-values")
+def get_interactions_parameter_values(
+    resources: str | None = None,
+    interaction_types: str | None = None,
+    organism: str | None = None,
+    datasets: str | None = None,
+):
+    """Report the values each query parameter can still take under this scope."""
+    from . import interactions
+
+    return interactions.parameter_values({
+        "filters": {
+            "resources": resources,
+            "interaction_types": interaction_types,
+            "organism": organism,
+            "datasets": datasets,
+        },
+    })
+
+
+@app.get("/interactions/stats")
+def get_interactions_stats(
+    resources: str | None = None,
+    interaction_types: str | None = None,
+    organism: str | None = None,
+    datasets: str | None = None,
+):
+    """Summary counts for an interactions query; returns no interaction rows."""
+    from . import interactions
+
+    return interactions.stats({
+        "filters": {
+            "resources": resources,
+            "interaction_types": interaction_types,
+            "organism": organism,
+            "datasets": datasets,
+        },
+    })
+
+
+# Registered after the literal /interactions/* paths, so those keep winning.
+@app.get("/interactions/{dataset}")
+def get_interactions_dataset(
+    dataset: str,
+    resources: str | None = None,
+    interaction_types: str | None = None,
+    organism: str | None = None,
+    attributes: str | None = None,
+    by_resource: bool = False,
+    view: str = "gene",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """One preset's interactions; sugar for `/interactions?datasets={dataset}`."""
+    from . import interactions
+
+    return interactions.dataset(dataset, {
+        "filters": {
+            "resources": resources,
+            "interaction_types": interaction_types,
+            "organism": organism,
+        },
+        "attributes": attributes,
+        "by_resource": by_resource,
+        "view": view,
+        "limit": limit,
+        "offset": offset,
+    })
+
 
 @app.post("/ontology/scoped-search")
 def post_ontology_scoped_search(payload: dict = Body(default_factory=dict)):
