@@ -22,7 +22,13 @@ _log = logging.getLogger(__name__)
 
 # The fact table under its currently specified names; the build's derive step
 # creates one of them. Probed the same way as `graph._relation_term_bitmap_table`.
-FACT_TABLE_CANDIDATES = ('interaction_fact', 'interaction')
+# `interaction_fact` is the pre-2026-08-20 name of the combined table, kept here
+# so the service still answers against a database built before the rename.
+FACT_TABLE_CANDIDATES = (
+    'interaction_fact_combined',
+    'interaction_fact',
+    'interaction',
+)
 
 # The parameters `/interactions/parameter-values` reports reachable values for.
 PARAMETERS = (
