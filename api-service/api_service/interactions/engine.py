@@ -24,6 +24,7 @@ from ..graph import SEARCH_SCHEMA
 from . import compose as _compose
 from . import fold as _fold
 from . import guard as _guard
+from . import nodes as _nodes
 from . import params as _params
 from . import scope as _scope
 
@@ -66,9 +67,10 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     with _scope.connection(conn) as live:
 
         resolved = _scope.resolve(query, conn = live)
+        _apply_preset(query, resolved)
         estimate = _guard.check(query, resolved, conn = live)
         rows = _fold.fold_rows(query, resolved, conn = live)
-        interactions = [_project(row, query, live) for row in rows]
+        interactions = _project_page(rows, query, live)
 
         if query.exact_total:
 
@@ -93,6 +95,13 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         'collapse': query.collapse,
         'resources': resolved.resources,
     }
+
+    if resolved.organism.asked:
+
+        # What the organism parameter resolved to, said out loud. A caller who
+        # wrote a subspecies the build files under its species gets the
+        # species' rows, and this is where they can see that it happened.
+        answer['organism'] = resolved.organism.as_dict()
 
     if len(rows) >= query.limit and rows:
 
@@ -137,9 +146,10 @@ def _composition(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         node = _compose.resolve_payload(payload, conn = live)
         record = _compose._record_filter(node, live) if _compose._scopable(node) else None
         resolved = _scope.resolve(query, conn = live)
+        _apply_preset(query, resolved)
         estimate = _guard.check(query, resolved, conn = live, record = record)
         rows = _compose.run(node, conn = live)
-        interactions = [_project(row, query, live) for row in rows]
+        interactions = _project_page(rows, query, live)
 
     return {
         'interactions': interactions,
@@ -152,7 +162,79 @@ def _composition(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     }
 
 
-def _project(row: dict[str, Any], query: _params.InteractionQuery, conn) -> dict[str, Any]:
+def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScope) -> None:
+    """
+    Let a named preset supply the defaults the request did not state.
+
+    A preset is a parameter set, and this is where the rest of that set — the
+    ones the scope resolution could not apply on its own — reaches the query.
+    Its collapse mode is the default for its own rows, and its declared
+    attributes are the ones its consumers expect to find. Both give way to a
+    caller who stated something else, which is what makes them defaults.
+
+    The names a preset declares that the standard output already carries are
+    dropped rather than passed on: sending `references` to the long-tail
+    attribute projection would look for a JSONB key of that name, find none,
+    and report null for a field the fold has already filled in.
+
+    Args:
+        query: The parsed request, modified in place.
+        resolved: The scope, carrying whatever the named presets declare.
+
+    Returns:
+        None.
+    """
+
+    if resolved.collapse_mode and not query.collapse_requested:
+
+        query.collapse = resolved.collapse_mode
+
+    attributes = list(query.attributes) or list(resolved.default_attributes)
+
+    for name in resolved.mandatory_attributes:
+
+        if name not in attributes:
+
+            attributes.append(name)
+
+    query.attributes = [
+        name for name in attributes if name not in _nodes.STANDARD_BLOCKS
+    ]
+
+
+def _project_page(
+        rows: list[dict[str, Any]],
+        query: _params.InteractionQuery,
+        conn,
+) -> list[dict[str, Any]]:
+    """
+    Render one page of folded rows, with both ends of every interaction named.
+
+    The per-node lookup runs once for the page rather than once per row: a
+    five-hundred-row page reaches at most a thousand entities and reads them in
+    one indexed statement, so the projection costs the same whether the page is
+    one dataset's or another's.
+
+    Args:
+        rows: The folded rows of one page.
+        query: The parsed request, for the projection parameters.
+        conn: An open connection.
+
+    Returns:
+        The page, ready to serialise.
+    """
+
+    index = _nodes.lookup(_nodes.entity_ids(rows), conn = conn)
+
+    return [_project(row, query, conn, index) for row in rows]
+
+
+def _project(
+        row: dict[str, Any],
+        query: _params.InteractionQuery,
+        conn,
+        index: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """
     Render one collapsed row for the response.
 
@@ -160,10 +242,12 @@ def _project(row: dict[str, Any], query: _params.InteractionQuery, conn) -> dict
         row: The folded row, in the shape of data-model §3b.
         query: The parsed request, for the projection parameters.
         conn: An open connection, for the class vocabulary.
+        index: The page's per-node lookup, keyed by entity id.
 
     Returns:
-        The row as JSON-ready values, with the class slug and label added and
-        the requested long-tail keys gathered under `attributes`.
+        The row as JSON-ready values, with the class slug and label added, both
+        endpoints projected into the standard per-node columns, and the
+        requested long-tail keys gathered under `attributes`.
     """
 
     out: dict[str, Any] = {}
@@ -183,11 +267,16 @@ def _project(row: dict[str, Any], query: _params.InteractionQuery, conn) -> dict
 
             out[name] = value
 
+    class_slug = None
+
     if (class_id := row.get('interaction_class_id')) is not None:
 
         vocabulary = _class_vocabulary(conn).get(int(class_id), {})
-        out['interaction_type'] = vocabulary.get('name')
+        class_slug = vocabulary.get('name')
+        out['interaction_type'] = class_slug
         out['interaction_type_label'] = vocabulary.get('label')
+
+    out.update(_nodes.project(row, index or {}, query.view, class_slug))
 
     if query.attributes:
 

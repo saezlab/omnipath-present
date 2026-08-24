@@ -191,13 +191,17 @@ def record_filter(query: InteractionQuery, resolved: ResolvedScope) -> RecordFil
         )
         args.extend([entities, entities])
 
-    if filters.organisms:
+    if taxa := resolved.organism.taxa:
 
+        # The taxa, not the names the caller wrote: `scope.resolve` has already
+        # turned `human`, `9606` and `hsapiens` into one number and has refused
+        # anything the record cannot match, so nothing here can quietly become
+        # no filter at all.
         clauses.append(
             '(r.subject_organism = ANY(%s::bigint[]) '
             'OR r.object_organism = ANY(%s::bigint[]))',
         )
-        args.extend([list(filters.organisms), list(filters.organisms)])
+        args.extend([list(taxa), list(taxa)])
 
     if resolved.entity_type_ids:
 

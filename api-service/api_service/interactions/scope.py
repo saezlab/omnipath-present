@@ -27,6 +27,8 @@ from typing import Any, Iterator
 
 from ..graph import SEARCH_SCHEMA, _connect
 from ..resource_catalog import resolve_resource_filters
+from .organism import OrganismScope
+from .organism import resolve as resolve_organisms
 from .params import InteractionQuery
 
 _log = logging.getLogger(__name__)
@@ -63,6 +65,14 @@ class ResolvedScope:
     excluded_resources: list[str] = field(default_factory = list)
     interaction_class_ids: list[int] = field(default_factory = list)
     entity_type_ids: list[int] = field(default_factory = list)
+    # The organism request, resolved to taxa the record can actually match.
+    organism: OrganismScope = field(default_factory = OrganismScope)
+    # What the named presets declare beyond their resource list: how far to
+    # collapse by default, and which attributes their rows are expected to
+    # carry. The engine reads these; nothing in the fold depends on them.
+    collapse_mode: str | None = None
+    default_attributes: list[str] = field(default_factory = list)
+    mandatory_attributes: list[str] = field(default_factory = list)
     # Fraction of the record the scope can reach, from the source facet. The
     # guardrail scales its estimates by it; nothing in the fold depends on it.
     record_share: float = 1.0
@@ -118,6 +128,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
     with connection(conn) as live:
 
         by_name = _source_ids_by_name(live)
+        presets = _presets(live, filters.datasets)
         sets: list[set[str]] = []
 
         if filters.resources:
@@ -126,7 +137,10 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
 
         if filters.datasets:
 
-            sets.append(_dataset_resources(live, filters.datasets))
+            sets.append({
+                source for preset in presets
+                for source in (preset['included_sources'] or [])
+            })
 
         if filters.license:
 
@@ -141,6 +155,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
             admitted = one if admitted is None else admitted & one
 
         excluded = set(resolve_resource_filters(filters.exclude_resources))
+        classes = _class_scope(filters.interaction_classes, presets)
 
         scope = ResolvedScope(
             source_ids = (
@@ -152,12 +167,23 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
             ),
             resources = sorted(admitted) if admitted is not None else [],
             excluded_resources = sorted(excluded),
-            interaction_class_ids = _class_ids(live, filters.interaction_classes),
+            interaction_class_ids = _class_ids(live, classes),
             entity_type_ids = _entity_type_ids(live, filters.entity_types),
+            organism = resolve_organisms(filters.organisms, conn = live),
+            collapse_mode = _preset_collapse(presets),
+            default_attributes = _preset_attributes(presets, 'default_attributes'),
+            mandatory_attributes = _preset_attributes(presets, 'mandatory_attributes'),
         )
         scope.empty = (
             (scope.source_ids is not None and not scope.source_ids)
-            or (bool(filters.interaction_classes) and not scope.interaction_class_ids)
+            or (bool(classes) and not scope.interaction_class_ids)
+            # A preset whose class scope and the caller's own do not overlap
+            # asks for the interactions of no class at all, which is an empty
+            # answer rather than an unrestricted one.
+            or (
+                bool(filters.interaction_classes or _preset_classes(presets))
+                and not classes
+            )
         )
         scope.record_share = _record_share(live, scope, by_name)
 
@@ -182,29 +208,144 @@ def _source_ids_by_name(conn) -> dict[str, int]:
     return {row['name']: int(row['source_id']) for row in rows}
 
 
-def _dataset_resources(conn, names: list[str]) -> set[str]:
+def _presets(conn, names: list[str]) -> list[dict[str, Any]]:
     """
-    The resources a set of presets admits, from `network_registry`.
+    The `network_registry` rows a request names, whole (contracts §1a).
+
+    A preset is more than a resource list: it also states which interaction
+    classes it covers, how far its rows collapse, and which attributes they are
+    expected to carry. Reading only the resource list is how a dataset ends up
+    serving classes it does not contain, so everything the registry declares is
+    read here and applied downstream.
 
     Args:
         conn: An open connection.
         names: The preset names.
 
     Returns:
-        The union of the presets' included sources. An unknown preset
-        contributes nothing, which leaves the scope empty rather than open.
+        One row per preset that exists. An unknown preset contributes nothing,
+        which leaves the scope empty rather than open.
     """
+
+    if not names:
+
+        return []
 
     rows = conn.execute(
         f"""
-        SELECT included_sources
+        SELECT name,
+               included_sources,
+               interaction_class_scope,
+               collapse_mode,
+               default_attributes,
+               mandatory_attributes
         FROM {SEARCH_SCHEMA}.network_registry
         WHERE name = ANY(%s::text[])
         """,
         ([name.lower() for name in names],),
     ).fetchall()
 
-    return {source for row in rows for source in (row['included_sources'] or [])}
+    found = {row['name'] for row in rows}
+    unknown = [name for name in names if name.lower() not in found]
+
+    if unknown:
+
+        _log.info('no preset is registered under %s; scope left empty', unknown)
+
+    return [dict(row) for row in rows]
+
+
+def _preset_classes(presets: list[dict[str, Any]]) -> set[str]:
+    """
+    The interaction classes the named presets cover, together.
+
+    Args:
+        presets: The registry rows.
+
+    Returns:
+        The union of the declared class scopes, lowercased. A preset that
+        declares none covers every class, and so contributes nothing here.
+    """
+
+    return {
+        str(slug).lower()
+        for preset in presets
+        for slug in (preset.get('interaction_class_scope') or [])
+    }
+
+
+def _class_scope(requested: list[str], presets: list[dict[str, Any]]) -> list[str]:
+    """
+    The interaction classes a request may see, from the caller and the presets.
+
+    Both are restrictions, so a class has to survive both. A caller asking a
+    preset for a class it does not carry gets nothing, which is the truthful
+    answer — the preset does not hold those interactions.
+
+    Args:
+        requested: The class slugs the caller named.
+        presets: The registry rows the request names.
+
+    Returns:
+        The class slugs to resolve, or an empty list when neither side
+        restricts anything.
+    """
+
+    declared = _preset_classes(presets)
+    asked = {slug.lower() for slug in requested}
+
+    if not declared:
+
+        return sorted(asked)
+
+    if not asked:
+
+        return sorted(declared)
+
+    return sorted(asked & declared)
+
+
+def _preset_collapse(presets: list[dict[str, Any]]) -> str | None:
+    """
+    The collapse mode the named presets agree on (contracts §1, `collapse`).
+
+    Args:
+        presets: The registry rows.
+
+    Returns:
+        The mode, or None when no preset was named or two of them disagree —
+        in which case the request's own default stands rather than one preset's
+        mode being applied to the other's rows.
+    """
+
+    modes = {preset['collapse_mode'] for preset in presets if preset['collapse_mode']}
+
+    return modes.pop() if len(modes) == 1 else None
+
+
+def _preset_attributes(presets: list[dict[str, Any]], column: str) -> list[str]:
+    """
+    The attribute names the named presets declare, in one list.
+
+    Args:
+        presets: The registry rows.
+        column: `default_attributes` or `mandatory_attributes`.
+
+    Returns:
+        The declared names, without duplicates and in registry order.
+    """
+
+    out: list[str] = []
+
+    for preset in presets:
+
+        for name in preset.get(column) or []:
+
+            if name not in out:
+
+                out.append(name)
+
+    return out
 
 
 def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[str]:

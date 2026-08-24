@@ -128,36 +128,6 @@ def _strings(value: Any) -> list[str]:
     return out
 
 
-def _ints(value: Any) -> list[int]:
-    """
-    Normalize a scalar or sequence into a list of integers, dropping the rest.
-
-    Args:
-        value: A comma-separated string, a sequence, a number, or None.
-
-    Returns:
-        The parsed integers, in order, without duplicates.
-    """
-
-    out: list[int] = []
-
-    for text in _strings(value):
-
-        try:
-
-            parsed = int(text)
-
-        except ValueError:
-
-            continue
-
-        if parsed not in out:
-
-            out.append(parsed)
-
-    return out
-
-
 def _bounds(value: Any) -> dict[str, Any] | None:
     """
     Normalize a range or post-fold parameter into `{'min': …, 'max': …}`.
@@ -232,7 +202,11 @@ class Filters:
     # Selection — stored columns of the record, applied before the fold.
     interaction_classes: list[str] = field(default_factory = list)
     entities: list[str] = field(default_factory = list)
-    organisms: list[int] = field(default_factory = list)
+    # Written as the caller wrote them: `9606`, `human` and `hsapiens` all name
+    # one taxon, and the name-to-taxon step needs a connection, so it belongs
+    # to `scope.resolve` with the rest of the name resolution. Parsing this to
+    # integers here would silently drop every name a caller could write.
+    organisms: list[str] = field(default_factory = list)
     entity_types: list[str] = field(default_factory = list)
     entity_annotations: list[str] = field(default_factory = list)
     curation_flags: list[str] = field(default_factory = list)
@@ -289,6 +263,10 @@ class InteractionQuery:
 
     # Shape.
     collapse: str = 'endpoints'
+    # Whether the caller named a collapse of their own. A preset carries a
+    # collapse mode and it is the default for its own dataset, so the engine
+    # has to tell "the caller asked for endpoints" from "nobody asked".
+    collapse_requested: bool = False
     by_resource: bool = False
     include_outofscope_signdir: bool = False
 
@@ -366,7 +344,7 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
             pick('interaction_classes', 'interactionClasses', 'interaction_types'),
         ),
         entities = _strings(pick('entities', 'entity')),
-        organisms = _ints(pick('organisms', 'organism')),
+        organisms = _strings(pick('organisms', 'organism')),
         entity_types = _strings(pick('entity_types', 'entityTypes')),
         entity_annotations = _strings(
             pick('entity_annotations', 'entityAnnotations'),
@@ -385,13 +363,15 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         ),
     )
 
-    collapse = str(payload.get('collapse') or 'endpoints').strip().lower()
+    requested_collapse = payload.get('collapse')
+    collapse = str(requested_collapse or 'endpoints').strip().lower()
     order_by = payload.get('order_by') or payload.get('orderBy')
     cursor = payload.get('cursor')
 
     return InteractionQuery(
         filters = parsed,
         collapse = collapse if collapse in COLLAPSE_MODES else 'endpoints',
+        collapse_requested = collapse in COLLAPSE_MODES and bool(requested_collapse),
         by_resource = bool(payload.get('by_resource') or payload.get('byResource')),
         include_outofscope_signdir = bool(
             payload.get('include_outofscope_signdir')
