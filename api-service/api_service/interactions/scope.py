@@ -27,6 +27,7 @@ from typing import Any, Iterator
 
 from ..graph import SEARCH_SCHEMA, _connect
 from ..resource_catalog import resolve_resource_filter, resolve_resource_filters
+from . import annotate
 from .organism import OrganismScope
 from .organism import resolve as resolve_organisms
 from .params import InteractionQuery
@@ -52,6 +53,9 @@ LICENSE_LEVELS: dict[str, dict[str, int]] = {
 # rather than counting rows.
 _SOURCE_FACET = 'source'
 
+# The preset registry, cached per schema: it changes only when the build does.
+_REGISTRY_CACHE: dict[str, list[dict[str, Any]]] = {}
+
 
 @dataclass
 class ResolvedScope:
@@ -63,6 +67,15 @@ class ResolvedScope:
     excluded_source_ids: list[int] = field(default_factory = list)
     resources: list[str] = field(default_factory = list)
     excluded_resources: list[str] = field(default_factory = list)
+    # The registered presets the request named, in the order it named them.
+    # One of them makes the query preset-scoped, which is what lets the legacy
+    # `interaction_dataset` scalar mean "the dataset you asked for".
+    preset_names: list[str] = field(default_factory = list)
+    # The entities an `entity_annotations` filter admits, or None for no such
+    # filter. Resolved here with the rest of the scope, so the record predicate
+    # is written against ids rather than against a join into the annotation
+    # tables for every candidate row.
+    annotated_entity_ids: list[str] | None = None
     interaction_class_ids: list[int] = field(default_factory = list)
     entity_type_ids: list[int] = field(default_factory = list)
     # The organism request, resolved to taxa the record can actually match.
@@ -215,6 +228,14 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
             ),
             resources = sorted(admitted) if admitted is not None else [],
             excluded_resources = sorted(excluded),
+            preset_names = [
+                name for name in
+                dict.fromkeys(value.lower() for value in filters.datasets)
+                if name in registered
+            ],
+            annotated_entity_ids = _annotated_entities(
+                filters.entity_annotations, live,
+            ),
             interaction_class_ids = _class_ids(live, classes),
             entity_type_ids = _entity_type_ids(live, filters.entity_types),
             organism = resolve_organisms(filters.organisms, conn = live),
@@ -224,6 +245,10 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
         )
         scope.empty = (
             (scope.source_ids is not None and not scope.source_ids)
+            or (
+                scope.annotated_entity_ids is not None
+                and not scope.annotated_entity_ids
+            )
             or (bool(classes) and not scope.interaction_class_ids)
             # A preset whose class scope and the caller's own do not overlap
             # asks for the interactions of no class at all, which is an empty
@@ -663,3 +688,131 @@ def _record_share(conn, scope: ResolvedScope, by_name: dict[str, int]) -> float:
     # A resource the facet does not know about still contributes rows, so a
     # zero share would price the request at nothing. Floor it at one row.
     return max(share, 1.0 / whole)
+
+
+def _annotated_entities(values: list[str], conn) -> list[str] | None:
+    """
+    The entities an annotation filter admits, resolved before the query runs.
+
+    Args:
+        values: The requested category names.
+        conn: An open connection.
+
+    Returns:
+        The entity ids, or None when no annotation filter was asked for.
+
+    Raises:
+        GuardrailRefusal: For a category nothing is registered under. An
+            unknown *filter* target is refused rather than answered emptily —
+            an empty page for a misspelt category says "nothing is annotated
+            this way", which is a different and false statement.
+    """
+
+    if not values:
+
+        return None
+
+    from .guard import GuardrailRefusal
+
+    if unknown := annotate.unknown_categories(values):
+
+        raise GuardrailRefusal(
+            f'no node annotation category is registered under {unknown}. '
+            f'Known categories: {annotate.categories()}.',
+            status_code = 400,
+            parameter = 'entity_annotations',
+            value = unknown,
+            known = annotate.categories(),
+        )
+
+    entities = annotate.entities_with(values, conn = conn)
+
+    _log.info(
+        'the annotation filter %s admits %d entities', values, len(entities),
+    )
+
+    return entities
+
+
+def dataset_registry(conn) -> list[dict[str, Any]]:
+    """
+    What every registered preset would claim, read once per process.
+
+    A dataset tag is not stored on the record: it is the statement that a row
+    falls inside a preset's scope, and the preset is where that scope is
+    written down. Deriving the tag from the registry keeps one definition of
+    what a dataset is — the same one the scope resolution filters by — instead
+    of a column that can drift away from it.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        One entry per preset: its name, the resources it admits and the classes
+        it covers.
+    """
+
+    if SEARCH_SCHEMA not in _REGISTRY_CACHE:
+
+        rows = conn.execute(
+            f"""
+            SELECT name, included_sources, interaction_class_scope
+            FROM {SEARCH_SCHEMA}.network_registry
+            """,
+        ).fetchall()
+        _REGISTRY_CACHE[SEARCH_SCHEMA] = [
+            {
+                'name': row['name'],
+                'sources': frozenset(row['included_sources'] or ()),
+                'classes': frozenset(
+                    str(slug).lower()
+                    for slug in (row['interaction_class_scope'] or ())
+                ),
+            }
+            for row in rows
+        ]
+
+        _log.info(
+            '%d presets are registered and can tag a row',
+            len(_REGISTRY_CACHE[SEARCH_SCHEMA]),
+        )
+
+    return _REGISTRY_CACHE[SEARCH_SCHEMA]
+
+
+def forget_registry() -> None:
+    """
+    Drop the cached registry so the next read sees a newly built one.
+
+    Returns:
+        None.
+    """
+
+    _REGISTRY_CACHE.clear()
+
+
+def dataset_tags(
+        sources: list[str] | None,
+        class_slug: str | None,
+        entries: list[dict[str, Any]],
+) -> list[str]:
+    """
+    The presets one folded row falls inside.
+
+    Args:
+        sources: The resources the row's fold kept.
+        class_slug: The row's interaction class.
+        entries: `dataset_registry`'s answer.
+
+    Returns:
+        The preset names, sorted. A preset that declares no class scope covers
+        every class, so only its resource list decides.
+    """
+
+    contributors = set(sources or ())
+
+    return sorted(
+        entry['name'] for entry in entries
+        if contributors & entry['sources']
+        and (not entry['classes'] or (class_slug or '') in entry['classes'])
+    )

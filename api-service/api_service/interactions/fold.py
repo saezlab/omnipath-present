@@ -14,6 +14,14 @@ when every contributor is silent, so a scope in which no resource asserts a
 sign yields NULL rather than a defaulted `false` (FR-044a). There is no
 `coalesce` anywhere in this file, and that is the reason.
 
+**A reference keeps the name of the resource that published it.** The joined
+`references` column of the legacy contract is a list of `resource:reference_id`
+pairs, so the pairing has to survive the aggregation rather than be
+reconstructed after it: two resources citing the same paper are two entries,
+and a caller narrowing to one of them must not inherit the other's citation.
+The pair is therefore built inside the aggregate, from the contributor row the
+reference came off.
+
 **Every summary is recomputed over the rows the scope kept.** `sources`,
 `source_count`, the three flags, both assertion counts, the reference unions
 and `reference_count` are aggregates over the filtered record, so a narrowed
@@ -75,6 +83,8 @@ _PROJECTION = """array_agg(DISTINCT contributor.name) AS sources,
         AS curation_flags,
       (count(DISTINCT c.value) FILTER (WHERE c.kind IN ('pubmed', 'doi')))::int
         AS reference_count,
+      array_agg(DISTINCT contributor.name || ':' || c.value)
+        FILTER (WHERE c.kind IN ('pubmed', 'doi')) AS reference_pairs,
       min(r.interaction_id::text)::uuid AS interaction_id"""
 
 

@@ -21,6 +21,7 @@ import logging
 from typing import Any
 
 from ..graph import SEARCH_SCHEMA
+from . import annotate as _annotate
 from . import compose as _compose
 from . import fold as _fold
 from . import guard as _guard
@@ -37,6 +38,15 @@ _log = logging.getLogger(__name__)
 _UUID_KEYS = ('subject_entity_id', 'object_entity_id', 'interaction_id')
 
 _CLASS_NAMES: dict[str, dict[int, dict[str, Any]]] = {}
+
+# Which folded column holds the entity behind each output side.
+_NODE_ENTITY: dict[str, str] = {
+    output: f'{record}_entity_id' for record, output in _nodes.SIDES.items()
+}
+
+# The delimiter the legacy columns join with. One character, one meaning: a
+# resource name and a reference id never contain it.
+DELIMITER = ';'
 
 
 def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
@@ -201,6 +211,12 @@ def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScop
 
             attributes.append(name)
 
+    # The annotation layers leave the list here rather than at parse time,
+    # because a preset may declare one and the split has to see the final list.
+    # A layer name left in would reach the long-tail projection, name no key of
+    # the record's attribute document, and come back null — reading as a build
+    # that carries no annotation at all.
+    query.annotation_layers, attributes = _annotate.read(attributes)
     query.attributes = [
         name for name in attributes
         if name in _projection.HOT_COLUMNS or name not in _nodes.STANDARD_BLOCKS
@@ -232,7 +248,12 @@ def _project_page(
     """
 
     index = _nodes.lookup(_nodes.entity_ids(rows), conn = conn)
-    projected = [_project(row, query, conn, index) for row in rows]
+    annotations = _annotate.index(conn) if rows else {}
+    registry = _scope.dataset_registry(conn) if rows else []
+    projected = [
+        _project(row, query, conn, index, annotations, registry, resolved)
+        for row in rows
+    ]
 
     return _shape.apply(projected, rows, query, resolved, conn = conn)
 
@@ -242,6 +263,9 @@ def _project(
         query: _params.InteractionQuery,
         conn,
         index: dict[str, dict[str, Any]] | None = None,
+        annotations: dict[str, dict[str, tuple[str, ...]]] | None = None,
+        registry: list[dict[str, Any]] | None = None,
+        resolved: _scope.ResolvedScope | None = None,
 ) -> dict[str, Any]:
     """
     Render one collapsed row for the response.
@@ -283,7 +307,25 @@ def _project(
         out['interaction_type'] = class_slug
         out['interaction_type_label'] = vocabulary.get('label')
 
-    out.update(_nodes.project(row, index or {}, query.view, class_slug))
+    blocks = _nodes.blocks(row, index or {}, query.view, class_slug)
+
+    for side, block in blocks.items():
+
+        block.update(
+            _annotate.columns(
+                row.get(_NODE_ENTITY[side]),
+                side,
+                query.annotation_layers,
+                annotations or {},
+            ),
+        )
+        out.update(block)
+
+    # The binary pair, seen whole. A reaction has no first and second endpoint
+    # to flatten into, so the array is the shape that generalises; here it is
+    # the same values the flat columns carry, arranged the way they will be.
+    out['participants'] = _nodes.participants(blocks)
+    out.update(_standard_columns(row, class_slug, registry or [], resolved))
 
     if query.attributes:
 
@@ -323,3 +365,48 @@ def _class_vocabulary(conn) -> dict[int, dict[str, Any]]:
         }
 
     return _CLASS_NAMES[SEARCH_SCHEMA]
+
+
+def _standard_columns(
+        row: dict[str, Any],
+        class_slug: str | None,
+        registry: list[dict[str, Any]],
+        resolved: _scope.ResolvedScope | None,
+) -> dict[str, Any]:
+    """
+    The legacy per-interaction columns, projected from what the fold produced.
+
+    Three of them are joined strings because the legacy contract's consumers
+    read them that way, and each keeps its structured form beside it rather
+    than instead of it: `sources` is the array behind `resources`,
+    `interaction_datasets` the array behind `interaction_dataset`. Nothing here
+    recomputes a summary — the sign flags and both assertion counts are the
+    fold's own, over the scope the query stated.
+
+    Args:
+        row: The folded row.
+        class_slug: The row's class, which decides which presets can claim it.
+        registry: The preset registry, for the dataset tags.
+        resolved: The resolved scope, which knows whether one preset was asked
+            for.
+
+    Returns:
+        The joined provenance, the dataset scalar and the array behind it.
+    """
+
+    sources = sorted(row.get('sources') or ())
+    tags = _scope.dataset_tags(sources, class_slug, registry)
+    presets = list(resolved.preset_names) if resolved else []
+
+    # The legacy scalar was scalar because legacy queries were always
+    # single-dataset. Asking for one preset therefore means "the dataset you
+    # asked for"; asking for none means every tag the row carries, joined, so
+    # the column stays a string and loses nothing.
+    scalar = presets[0] if len(presets) == 1 else (DELIMITER.join(tags) or None)
+
+    return {
+        'resources': DELIMITER.join(sources),
+        'references': DELIMITER.join(sorted(row.get('reference_pairs') or ())),
+        'interaction_dataset': scalar,
+        'interaction_datasets': tags,
+    }

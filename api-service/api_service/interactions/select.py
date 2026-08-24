@@ -203,6 +203,21 @@ def record_filter(query: InteractionQuery, resolved: ResolvedScope) -> RecordFil
         )
         args.extend([list(taxa), list(taxa)])
 
+    if resolved.annotated_entity_ids is not None:
+
+        # Resolved to ids before the query ran, so the annotation tables are
+        # never joined per candidate row: they are partitioned forty-five ways
+        # and a join there would price the filter by the scope rather than by
+        # the page.
+        clauses.append(
+            '(r.subject_entity_id = ANY(%s::uuid[]) '
+            'OR r.object_entity_id = ANY(%s::uuid[]))',
+        )
+        args.extend([
+            list(resolved.annotated_entity_ids),
+            list(resolved.annotated_entity_ids),
+        ])
+
     if resolved.entity_type_ids:
 
         clauses.append(

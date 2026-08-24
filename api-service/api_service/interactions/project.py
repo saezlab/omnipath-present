@@ -62,6 +62,15 @@ HOT_COLUMNS: frozenset[str] = frozenset({
     'reference_count',
     'interaction_type',
     'interaction_type_label',
+    'reference_pairs',
+    # The legacy projections of the columns above: joined strings and the
+    # dataset scalar. Naming one of them in `attributes` selects the rendered
+    # value rather than looking for a document key nobody stores.
+    'resources',
+    'references',
+    'interaction_dataset',
+    'interaction_datasets',
+    'participants',
 })
 
 # The prefix the fold aliases an extracted key under, so a long-tail key called

@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import annotate
+
 # contracts §1a, the seven groups. Kept as one mapping so nothing downstream
 # has to re-derive which stage owns a parameter.
 PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
@@ -278,6 +280,10 @@ class InteractionQuery:
     attributes: list[str] = field(default_factory = list)
     view: str = 'gene'
     annotation_layer: str | None = None
+    # Which per-node annotation layers the attribute list asked for. Split out
+    # of `attributes` once the presets have had their say, because a preset may
+    # declare one and the split has to see the final list.
+    annotation_layers: annotate.Layers = field(default_factory = annotate.Layers)
 
     # Paging.
     limit: int = DEFAULT_LIMIT

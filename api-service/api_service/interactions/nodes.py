@@ -284,6 +284,46 @@ def columns(
     }
 
 
+def blocks(
+        row: dict[str, Any],
+        index: dict[str, dict[str, Any]],
+        view: str,
+        class_slug: str | None,
+) -> dict[str, dict[str, Any]]:
+    """
+    The standard per-node columns of one folded row, kept per end.
+
+    The flat projection and the participant array are the same columns read two
+    ways, so they are built once and arranged twice. Merging first and slicing
+    afterwards would mean guessing from a column name which end it belongs to,
+    and `source_count` is a per-interaction column whose name begins with a
+    side. One wrong guess there puts the resource count inside a participant.
+
+    Args:
+        row: One folded row, carrying `subject_entity_id` and
+            `object_entity_id`.
+        index: The lookup's result for this page.
+        view: `gene` or `protein`.
+        class_slug: The row's interaction class, which names the roles.
+
+    Returns:
+        `{output side: columns}`, in the order the sides are named.
+    """
+
+    roles = dict(zip(SIDES, endpoint_roles(class_slug)))
+
+    return {
+        output_side: columns(
+            index.get(str(row.get(f'{record_side}_entity_id')))
+            if row.get(f'{record_side}_entity_id') is not None else None,
+            output_side,
+            view,
+            roles[record_side],
+        )
+        for record_side, output_side in SIDES.items()
+    }
+
+
 def project(
         row: dict[str, Any],
         index: dict[str, dict[str, Any]],
@@ -304,19 +344,44 @@ def project(
         Every `source_*` and `target_*` column of the row.
     """
 
-    roles = dict(zip(SIDES, endpoint_roles(class_slug)))
     out: dict[str, Any] = {}
 
-    for record_side, output_side in SIDES.items():
+    for block in blocks(row, index, view, class_slug).values():
 
-        entity = row.get(f'{record_side}_entity_id')
-        out.update(
-            columns(
-                index.get(str(entity)) if entity is not None else None,
-                output_side,
-                view,
-                roles[record_side],
-            ),
-        )
+        out.update(block)
+
+    return out
+
+
+def participants(rendered: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The same two nodes as the hyperedge form the contract nests per participant.
+
+    Binary consumers keep the flat pair; a reaction has no first and second
+    endpoint to flatten into, and the array is what it will come back as. It is
+    length two here, and it is the same values under names that do not carry a
+    side — which is the whole of the difference between the two shapes.
+
+    Args:
+        rendered: `blocks`' answer, with any per-node annotation columns
+            already merged into each side.
+
+    Returns:
+        One element per participant, in side order.
+    """
+
+    out: list[dict[str, Any]] = []
+
+    for side, block in rendered.items():
+
+        participant = {'entity': block.get(side)}
+
+        for name, value in block.items():
+
+            if name != side:
+
+                participant[name.removeprefix(f'{side}_')] = value
+
+        out.append(participant)
 
     return out
