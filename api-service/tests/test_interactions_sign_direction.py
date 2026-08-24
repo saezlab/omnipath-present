@@ -528,10 +528,40 @@ def test_narrowing_the_scope_narrows_the_sign_count(db, disagreeing_key):
 # ── Two directions, two rows ────────────────────────────────────────────────
 
 
+def _every_row(db, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every row of a request, following the cursor to the end.
+
+    An entity filter reaches every interaction either endpoint takes part in,
+    which for a well connected protein is a few thousand keys — more than one
+    page. Reading only the first page would make this assertion depend on where
+    a pair happens to sort, which is not what it is testing.
+
+    Args:
+        db: An open connection.
+        payload: The request.
+
+    Returns:
+        The rows of every page.
+    """
+
+    rows: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    while True:
+
+        answer = _run(db, {**payload, 'cursor': cursor} if cursor else payload)
+        rows.extend(answer['interactions'])
+        cursor = answer.get('cursor')
+
+        if not cursor:
+
+            return rows
+
+
 def test_an_opposite_direction_pair_is_two_rows(db, opposite_pair):
     """A→B and B→A stay apart, each with its own provenance."""
 
-    answer = _run(db, _key_payload(opposite_pair))
+    interactions = _every_row(db, _key_payload(opposite_pair))
     forward = (
         str(opposite_pair['subject_entity_id']),
         str(opposite_pair['object_entity_id']),
@@ -539,7 +569,7 @@ def test_an_opposite_direction_pair_is_two_rows(db, opposite_pair):
     reverse = (forward[1], forward[0])
     seen = {
         (str(row['subject_entity_id']), str(row['object_entity_id']))
-        for row in answer['interactions']
+        for row in interactions
         if int(row['interaction_class_id']) == int(opposite_pair['interaction_class_id'])
     }
 
@@ -550,7 +580,7 @@ def test_an_opposite_direction_pair_is_two_rows(db, opposite_pair):
     )
 
     rows = [
-        row for row in answer['interactions']
+        row for row in interactions
         if (str(row['subject_entity_id']), str(row['object_entity_id'])) in {forward, reverse}
         and int(row['interaction_class_id']) == int(opposite_pair['interaction_class_id'])
     ]

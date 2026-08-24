@@ -139,7 +139,12 @@ class RecordFilter:
         )
 
 
-def record_filter(query: InteractionQuery, resolved: ResolvedScope) -> RecordFilter:
+def record_filter(
+        query: InteractionQuery,
+        resolved: ResolvedScope,
+        *,
+        long_tail: bool = True,
+) -> RecordFilter:
     """
     Every pre-fold predicate of one request, as one expression over `r`.
 
@@ -151,6 +156,10 @@ def record_filter(query: InteractionQuery, resolved: ResolvedScope) -> RecordFil
     Args:
         query: The parsed request.
         resolved: The scope, already collapsed to `source_id` values.
+        long_tail: Whether to include the predicates that reach into the
+            attribute document. `guard` builds the expression **without** them
+            to find how many rows they would be applied to, which is the one
+            number that decides whether the request is affordable.
 
     Returns:
         The predicate and its positional arguments.
@@ -258,7 +267,122 @@ def record_filter(query: InteractionQuery, resolved: ResolvedScope) -> RecordFil
             clauses.append(f'r.{name} <= %s')
             args.append(float(upper))
 
+    if long_tail:
+
+        # Last, and that is not arbitrary. `AND` is commutative but the cost is
+        # not: the indexed clauses above decide how many rows this one is
+        # evaluated against, and `guard` refuses the request unless that number
+        # is small. The name binds as a value rather than as an identifier,
+        # because it is what the document is looked up by.
+        for name, wanted in filters.attribute_filters.items():
+
+            if isinstance(wanted, dict):
+
+                if (lower := wanted.get('min')) is not None:
+
+                    clauses.append('(r.attributes ->> %s) >= %s')
+                    args.extend([str(name), str(lower)])
+
+                if (upper := wanted.get('max')) is not None:
+
+                    clauses.append('(r.attributes ->> %s) <= %s')
+                    args.extend([str(name), str(upper)])
+
+            else:
+
+                clauses.append('(r.attributes ->> %s) = %s')
+                args.extend([str(name), str(wanted)])
+
     return RecordFilter(sql = ' AND '.join(clauses) or 'true', args = args)
+
+
+def record_scan_sql(
+        query: InteractionQuery,
+        resolved: ResolvedScope,
+        *,
+        record: RecordFilter | None = None,
+) -> tuple[str, Sequence[Any]]:
+    """
+    The record rows the **indexed** predicates admit, built to be planned.
+
+    This is what an unindexed long-tail predicate would be applied to, row by
+    row, and therefore the number `guard` prices it from. The long-tail
+    predicates are left out on purpose: including them would ask the planner
+    how selective a key of the attribute document is, which is exactly the
+    question it has no statistics to answer.
+
+    Args:
+        query: The parsed request.
+        resolved: The resolved scope.
+        record: A pre-built record filter, for a composition. Such a filter is
+            used as it stands, since a composition's scope is not one query's.
+
+    Returns:
+        The statement and its positional arguments.
+    """
+
+    predicate = (
+        record if record is not None
+        else record_filter(query, resolved, long_tail = False)
+    )
+
+    return f'SELECT 1 FROM {record_source()} r WHERE {predicate.sql}', list(predicate.args)
+
+
+def key_probe_sql(
+        query: InteractionQuery,
+        resolved: ResolvedScope,
+        ceiling: int,
+        *,
+        record: RecordFilter | None = None,
+) -> tuple[str, Sequence[Any]]:
+    """
+    Count the collapse keys of a scope, stopping at a ceiling.
+
+    An exact count is the full fold of the scope (`key_count_sql`) and costs
+    what the fold costs. This is the same count with a bound on it: the keys
+    come off the collapse index in key order, the scan stops at the ceiling,
+    and the answer is exact whenever it is below it. Above it the answer is the
+    ceiling, and the caller of this function is expected to say so rather than
+    report a floor as a total.
+
+    Args:
+        query: The parsed request.
+        resolved: The resolved scope.
+        ceiling: The most keys to count before stopping.
+        record: A pre-built record filter, for a composition.
+
+    Returns:
+        The statement and its positional arguments.
+    """
+
+    predicate = record if record is not None else record_filter(query, resolved)
+    distinct_on = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    having, having_args = having_sql(query)
+    lateral = REFERENCE_LATERAL if 'c.value' in having else ''
+
+    if having:
+
+        inner = f"""SELECT {distinct_on}
+      FROM {record_source()} r
+      {lateral}
+      WHERE {predicate.sql}
+      GROUP BY 1, 2, 3
+      HAVING {having}
+      ORDER BY 1, 2, 3
+      LIMIT %s"""
+
+    else:
+
+        inner = f"""SELECT DISTINCT ON ({distinct_on}) {distinct_on}
+      FROM {record_source()} r
+      WHERE {predicate.sql}
+      ORDER BY 1, 2, 3
+      LIMIT %s"""
+
+    sql = f'SELECT count(*)::bigint AS keys FROM (\n    {inner}\n    ) probe'
+
+    return sql, [*predicate.args, *having_args, int(ceiling)]
 
 
 def having_sql(query: InteractionQuery) -> tuple[str, list[Any]]:

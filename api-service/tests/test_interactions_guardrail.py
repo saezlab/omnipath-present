@@ -428,3 +428,386 @@ def test_the_guard_prices_a_having_rather_than_refusing_it(db):
 
     assert estimate.qualifying_keys > 0
     assert estimate.keys_folded > 0
+
+
+# ── The long tail: an unbounded projection and an unindexed filter ───────────
+#
+# The other half of the cost governor. The folded-value
+# rules above are about a column the fold produces. These two are about the
+# record's `attributes` document, which no index of this build reaches.
+#
+# **Measured on dev4 2026-08-24, and the numbers are what decide the bound.** A
+# predicate on one long-tail key, unscoped, is an index scan over the whole
+# record with the predicate applied as a filter: 14,686,404 rows examined,
+# 14,789,117 buffers touched, **12,637 ms**, and the `LIMIT` saves nothing
+# because a page bound cannot stop a scan that qualifies no row. The same
+# predicate scoped to one resource examines 44,455 rows in **94.9 ms**. In
+# between: 410,592 rows in 384 ms and 902,216 rows in 441 ms. So the cost
+# tracks the rows the indexed predicates admit, one million of them sits at
+# about half a second, and the unscoped scan is twelve times outside the
+# one-second budget.
+#
+# **The timing cannot price the detoast, and this build cannot make it.** The
+# `attributes` column is null on all 14,686,404 rows, so a projection of one
+# long-tail key costs 1,421 ms against 1,419 ms bare and sixteen keys cost
+# 1,420 ms — the extraction measures nothing because there is no document to
+# open. The bound is therefore structural rather than timed: it counts the
+# record rows the request would open, and the count is right whether or not
+# today's rows carry anything.
+
+# A key nothing in this build stores. It has to be a name rather than a real
+# column, because the point is that the guardrail prices the *reach* into the
+# document and not the value found there.
+TAIL_KEY = 'evidence_type'
+
+# A resource whose whole contribution — 44,455 record rows — is small enough
+# that an unindexed predicate over it is affordable, measured at 94.9 ms.
+NARROW_RESOURCE = 'connectomedb2025'
+
+# A license term that resolves to 30 of the 35 resources and 54.05% of the
+# record. It is here because the resolution has to happen **before** the
+# estimate: a license filter is a resource filter, and an estimate taken
+# before it resolves prices a scope the query will not run.
+LICENSE_TERM = 'purpose:commercial'
+
+
+def _tail_filter_payload(resources: list[str] | None = None) -> dict:
+    """A filter on a long-tail key, optionally scoped."""
+
+    filters: dict[str, Any] = {'attribute_filters': {TAIL_KEY: 'binding'}}
+
+    if resources:
+        filters['resources'] = resources
+
+    return {'filters': filters, 'limit': 10}
+
+
+def _tail_projection_payload(**extra: Any) -> dict:
+    """A request projecting a long-tail key."""
+
+    payload: dict[str, Any] = {'attributes': [TAIL_KEY], 'limit': 10}
+    payload.update(extra)
+
+    return payload
+
+
+def test_the_long_tail_filter_parameter_exists(client):
+    """The governor prices a filter on an unindexed key, so such a filter must exist."""
+
+    params = _engine('params')
+    parsed = _member(params, 'parse', 'params.parse(payload)')(
+        _tail_filter_payload([NARROW_RESOURCE]),
+    )
+
+    assert getattr(parsed.filters, 'attribute_filters', None), (
+        'the parameter surface carries no long-tail filter, so the refusal '
+        'the cost governor owes for one could never fire; a guardrail that '
+        'cannot fire is not a guardrail'
+    )
+
+
+def test_an_unindexed_long_tail_filter_is_refused_unscoped(client):
+    """12,637 ms over 14,686,404 rows, twelve times the one-second budget."""
+
+    response = client.post('/interactions', json = _tail_filter_payload())
+
+    assert 400 <= response.status_code < 500, (
+        f'an unscoped filter on `{TAIL_KEY}` answered {response.status_code}; '
+        f'no index of this build reaches the attribute document, so the '
+        f'predicate is applied to every row the scope admits'
+    )
+
+
+def test_the_long_tail_refusal_names_the_key_and_what_to_narrow(client):
+    """Actionable, so a caller can act rather than guess."""
+
+    body = _body(client.post('/interactions', json = _tail_filter_payload()))
+
+    assert TAIL_KEY in body, f'the refusal does not name `{TAIL_KEY}`: {body}'
+    assert 'resources' in body or 'datasets' in body, (
+        f'the refusal does not say what to narrow: {body}'
+    )
+
+
+def test_a_narrow_scope_buys_the_long_tail_filter(client):
+    """The refusal is targeted: 44,455 rows is 94.9 ms and is served."""
+
+    response = client.post(
+        '/interactions', json = _tail_filter_payload([NARROW_RESOURCE]),
+    )
+
+    assert response.status_code == 200, (
+        f'a long-tail filter over {NARROW_RESOURCE} answered '
+        f'{response.status_code}; refusing an affordable request makes the '
+        f'guardrail a blanket ban rather than a price'
+    )
+    assert 'interactions' in response.json()
+
+
+def test_the_long_tail_filter_reaches_the_record_predicate(db):
+    """A parameter the record filter ignores is a filter in name only."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    select = _engine('select')
+
+    query = _member(params, 'parse', 'params.parse(payload)')(
+        _tail_filter_payload([NARROW_RESOURCE]),
+    )
+    resolved = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')(
+        query, conn = db,
+    )
+    predicate = _member(
+        select, 'record_filter', 'select.record_filter(query, resolved)',
+    )(query, resolved)
+
+    # The name binds as an argument rather than as an interpolated identifier.
+    # It names a value the document is looked up by, not a column, so it
+    # belongs in the parameter list where a caller's string cannot become SQL.
+    assert 'attributes' in predicate.sql, (
+        f'the record predicate never reaches the attribute document, so the '
+        f'filter would return every row of the scope while claiming to have '
+        f'narrowed it: {predicate.sql}'
+    )
+    assert TAIL_KEY in predicate.args, (
+        f'`{TAIL_KEY}` is not among the predicate\'s arguments: {predicate.args}'
+    )
+
+
+def test_the_guard_refuses_the_long_tail_filter_before_the_query_runs(db):
+    """Estimate, then refuse — never run it and find out."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    refusal = _member(guard, 'GuardrailRefusal', 'guard.GuardrailRefusal(Exception)')
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+    query = _member(params, 'parse', 'params.parse(payload)')(_tail_filter_payload())
+    resolved = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')(
+        query, conn = db,
+    )
+
+    with pytest.raises(refusal) as raised:
+        check(query, resolved, conn = db)
+
+    assert 400 <= raised.value.status_code < 500
+    assert TAIL_KEY in str(raised.value.context) or TAIL_KEY in raised.value.message
+
+
+def test_a_license_filter_resolves_before_the_estimate(db):
+    """A license filter **is** a resource filter, and prices as one."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    parse = _member(params, 'parse', 'params.parse(payload)')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+
+    licensed = parse({'filters': {'license': LICENSE_TERM}, 'limit': 10})
+    resolved = resolve(licensed, conn = db)
+
+    assert resolved.resources, (
+        f'{LICENSE_TERM} resolved to no resource set, so the guard would price '
+        f'the unscoped record'
+    )
+    assert resolved.record_share < 1.0, (
+        'the license filter left the record share at 1.0; the estimate would '
+        'then describe a scope the query does not run'
+    )
+
+    open_query = parse({'limit': 10})
+    unscoped = check(open_query, resolve(open_query, conn = db), conn = db)
+
+    assert check(licensed, resolved, conn = db).qualifying_keys < unscoped.qualifying_keys
+
+
+def test_a_license_filter_prices_the_long_tail_filter_it_scopes(client):
+    """The estimate reflects the scope actually queried, license included."""
+
+    response = client.post(
+        '/interactions',
+        json = {
+            'filters': {
+                'attribute_filters': {TAIL_KEY: 'binding'},
+                'license': LICENSE_TERM,
+            },
+            'limit': 10,
+        },
+    )
+
+    assert 400 <= response.status_code < 500, (
+        f'{LICENSE_TERM} admits 54.05% of the record — about 7.9 million rows '
+        f'for the unindexed predicate to be applied to — and answered '
+        f'{response.status_code}'
+    )
+
+
+def test_a_stored_range_filter_is_unaffected(client):
+    """`affinity` is a stored column, reaches an index, and is not refused."""
+
+    response = client.post(
+        '/interactions', json = {'filters': {'affinity': {'min': 0}}, 'limit': 10},
+    )
+
+    assert response.status_code == 200, (
+        f'a range on a stored column answered {response.status_code}; the '
+        f'refusal is about the document, not about ranges'
+    )
+
+
+def test_a_page_bounded_long_tail_projection_is_served(client):
+    """Folding the page bounds the projection: about 103 rows per 100 keys."""
+
+    response = client.post('/interactions', json = _tail_projection_payload())
+
+    assert response.status_code == 200, (
+        f'an ordinary page projecting `{TAIL_KEY}` answered '
+        f'{response.status_code}; the extraction is written into the fold, '
+        f'whose FROM starts from the bounded key list'
+    )
+
+    rows = response.json()['interactions']
+
+    assert rows and all(TAIL_KEY in (row.get('attributes') or row) for row in rows), (
+        'a requested name must be a key of every row, present either way'
+    )
+
+
+def test_an_unbounded_long_tail_projection_is_refused(client):
+    """Refused 100% of the time. An exact count walks every key in scope."""
+
+    response = client.post(
+        '/interactions', json = _tail_projection_payload(exact_total = True),
+    )
+
+    assert 400 <= response.status_code < 500, (
+        f'projecting `{TAIL_KEY}` while counting every key of the unscoped '
+        f'fold answered {response.status_code}; that is 14,291,204 keys and '
+        f'the whole record detoasted'
+    )
+
+
+def test_the_projection_refusal_prices_the_scope_rather_than_naming_it(client):
+    """A scoped-but-huge request escapes a rule written as `if unscoped`."""
+
+    wide = client.post(
+        '/interactions',
+        json = _tail_projection_payload(
+            exact_total = True, filters = {'license': LICENSE_TERM},
+        ),
+    )
+    narrow = client.post(
+        '/interactions',
+        json = _tail_projection_payload(
+            exact_total = True, filters = {'resources': [NARROW_RESOURCE]},
+        ),
+    )
+
+    assert 400 <= wide.status_code < 500, (
+        f'a long-tail projection over an exact count of 54.05% of the record '
+        f'answered {wide.status_code}; naming the scope instead of pricing it '
+        f'lets every large scope but the widest through'
+    )
+    assert narrow.status_code == 200, (
+        f'the same request over {NARROW_RESOURCE} — 44,455 rows — answered '
+        f'{narrow.status_code}'
+    )
+
+
+def test_a_hot_column_projection_opens_no_document(client):
+    """A hot column is on the row the fold produces, so asking costs nothing."""
+
+    response = client.post(
+        '/interactions',
+        json = {'attributes': ['source_count'], 'limit': 10, 'exact_total': True,
+                'filters': {'resources': [NARROW_RESOURCE]}},
+    )
+
+    assert response.status_code == 200, (
+        f'projecting a hot column answered {response.status_code}; pricing it '
+        f'as a long-tail key would refuse a request that costs nothing'
+    )
+
+
+# ── The estimate itself: a bound the caller can rely on ─────────────────────
+#
+# **Measured on dev4 2026-08-24.** With an `entity_annotations` filter the
+# planner prices an `OR` of two fifteen-thousand-element uuid arrays and gets
+# it badly wrong: 8,428,823 estimated keys against 729,900 true for `ligand`,
+# and 7,483,451 against 1,273,762 for `receptor` — 11.5x and 5.9x over. The
+# flat record count is mispriced the same way (8,531,569 against 794,518), so
+# it is the predicate and not the `DISTINCT` that the planner cannot price.
+# With the class filter added it undershoots instead: 42,656 against 59,328.
+#
+# An exact count of the annotated scope costs 1.834 s, which is outside the
+# one-second budget and cannot be paid on every request. A key scan bounded at 100,000 keys costs
+# 0.282 s and gives the exact answer wherever the answer is smaller than the
+# bound — 59,328 in 0.397 s for the ligand-receptor scope, 44,455 in 0.074 s
+# for a single resource. So the claim is bounded rather than the planner fixed.
+
+ANNOTATION_CATEGORY = 'ligand'
+ANNOTATION_CLASS = 'ligand_receptor'
+# Measured by folding the scope: the true key counts the estimate is judged
+# against. The test reads them from the database rather than trusting these,
+# and they are recorded here so a drift is visible in the diff.
+ANNOTATED_TRUE_KEYS = 729_900
+ANNOTATED_CLASS_TRUE_KEYS = 59_328
+
+
+def _annotation_payload(with_class: bool = False, **extra: Any) -> dict:
+    filters: dict[str, Any] = {'entity_annotations': [ANNOTATION_CATEGORY]}
+
+    if with_class:
+        filters['interaction_classes'] = [ANNOTATION_CLASS]
+
+    return {'filters': filters, 'limit': 10, **extra}
+
+
+def test_an_annotation_filtered_total_is_exact_where_it_is_small(client):
+    """The bounded scan answers exactly whenever the answer fits inside it."""
+
+    body = client.post('/interactions', json = _annotation_payload(True)).json()
+
+    assert int(body['total']) == ANNOTATED_CLASS_TRUE_KEYS, (
+        f'the reported total is {body["total"]} against the {ANNOTATED_CLASS_TRUE_KEYS} '
+        f'keys the scope actually folds; the planner said 42,656'
+    )
+
+
+def test_an_annotation_filtered_total_does_not_overshoot(client):
+    """8,428,823 against 729,900 is not an estimate, it is a wrong number."""
+
+    body = client.post('/interactions', json = _annotation_payload()).json()
+
+    assert int(body['total']) <= ANNOTATED_TRUE_KEYS, (
+        f'the reported total is {body["total"]} against {ANNOTATED_TRUE_KEYS} '
+        f'true keys; an estimate that overshoots by an order of magnitude '
+        f'sends a caller looking for rows that are not there'
+    )
+    assert body.get('total_is_estimate') is True
+
+
+def test_a_bounded_total_says_it_is_a_floor(client):
+    """A number that is only a lower bound has to say so, or it is a claim."""
+
+    body = client.post('/interactions', json = _annotation_payload()).json()
+    estimate = body.get('estimate') or {}
+
+    assert body.get('total_is_lower_bound') is True or estimate.get('at_least') is True, (
+        f'the total was bounded at a scan ceiling and the response does not '
+        f'say so: {json.dumps(body)[:400]}'
+    )
+
+
+def test_an_unscoped_estimate_is_not_bounded_by_the_scan(client):
+    """The bound is for the case the planner cannot price, not for every case."""
+
+    body = client.post('/interactions', json = {'limit': 10}).json()
+
+    assert int(body['total']) > 10_000_000, (
+        f'the unscoped total came back as {body["total"]}; the planner prices '
+        f'the whole record within half a percent and there is nothing to bound'
+    )

@@ -23,6 +23,7 @@ from typing import Any
 from ..graph import SEARCH_SCHEMA
 from . import annotate as _annotate
 from . import compose as _compose
+from . import discover as _discover
 from . import fold as _fold
 from . import guard as _guard
 from . import nodes as _nodes
@@ -74,6 +75,14 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         # entered with a component list instead of one parameter set (FR-054).
         return _composition(payload, conn = conn)
 
+    if payload.get('discover') in _discover.QUESTIONS:
+
+        # Discovery is not a fast path around the engine either. It is the
+        # engine entered with a question about the scope instead of a request
+        # for rows: the same parameters, the same resolution, the same
+        # guardrail, and no fold.
+        return _discovery(payload, conn = conn)
+
     query = _params.parse(payload)
 
     with _scope.connection(conn) as live:
@@ -115,6 +124,13 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         # species' rows, and this is where they can see that it happened.
         answer['organism'] = resolved.organism.as_dict()
 
+    if estimate.at_least and not query.exact_total:
+
+        # The bounded key scan stopped at its ceiling, so `total` is a floor
+        # and not a count of anything. A floor reported as a total is the
+        # quietly wrong number under a third name, and the label costs one key.
+        answer['total_is_lower_bound'] = True
+
     if len(rows) >= query.limit and rows:
 
         answer['cursor'] = _fold.encode_cursor([
@@ -123,11 +139,43 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
             rows[-1]['interaction_class_id'],
         ])
 
-    if query.filters.post_fold() or query.exact_total:
+    if query.filters.post_fold() or query.exact_total or estimate.at_least:
 
         answer['estimate'] = estimate.as_dict()
 
     return answer
+
+
+def _discovery(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
+    """
+    Answer one question about a scope, without returning any interaction.
+
+    Args:
+        payload: The same filters a query takes, plus `discover` naming the
+            question — the reachable parameter values, or the counts.
+        conn: An open connection, or None to open one.
+
+    Returns:
+        The answer `discover` shapes, carrying counts and never rows.
+
+    Raises:
+        guard.GuardrailRefusal: For a scope the cost governor will not resolve
+            or will not price.
+    """
+
+    query = _params.parse(payload)
+
+    with _scope.connection(conn) as live:
+
+        resolved = _scope.resolve(query, conn = live)
+        _apply_preset(query, resolved)
+        estimate = _guard.check(query, resolved, conn = live)
+
+        if payload['discover'] == _discover.PARAMETER_VALUES:
+
+            return _discover.parameter_values(query, resolved, live)
+
+        return _discover.statistics(query, resolved, estimate, live)
 
 
 def _composition(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:

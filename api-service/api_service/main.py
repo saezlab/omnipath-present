@@ -469,6 +469,7 @@ def get_interactions(
     license: str | None = None,
     entities: str | None = None,
     entity_annotations: str | None = None,
+    attribute_filters: str | None = None,
     attributes: str | None = None,
     collapse: str = "endpoints",
     by_resource: str | None = None,
@@ -493,6 +494,7 @@ def get_interactions(
             "license": license,
             "entities": entities,
             "entity_annotations": entity_annotations,
+            "attribute_filters": attribute_filters,
         },
         "attributes": attributes,
         "collapse": collapse,
@@ -507,44 +509,81 @@ def get_interactions(
     })
 
 
+def _discovery_scope(
+    resources: str | None,
+    exclude_resources: str | None,
+    interaction_classes: str | None,
+    organism: str | None,
+    datasets: str | None,
+    license: str | None,
+    entities: str | None,
+    entity_types: str | None,
+    entity_annotations: str | None,
+    curation_flags: str | None,
+) -> dict:
+    """The scope the two discovery endpoints answer under; the query surface."""
+    return {
+        "resources": resources,
+        "exclude_resources": exclude_resources,
+        "interaction_classes": interaction_classes,
+        "organisms": organism,
+        "datasets": datasets,
+        "license": license,
+        "entities": entities,
+        "entity_types": entity_types,
+        "entity_annotations": entity_annotations,
+        "curation_flags": curation_flags,
+    }
+
+
 @app.get("/interactions/parameter-values")
 def get_interactions_parameter_values(
     resources: str | None = None,
+    exclude_resources: str | None = None,
     interaction_classes: str | None = None,
     organism: str | None = None,
     datasets: str | None = None,
+    license: str | None = None,
+    entities: str | None = None,
+    entity_types: str | None = None,
+    entity_annotations: str | None = None,
+    curation_flags: str | None = None,
 ):
     """Report the values each query parameter can still take under this scope."""
     from . import interactions
 
     return interactions.parameter_values({
-        "filters": {
-            "resources": resources,
-            "interaction_classes": interaction_classes,
-            "organisms": organism,
-            "datasets": datasets,
-        },
+        "filters": _discovery_scope(
+            resources, exclude_resources, interaction_classes, organism,
+            datasets, license, entities, entity_types, entity_annotations,
+            curation_flags,
+        ),
     })
 
 
 @app.get("/interactions/stats")
 def get_interactions_stats(
     resources: str | None = None,
+    exclude_resources: str | None = None,
     interaction_classes: str | None = None,
     organism: str | None = None,
     datasets: str | None = None,
+    license: str | None = None,
+    entities: str | None = None,
+    entity_types: str | None = None,
+    entity_annotations: str | None = None,
+    curation_flags: str | None = None,
     exact_total: bool = False,
 ):
     """Summary counts for an interactions query; returns no interaction rows."""
     from . import interactions
 
     return interactions.stats({
-        "filters": {
-            "resources": resources,
-            "interaction_classes": interaction_classes,
-            "organisms": organism,
-            "datasets": datasets,
-        },
+        "filters": _discovery_scope(
+            resources, exclude_resources, interaction_classes, organism,
+            datasets, license, entities, entity_types, entity_annotations,
+            curation_flags,
+        ),
         "exact_total": exact_total,
     })
 

@@ -35,6 +35,13 @@ PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
         'curation_flags',
         'sign',
         'direction',
+        # A predicate on a key of the record's attribute document. It belongs
+        # to Selection because it is a stored column of the record applied
+        # before the fold, like the rest of the group. It is named apart in
+        # `LONG_TAIL_PARAMETERS` because it is the one member of the group
+        # that reaches no index, which is the whole of what `guard` needs to
+        # know about it.
+        'attribute_filters',
     ),
     'range': ('affinity', 'pchembl', 'score'),
     'post_fold': (
@@ -77,6 +84,16 @@ SORTABLE_COLUMNS: frozenset[str] = frozenset({
     'score',
 })
 
+# The parameters whose predicate lands on the record's attribute document. No
+# index of the build reaches it — the record carries a btree on the collapse
+# key, one on the key plus the assertion columns, and one on `source_id`, and
+# nothing at all on `attributes` — so the predicate is applied as a filter to
+# every row the indexed predicates admit. Measured on dev4 2026-08-24: 44,455
+# rows in 94.9 ms, 410,592 in 384 ms, 902,216 in 441 ms and all 14,686,404 in
+# 12,637 ms. The page bound saves nothing, because a scan that qualifies no
+# row cannot stop at a page.
+LONG_TAIL_PARAMETERS: tuple[str, ...] = ('attribute_filters',)
+
 COLLAPSE_MODES = ('none', 'assertion', 'endpoints')
 
 # The paging bounds. `MAX_LIMIT` matches `graph._limit`'s existing cap so the
@@ -86,6 +103,28 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 MAX_OFFSET = 10_000
 MAX_ATTRIBUTES = 32
+
+# The record rows a request may reach into the attribute document over, whether
+# to test a predicate against a key or to project one. It is one bound because
+# it counts one thing — rows whose document the request opens or scans — and it
+# is set from the timings above: a million rows sits at about half a second,
+# inside the one-second budget, and the unscoped scan measured twelve times
+# outside it.
+#
+# The bound is structural rather than timed, and deliberately so. On this build
+# `attributes` is null on all 14,686,404 rows, so a projection of sixteen keys
+# measures 1,420 ms against 1,419 ms bare — the detoast this bound exists to
+# price cannot be measured here at all. A rule calibrated against that timing
+# would pass green and protect nothing.
+MAX_LONG_TAIL_ROWS = 1_000_000
+
+# How far a bounded key scan will count before it reports a floor instead of a
+# number. The planner cannot price an `OR` of two large uuid arrays — 8,428,823
+# estimated against 729,900 true for one annotation filter — and an exact count
+# of such a scope costs 1.834 s, outside the one-second budget. A scan stopped
+# at this many
+# keys costs 0.282 s and answers exactly wherever the answer fits inside it.
+KEY_PROBE_CEILING = 100_000
 
 
 def _strings(value: Any) -> list[str]:
@@ -162,6 +201,49 @@ def _bounds(value: Any) -> dict[str, Any] | None:
     return out or None
 
 
+def _attribute_filters(value: Any) -> dict[str, Any]:
+    """
+    Normalize a predicate on the record's attribute document.
+
+    Two spellings reach the same object, because a query string cannot carry a
+    mapping: `{"evidence_type": "binding"}` from a body, and
+    `evidence_type:binding,pchembl_kind:kd` from a query parameter. A value
+    that is itself a mapping is read as bounds, so one key can be asked for as
+    a range exactly as `affinity` is.
+
+    Args:
+        value: The parameter as written — a mapping, a `key:value` string, or
+            a list of such strings.
+
+    Returns:
+        `{key: value or bounds}`, empty when the parameter is absent.
+    """
+
+    if value is None:
+
+        return {}
+
+    if isinstance(value, dict):
+
+        return {
+            str(key): _bounds(item) if isinstance(item, dict) else item
+            for key, item in value.items()
+            if str(key).strip()
+        }
+
+    out: dict[str, Any] = {}
+
+    for term in _strings(value):
+
+        key, separator, wanted = term.partition(':')
+
+        if separator and key.strip():
+
+            out[key.strip()] = wanted
+
+    return out
+
+
 def _flag(value: Any) -> bool | None:
     """
     Normalize a tri-state flag: True, False, or None for "not asked".
@@ -214,6 +296,10 @@ class Filters:
     curation_flags: list[str] = field(default_factory = list)
     sign: bool | None = None
     direction: bool | None = None
+    # `{document key: value or bounds}`. Stored on the record like the rest of
+    # Selection, and unlike the rest of it reaching no index, which is why
+    # `guard` prices it from the rows the other predicates admit.
+    attribute_filters: dict[str, Any] = field(default_factory = dict)
 
     # Range — stored columns too, and named apart from the post-fold group
     # only because they reach an index where the post-fold group reaches the
@@ -360,6 +446,9 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
             pick('entity_annotations', 'entityAnnotations'),
         ),
         curation_flags = _strings(pick('curation_flags', 'curationFlags')),
+        attribute_filters = _attribute_filters(
+            pick('attribute_filters', 'attributeFilters'),
+        ),
         sign = _flag(pick('sign')),
         direction = _flag(pick('direction')),
         affinity = _bounds(pick('affinity')),

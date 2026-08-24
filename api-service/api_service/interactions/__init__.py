@@ -23,20 +23,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import engine, params
+from . import discover, engine
 from .guard import GuardrailRefusal
 from .select import RECORD_TABLE
 
 _log = logging.getLogger(__name__)
-
-# The parameters `/interactions/parameter-values` reports reachable values for.
-PARAMETERS = (
-    'resources',
-    'interaction_classes',
-    'organisms',
-    'datasets',
-    'attributes',
-)
 
 
 def fact_table() -> str:
@@ -145,60 +136,57 @@ def compose_query(payload: dict[str, Any]) -> dict[str, Any]:
 
 def parameter_values(payload: dict[str, Any]) -> dict[str, Any]:
     """
-    The parameter surface, and the resources the current scope resolves to.
+    The values each parameter can still take under one filter scope.
+
+    Every parameter of the query surface is reported, not the handful the
+    earlier scaffold listed: a discovery endpoint that omits a parameter teaches a caller it
+    does not exist. A post-fold parameter reports its distribution instead of a
+    value list, because `source_count` is drawn from no vocabulary — it is a
+    number the fold produces, and the honest answer is how it is distributed.
 
     Args:
         payload: The same filter scope as `search`.
 
     Returns:
-        The seven parameter groups of contracts §1a, the parameters this
-        endpoint reports values for, and the scope's own resource set. The
-        per-value scoped counts are a facet question and are not answered from
-        the record.
+        The parameter groups, one entry per parameter, and the scope those
+        answers hold under. No interaction row, at any width.
     """
 
     try:
 
-        answer = engine.run({**(payload or {}), 'limit': 1})
+        return engine.run({
+            **(payload or {}), 'discover': discover.PARAMETER_VALUES,
+        })
 
     except GuardrailRefusal as exc:
 
         _refuse(exc)
-
-    return {
-        'parameter_groups': {
-            group: list(names) for group, names in params.PARAMETER_GROUPS.items()
-        },
-        'parameters': list(PARAMETERS),
-        'folded_columns': sorted(params.FOLDED_COLUMNS),
-        'resources': answer['resources'],
-    }
 
 
 def stats(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Summary counts for a scope, without returning any interaction.
 
+    There is no stored collapse to count, so nothing here counts one. The
+    per-resource and per-organism blocks come from the roaring bitmaps, the
+    per-class and per-dataset blocks from one grouped count of the record's
+    stored columns, and the total from the derive's recorded histogram where
+    the scope restricts nothing. Anything else is the guardrail's estimate,
+    labelled as one, or an exact count the caller asked for and the guardrail
+    priced before it ran.
+
     Args:
         payload: The same filter scope as `search`, plus `exact_total`.
 
     Returns:
-        The scope's total, whether that total is an estimate, and the estimate
-        the guardrail made of it.
+        The scope's total with its provenance, the per-resource, per-type,
+        per-dataset and per-organism counts, and the recorded distribution.
     """
 
     try:
 
-        answer = engine.run({**(payload or {}), 'limit': 1})
+        return engine.run({**(payload or {}), 'discover': discover.STATISTICS})
 
     except GuardrailRefusal as exc:
 
         _refuse(exc)
-
-    return {
-        'fact_table': fact_table(),
-        'total': answer['total'],
-        'total_is_estimate': answer['total_is_estimate'],
-        'estimate': answer.get('estimate'),
-        'resources': answer['resources'],
-    }
