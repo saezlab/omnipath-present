@@ -437,53 +437,76 @@ def get_relation_evidence(relation_id: str):
         raise HTTPException(status_code=404, detail=f"Relation '{relation_id}' evidence not found")
     return result
 
-# ── General interactions API (cycle 008) — the fact-table surface ───────────
+# ── General interactions API (cycle 008) — the fold, per request ────────────
 # Separate from the /relations block above, which keeps serving the canonical
-# graph. Scaffold: the routes are wired, the queries land in a later phase.
+# graph. R24 removed the precomputed collapse, so every endpoint here folds the
+# record for the scope it states, through the one engine (FR-054).
 
 
 @app.post("/interactions")
 def post_interactions(payload: dict = Body(default_factory=dict)):
-    """Query the interactions fact table by resource, type, organism or dataset."""
+    """Query the interactions, folded for the scope the payload states."""
     from . import interactions
 
     return interactions.search(payload)
 
 
+@app.post("/interactions/compose")
+def post_interactions_compose(payload: dict = Body(default_factory=dict)):
+    """Assemble a dataset from components; the guardrail prices the composition."""
+    from . import interactions
+
+    return interactions.compose_query(payload)
+
+
 @app.get("/interactions")
 def get_interactions(
     resources: str | None = None,
-    interaction_types: str | None = None,
+    exclude_resources: str | None = None,
+    interaction_classes: str | None = None,
     organism: str | None = None,
     datasets: str | None = None,
+    license: str | None = None,
+    entities: str | None = None,
     attributes: str | None = None,
+    collapse: str = "endpoints",
     by_resource: bool = False,
     view: str = "gene",
+    order_by: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    cursor: str | None = None,
+    exact_total: bool = False,
 ):
-    """Query the interactions fact table using query parameters."""
+    """Query the interactions using query parameters."""
     from . import interactions
 
     return interactions.search({
         "filters": {
             "resources": resources,
-            "interaction_types": interaction_types,
-            "organism": organism,
+            "exclude_resources": exclude_resources,
+            "interaction_classes": interaction_classes,
+            "organisms": organism,
             "datasets": datasets,
+            "license": license,
+            "entities": entities,
         },
         "attributes": attributes,
+        "collapse": collapse,
         "by_resource": by_resource,
         "view": view,
+        "order_by": order_by,
         "limit": limit,
         "offset": offset,
+        "cursor": cursor,
+        "exact_total": exact_total,
     })
 
 
 @app.get("/interactions/parameter-values")
 def get_interactions_parameter_values(
     resources: str | None = None,
-    interaction_types: str | None = None,
+    interaction_classes: str | None = None,
     organism: str | None = None,
     datasets: str | None = None,
 ):
@@ -493,8 +516,8 @@ def get_interactions_parameter_values(
     return interactions.parameter_values({
         "filters": {
             "resources": resources,
-            "interaction_types": interaction_types,
-            "organism": organism,
+            "interaction_classes": interaction_classes,
+            "organisms": organism,
             "datasets": datasets,
         },
     })
@@ -503,9 +526,10 @@ def get_interactions_parameter_values(
 @app.get("/interactions/stats")
 def get_interactions_stats(
     resources: str | None = None,
-    interaction_types: str | None = None,
+    interaction_classes: str | None = None,
     organism: str | None = None,
     datasets: str | None = None,
+    exact_total: bool = False,
 ):
     """Summary counts for an interactions query; returns no interaction rows."""
     from . import interactions
@@ -513,10 +537,11 @@ def get_interactions_stats(
     return interactions.stats({
         "filters": {
             "resources": resources,
-            "interaction_types": interaction_types,
-            "organism": organism,
+            "interaction_classes": interaction_classes,
+            "organisms": organism,
             "datasets": datasets,
         },
+        "exact_total": exact_total,
     })
 
 
@@ -525,13 +550,15 @@ def get_interactions_stats(
 def get_interactions_dataset(
     dataset: str,
     resources: str | None = None,
-    interaction_types: str | None = None,
+    interaction_classes: str | None = None,
     organism: str | None = None,
     attributes: str | None = None,
+    collapse: str | None = None,
     by_resource: bool = False,
     view: str = "gene",
     limit: int = 50,
     offset: int = 0,
+    cursor: str | None = None,
 ):
     """One preset's interactions; sugar for `/interactions?datasets={dataset}`."""
     from . import interactions
@@ -539,14 +566,16 @@ def get_interactions_dataset(
     return interactions.dataset(dataset, {
         "filters": {
             "resources": resources,
-            "interaction_types": interaction_types,
-            "organism": organism,
+            "interaction_classes": interaction_classes,
+            "organisms": organism,
         },
         "attributes": attributes,
+        "collapse": collapse,
         "by_resource": by_resource,
         "view": view,
         "limit": limit,
         "offset": offset,
+        "cursor": cursor,
     })
 
 
