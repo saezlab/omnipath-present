@@ -29,11 +29,6 @@ from .select import RECORD_TABLE
 
 _log = logging.getLogger(__name__)
 
-# One record table, named once, in `select`. The scaffold's candidate list
-# probed the removed combined table first and would have folded a wider scope
-# than the caller asked for, which is the FR-048 defect with a table name on it.
-FACT_TABLE_CANDIDATES = (RECORD_TABLE,)
-
 # The parameters `/interactions/parameter-values` reports reachable values for.
 PARAMETERS = (
     'resources',
