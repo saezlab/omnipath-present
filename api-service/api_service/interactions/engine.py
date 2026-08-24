@@ -26,7 +26,9 @@ from . import fold as _fold
 from . import guard as _guard
 from . import nodes as _nodes
 from . import params as _params
+from . import project as _projection
 from . import scope as _scope
+from . import shape as _shape
 
 _log = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         _apply_preset(query, resolved)
         estimate = _guard.check(query, resolved, conn = live)
         rows = _fold.fold_rows(query, resolved, conn = live)
-        interactions = _project_page(rows, query, live)
+        interactions = _project_page(rows, query, live, resolved)
 
         if query.exact_total:
 
@@ -149,7 +151,7 @@ def _composition(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         _apply_preset(query, resolved)
         estimate = _guard.check(query, resolved, conn = live, record = record)
         rows = _compose.run(node, conn = live)
-        interactions = _project_page(rows, query, live)
+        interactions = _project_page(rows, query, live, resolved)
 
     return {
         'interactions': interactions,
@@ -175,7 +177,9 @@ def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScop
     The names a preset declares that the standard output already carries are
     dropped rather than passed on: sending `references` to the long-tail
     attribute projection would look for a JSONB key of that name, find none,
-    and report null for a field the fold has already filled in.
+    and report null for a field the fold has already filled in. A hot column
+    is the exception — it is on the row either way, so naming it selects it
+    rather than losing it.
 
     Args:
         query: The parsed request, modified in place.
@@ -198,7 +202,8 @@ def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScop
             attributes.append(name)
 
     query.attributes = [
-        name for name in attributes if name not in _nodes.STANDARD_BLOCKS
+        name for name in attributes
+        if name in _projection.HOT_COLUMNS or name not in _nodes.STANDARD_BLOCKS
     ]
 
 
@@ -206,6 +211,7 @@ def _project_page(
         rows: list[dict[str, Any]],
         query: _params.InteractionQuery,
         conn,
+        resolved: _scope.ResolvedScope,
 ) -> list[dict[str, Any]]:
     """
     Render one page of folded rows, with both ends of every interaction named.
@@ -219,14 +225,16 @@ def _project_page(
         rows: The folded rows of one page.
         query: The parsed request, for the projection parameters.
         conn: An open connection.
+        resolved: The resolved scope, for the Shape group's reads.
 
     Returns:
         The page, ready to serialise.
     """
 
     index = _nodes.lookup(_nodes.entity_ids(rows), conn = conn)
+    projected = [_project(row, query, conn, index) for row in rows]
 
-    return [_project(row, query, conn, index) for row in rows]
+    return _shape.apply(projected, rows, query, resolved, conn = conn)
 
 
 def _project(
@@ -251,13 +259,12 @@ def _project(
     """
 
     out: dict[str, Any] = {}
-    attributes: dict[str, Any] = {}
 
     for name, value in row.items():
 
-        if name.startswith('attribute:'):
+        if name.startswith(_projection.ALIAS):
 
-            attributes[name.split(':', 1)[1]] = value
+            continue
 
         elif name in _UUID_KEYS:
 
@@ -280,9 +287,9 @@ def _project(
 
     if query.attributes:
 
-        # FR-045: a name that is neither a hot column nor a present key comes
-        # back null rather than as a 4xx, and never drops the interaction.
-        out['attributes'] = {name: attributes.get(name) for name in query.attributes}
+        # A name that is neither a hot column nor a present key comes back null
+        # rather than as a 4xx, and never drops the interaction.
+        out['attributes'] = _projection.render(row, out, query.attributes)
 
     return out
 

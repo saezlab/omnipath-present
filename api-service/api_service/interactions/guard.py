@@ -42,6 +42,7 @@ from .params import (
     SORTABLE_COLUMNS,
     InteractionQuery,
 )
+from .project import long_tail
 from .scope import ResolvedScope, connection
 from .select import RecordFilter, key_estimate_sql
 
@@ -135,6 +136,7 @@ def check(
     _refuse_folded_sort(query)
     _refuse_deep_offset(query)
     _refuse_unbounded_projection(query, resolved)
+    _refuse_widening_the_group_key(query)
 
     with connection(conn) as live:
 
@@ -230,17 +232,22 @@ def _refuse_unbounded_projection(
             long tail is projected over a scan that nothing narrows.
     """
 
-    if len(query.attributes) > MAX_ATTRIBUTES:
+    # Only the long tail is priced. A hot column is already on the row the
+    # fold produces, so asking for it opens no document and adds no scan;
+    # counting it here would refuse a request that costs nothing.
+    tail = long_tail(query.attributes)
+
+    if len(tail) > MAX_ATTRIBUTES:
 
         raise GuardrailRefusal(
-            f'{len(query.attributes)} attributes requested; at most '
+            f'{len(tail)} long-tail attributes requested; at most '
             f'{MAX_ATTRIBUTES} are projected in one request. Narrow the '
             f'`attributes` list, or ask for the rest in a second call.',
             status_code = 400,
             parameter = 'attributes',
         )
 
-    if query.attributes and query.exact_total and resolved.unscoped:
+    if tail and query.exact_total and resolved.unscoped:
 
         raise GuardrailRefusal(
             'projecting the long-tail attributes while counting every key of '
@@ -249,6 +256,41 @@ def _refuse_unbounded_projection(
             status_code = 400,
             parameter = 'attributes',
         )
+
+
+def _refuse_widening_the_group_key(query: InteractionQuery) -> None:
+    """
+    Refuse widening the sign flags when the flags are the group key.
+
+    `collapse=none` and `collapse=assertion` put the sign and direction columns
+    into the key, so each row exists *because* of the values it carries there.
+    Overwriting them with an assertion from outside the scope would move rows
+    off their own key and merge groups the caller asked to keep apart. The
+    request is refused rather than half-served, because silently declining half
+    of what was asked for is the quiet wrongness this endpoint is built to
+    avoid.
+
+    Args:
+        query: The parsed request.
+
+    Raises:
+        GuardrailRefusal: For the two collapse modes that key on the flags.
+    """
+
+    if not query.include_outofscope_signdir or query.collapse == 'endpoints':
+
+        return
+
+    raise GuardrailRefusal(
+        f'collapse={query.collapse} groups on the sign and direction columns, '
+        f'so widening those flags with an assertion from outside the scope '
+        f'would rewrite the key each row was grouped under. Ask for the '
+        f'widened flags with collapse=endpoints, or read the per-resource '
+        f'assertions with by_resource instead.',
+        status_code = 400,
+        parameter = 'include_outofscope_signdir',
+        collapse = query.collapse,
+    )
 
 
 def _price(

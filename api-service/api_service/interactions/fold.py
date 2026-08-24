@@ -28,6 +28,7 @@ from typing import Any, Sequence
 
 from ..graph import SEARCH_SCHEMA
 from .params import InteractionQuery
+from .project import aggregate_sql, long_tail
 from .scope import ResolvedScope, connection
 from .select import (
     COLLAPSE_KEYS,
@@ -119,7 +120,10 @@ def fold_sql(
     )
     grouped = ', '.join(str(index + 1) for index in range(len(group)))
 
-    attributes, attribute_args = _attribute_projection(query.attributes)
+    # Only the long tail reaches the document: a hot column is already on the
+    # row the fold produces, and opening the document to fetch it again would
+    # be a detoast bought for nothing.
+    attributes, extraction, attribute_args = aggregate_sql(long_tail(query.attributes))
 
     sql = f"""SELECT
       {selected},
@@ -131,40 +135,11 @@ def fold_sql(
     JOIN {SEARCH_SCHEMA}.data_source contributor
       ON contributor.source_id = r.source_id
     {REFERENCE_LATERAL}
+    {extraction}
     GROUP BY {grouped}
     ORDER BY 1, 2, 3"""
 
     return sql, [*attribute_args, *keys_args, *predicate.args]
-
-
-def _attribute_projection(names: list[str]) -> tuple[str, list[Any]]:
-    """
-    The long-tail JSONB keys a request asked for, projected after the fold.
-
-    A requested name that is neither a hot column nor a present key comes back
-    as null for those rows rather than as a 4xx, and never drops the
-    interaction (FR-045). `guard` caps how many may be asked for at once.
-
-    Args:
-        names: The requested attribute keys.
-
-    Returns:
-        The projection fragment and its positional arguments.
-    """
-
-    fragments: list[str] = []
-    args: list[Any] = []
-
-    for name in names:
-
-        alias = 'attribute:' + name.replace('"', '')
-        fragments.append(
-            f'''array_agg(DISTINCT r.attributes ->> %s)
-        FILTER (WHERE r.attributes ? %s) AS "{alias}"''',
-        )
-        args.extend([name, name])
-
-    return (',\n      ' + ',\n      '.join(fragments) if fragments else ''), args
 
 
 def fold_rows(

@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from ..graph import SEARCH_SCHEMA, _connect
-from ..resource_catalog import resolve_resource_filters
+from ..resource_catalog import resolve_resource_filter, resolve_resource_filters
 from .organism import OrganismScope
 from .organism import resolve as resolve_organisms
 from .params import InteractionQuery
@@ -128,7 +128,55 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
     with connection(conn) as live:
 
         by_name = _source_ids_by_name(live)
+        # Every name the caller wrote is checked before any of them is used, so
+        # a typo is a refusal rather than an empty page.
+        _refuse_unknown(
+            'resources',
+            [
+                value for value in filters.resources
+                if resolve_resource_filter(value) not in by_name
+            ],
+            list(by_name),
+        )
+        _refuse_unknown(
+            'exclude_resources',
+            [
+                value for value in filters.exclude_resources
+                if resolve_resource_filter(value) not in by_name
+            ],
+            list(by_name),
+        )
+        _refuse_unknown(
+            'by_resource',
+            [
+                value for value in query.by_resource_names
+                if resolve_resource_filter(value) not in by_name
+            ],
+            list(by_name),
+        )
+        # Written as the caller wrote them, resolved to the names the record
+        # carries, so a synonym or a capitalisation reaches the same block the
+        # resource filter would have reached.
+        query.by_resource_names = resolve_resource_filters(query.by_resource_names)
+        vocabulary = _class_vocabulary(live)
+        _refuse_unknown(
+            'interaction_classes',
+            [
+                value for value in filters.interaction_classes
+                if value.lower() not in vocabulary
+            ],
+            [name for key, name in vocabulary.items() if not key.isdigit()],
+        )
         presets = _presets(live, filters.datasets)
+        registered = {preset['name'] for preset in presets}
+        _refuse_unknown(
+            'datasets',
+            [
+                value for value in filters.datasets
+                if value.lower() not in registered
+            ],
+            _preset_names(live),
+        )
         sets: list[set[str]] = []
 
         if filters.resources:
@@ -379,9 +427,7 @@ def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[s
 
         if dimension not in LICENSE_LEVELS:
 
-            _log.warning('unknown license dimension %r; scope left empty', dimension)
-
-            return set()
+            _refuse_unknown('license', [term], sorted(LICENSE_LEVELS))
 
         ordinal = LICENSE_LEVELS[dimension].get(level)
 
@@ -393,9 +439,11 @@ def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[s
 
             except ValueError:
 
-                _log.warning('unknown license level %r; scope left empty', term)
-
-                return set()
+                _refuse_unknown(
+                    'license',
+                    [term],
+                    sorted(LICENSE_LEVELS[dimension]),
+                )
 
         floors[dimension] = max(floors.get(dimension, 0), ordinal)
 
@@ -481,6 +529,96 @@ def _entity_type_ids(conn, names: list[str]) -> list[int]:
     ).fetchall()
 
     return sorted(int(row['entity_type_id']) for row in rows)
+
+
+def _refuse_unknown(parameter: str, unknown: list[str], carried: list[str]) -> None:
+    """
+    Refuse a filter value the build carries nothing under.
+
+    The asymmetry with the projection is deliberate and is the whole rule. A
+    projection name nobody stores is null, because a caller assembling one
+    frame across resources that publish different columns is asking for the
+    union of them. A **filter** name nobody stores cannot be answered the same
+    way: an empty page says "no interaction matches this", when the truth is
+    "nothing in this build is called that". One of those is a finding and the
+    other is a typo, and a caller who cannot tell them apart will publish the
+    first.
+
+    Args:
+        parameter: The parameter the caller wrote the value in.
+        unknown: The values that match nothing.
+        carried: What the build does carry, for the message.
+
+    Returns:
+        None, when every value is known.
+
+    Raises:
+        GuardrailRefusal: 400 naming the values and what is available.
+    """
+
+    if not unknown:
+
+        return
+
+    from .guard import GuardrailRefusal
+
+    shown = sorted(carried)
+    listed = ', '.join(shown[:12]) + (', …' if len(shown) > 12 else '')
+
+    raise GuardrailRefusal(
+        f'{parameter}={", ".join(unknown)} matches nothing in this build. An '
+        f'empty page would read as "no interaction has this", which is a '
+        f'different statement from "this build knows no such name". '
+        f'Available: {listed}.',
+        status_code = 400,
+        parameter = parameter,
+        unknown = unknown,
+        available = shown,
+    )
+
+
+def _class_vocabulary(conn) -> dict[str, str]:
+    """
+    Every interaction-class slug, and every id, as strings.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        A lookup of everything `interaction_classes` may be written as. The
+        capitalised label is deliberately absent: it is output-side, and a
+        caller who writes it is writing something that never selected rows.
+    """
+
+    rows = conn.execute(
+        f"""
+        SELECT interaction_class_id, name
+        FROM {SEARCH_SCHEMA}.vocab_interaction_class
+        """,
+    ).fetchall()
+
+    known = {row['name'].lower(): row['name'] for row in rows}
+    known.update({str(row['interaction_class_id']): row['name'] for row in rows})
+
+    return known
+
+
+def _preset_names(conn) -> list[str]:
+    """
+    Every preset the registry carries, for a refusal message.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        The registered dataset names.
+    """
+
+    rows = conn.execute(
+        f'SELECT name FROM {SEARCH_SCHEMA}.network_registry',
+    ).fetchall()
+
+    return [row['name'] for row in rows]
 
 
 def _record_share(conn, scope: ResolvedScope, by_name: dict[str, int]) -> float:

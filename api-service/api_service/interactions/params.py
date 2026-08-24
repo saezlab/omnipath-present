@@ -268,6 +268,10 @@ class InteractionQuery:
     # has to tell "the caller asked for endpoints" from "nobody asked".
     collapse_requested: bool = False
     by_resource: bool = False
+    # The resources the per-resource breakdown covers. Empty means every
+    # resource the scope kept: `by_resource=true` asks for the breakdown, and
+    # `by_resource=SIGNOR,IntAct` asks for it restricted to those names.
+    by_resource_names: list[str] = field(default_factory = list)
     include_outofscope_signdir: bool = False
 
     # Projection.
@@ -363,6 +367,9 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         ),
     )
 
+    requested_resource_detail = _by_resource(
+        payload.get('by_resource', payload.get('byResource')),
+    )
     requested_collapse = payload.get('collapse')
     collapse = str(requested_collapse or 'endpoints').strip().lower()
     order_by = payload.get('order_by') or payload.get('orderBy')
@@ -372,7 +379,8 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         filters = parsed,
         collapse = collapse if collapse in COLLAPSE_MODES else 'endpoints',
         collapse_requested = collapse in COLLAPSE_MODES and bool(requested_collapse),
-        by_resource = bool(payload.get('by_resource') or payload.get('byResource')),
+        by_resource = requested_resource_detail[0],
+        by_resource_names = requested_resource_detail[1],
         include_outofscope_signdir = bool(
             payload.get('include_outofscope_signdir')
             or payload.get('includeOutofscopeSigndir'),
@@ -388,6 +396,42 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         order_by = str(order_by).strip() if order_by else None,
         exact_total = bool(payload.get('exact_total') or payload.get('exactTotal')),
     )
+
+
+# The words a boolean parameter may be written as. A value outside this set is
+# a resource name, which is how one parameter carries both halves of the same
+# question without a second parameter that could disagree with it.
+_TRUE_WORDS = frozenset({'1', 'true', 'yes', 'on'})
+_BOOLEAN_WORDS = _TRUE_WORDS | frozenset({'0', 'false', 'no', 'off', 'none', 'null', 'any'})
+
+
+def _by_resource(value: Any) -> tuple[bool, list[str]]:
+    """
+    Read the per-resource shape parameter: whether, and for which resources.
+
+    One parameter carries both because they are one question. `true` asks for
+    every in-scope resource's own attributes. A list of names asks for the same
+    thing restricted to those names, which is what "by resource" means when the
+    caller has one in mind.
+
+    Args:
+        value: The parameter as written — a flag, a name, or a list of names.
+
+    Returns:
+        Whether the breakdown was asked for, and the resources it covers.
+    """
+
+    if value is None or isinstance(value, bool):
+
+        return bool(value), []
+
+    names = _strings(value)
+
+    if len(names) == 1 and names[0].lower() in _BOOLEAN_WORDS:
+
+        return names[0].lower() in _TRUE_WORDS, []
+
+    return bool(names), names
 
 
 def _limit(value: Any) -> int:
