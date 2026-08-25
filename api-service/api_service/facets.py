@@ -243,9 +243,9 @@ def scoped_entity_facet_counts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     type_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
     source_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
     taxonomy_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["source_filter_bitmap.bitmap"] if sources else [])])
-    # Derived classification facets (chemical_class, metabolic_domain — Milestone B;
-    # structural_specificity — Milestone E). These are not filter inputs, so they
-    # are counted against the full scope (all active filters applied).
+    # Derived classification facets (chemical_class, metabolic_domain,
+    # structural_specificity). These are not filter inputs, so they are counted
+    # against the full scope (all active filters applied).
     full_scope = _chain_bitmaps(["scope_base.bitmap", *(["query_bitmap.bitmap"] if query else []), *(["type_filter_bitmap.bitmap"] if entity_types else []), *(["source_filter_bitmap.bitmap"] if sources else []), *(["taxonomy_filter_bitmap.bitmap"] if taxonomy_ids else [])])
     CLASSIFICATION_FACETS = ("chemical_class", "metabolic_domain", "structural_specificity")
     classification_branches = "\n".join(

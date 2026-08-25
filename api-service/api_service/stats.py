@@ -1,4 +1,4 @@
-"""Statistics / query API (Milestone H).
+"""Statistics / query API.
 
 Read-only endpoints over **precomputed** tables (derived counts, facet bitmaps,
 the build manifest, resource summary) — no full scans / heavy compute on the

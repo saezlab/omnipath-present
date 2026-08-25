@@ -11,7 +11,7 @@ one (Principle I/II).
 
 **Three-valued sign is load-bearing.** `bool_or` ignores NULLs and returns NULL
 when every contributor is silent, so a scope in which no resource asserts a
-sign yields NULL rather than a defaulted `false` (FR-044a). There is no
+sign yields NULL rather than a defaulted `false`. There is no
 `coalesce` anywhere in this file, and that is the reason.
 
 **A reference keeps the name of the resource that published it.** The joined

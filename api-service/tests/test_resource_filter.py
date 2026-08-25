@@ -1,4 +1,4 @@
-"""Forgiving resource-filter resolution (Milestone M).
+"""Forgiving resource-filter resolution.
 
 A resource filter given as slug / short / synonym (any case) resolves to the same
 canonical resource key. Needs DATABASE_URL pointing at a built DB with the

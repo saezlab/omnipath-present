@@ -58,7 +58,7 @@ def list_resources() -> list[dict[str, Any]]:
             if _has_column(conn, "resources", "license_label")
             else "NULL::text AS license_label"
         )
-        # 3-name model columns (Milestone M) — guarded for older builds.
+        # 3-name model columns — guarded for older builds.
         short_select = (
             "resource_short" if _has_column(conn, "resources", "resource_short")
             else "NULL::text AS resource_short"

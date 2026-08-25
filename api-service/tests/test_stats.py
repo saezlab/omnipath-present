@@ -1,4 +1,4 @@
-"""Integration tests for the statistics API (Milestone H).
+"""Integration tests for the statistics API.
 
 Counts from /stats/* must equal direct queries against the same precomputed
 tables in the same build. Needs DATABASE_URL pointing at a built DB and

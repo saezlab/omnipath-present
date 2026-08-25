@@ -247,7 +247,7 @@ def get_available_sources(domain: str | None = None):
     return {"sources": list_sources(domain)}
 
 
-# ── Statistics / query API (Milestone H) — precomputed reads, camelCase ──────
+# ── Statistics / query API — precomputed reads, camelCase ────────────────────
 
 
 @app.get("/stats/sources")
