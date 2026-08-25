@@ -1,11 +1,12 @@
 """
-The cost governor — estimate, then refuse (T020j, contracts §4, FR-009).
+The cost governor — estimate, then refuse.
 
 `graph._limit` capped a page size. This is the same seam widened to the cost
-R24 moved from the derive to the query: the limit and the attribute count are
-still capped, and on top of that the request is **priced before it runs**, from
-`facet_relation_bitmap` cardinalities and from the derive's `source_count`
-histogram, and refused with an actionable 4xx when the price is unbounded.
+that moved from the derive to the query when the build stopped precomputing
+the collapse: the limit and the attribute count are still capped, and on top
+of that the request is **priced before it runs**, from `facet_relation_bitmap`
+cardinalities and from the derive's `source_count` histogram, and refused with
+an actionable 4xx when the price is unbounded.
 
 The distinction the whole design rests on is between a post-fold **filter** and
 a post-fold **sort**, and the two are treated apart here on purpose.
@@ -14,9 +15,9 @@ a post-fold **sort**, and the two are treated apart here on purpose.
   `GroupAggregate` emits each group as its key changes and the outer `LIMIT`
   stops the scan, so the cost is page ÷ selectivity — 3,900, 90,000 and 1.7
   million keys folded at `>= 2`, `>= 3` and `>= 5`. Every one of those is
-  inside SC-002 at present cardinality, so the histogram **prices** it and the
-  caller can see the price. It becomes a gate when `interaction_assay`
-  multiplies the grain.
+  inside the interactive latency target at present cardinality, so the
+  histogram **prices** it and the caller can see the price. It becomes a gate
+  when `interaction_assay` multiplies the grain.
 * `ORDER BY source_count` cannot stop early. To know which key sorts first the
   engine folds every key in scope and then sorts — measured at 5,538 ms
   unscoped, with the `LIMIT` saving nothing because the top-N heapsort only
@@ -56,8 +57,8 @@ from .select import (
 _log = logging.getLogger(__name__)
 
 # data-model §12. Nine rows: one per observed `source_count` level, with the
-# number of collapse keys at that level. T013m writes it; where it is absent
-# the same nine rows are computed once and the estimate says so.
+# number of collapse keys at that level. The derive writes it; where it is
+# absent the same nine rows are computed once and the estimate says so.
 HISTOGRAM_TABLE = 'interaction_source_count_histogram'
 
 # Cached per schema. The computed fallback is a full fold (about four seconds
@@ -711,11 +712,11 @@ def histogram(conn) -> tuple[dict[int, int], str]:
     """
     The `source_count` histogram, from the derive where it exists.
 
-    T013m writes `interaction_source_count_histogram`; until it has run the
-    same nine rows are computed by folding the record once, cached for the
+    The derive writes `interaction_source_count_histogram`; until it has run
+    the same nine rows are computed by folding the record once, cached for the
     life of the process, and the estimate's `source` says which one answered —
-    an estimate that hides where it came from is the kind of quietly wrong
-    number FR-048 exists to prevent.
+    an estimate that hides where it came from is the same kind of quietly
+    wrong number as a summary folded over the wrong resource set.
 
     Args:
         conn: An open connection.

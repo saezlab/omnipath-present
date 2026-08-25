@@ -1,5 +1,5 @@
 """
-The Projection group: which columns a caller gets back (contracts §1a).
+The Projection group: which columns a caller gets back.
 
 A request names columns in `attributes=`, and a name is one of two things. A
 **hot column** is stored on the record or produced by the fold, so it is

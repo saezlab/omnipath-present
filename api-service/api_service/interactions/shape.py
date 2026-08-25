@@ -1,5 +1,5 @@
 """
-The Shape group: how much of the record a row speaks for (contracts §1a).
+The Shape group: how much of the record a row speaks for.
 
 `collapse` — how far the record folds — is a flag on the fold's own builder,
 because it changes the group key. The other two parameters of the group do not

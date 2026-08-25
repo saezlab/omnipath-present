@@ -1,12 +1,12 @@
 """
-The one query engine (T020h-T020o, FR-054, R26).
+The one query engine.
 
 Every `/interactions*` route reaches the interaction tables through `run`, and
-nothing else reaches them at all. That is the serving-side reading of FR-011
-and FR-015: the build forbids per-dataset materialised views, and without the
-same rule here the 1,571 lines of view definitions reappear as route code, one
-query function per dataset, and the parameter surface stops being the thing
-that has to be general.
+nothing else reaches them at all. That is the serving-side reading of a rule
+the build already holds: per-dataset materialised views are forbidden, and
+without the same rule here the 1,571 lines of view definitions reappear as
+route code, one query function per dataset, and the parameter surface stops
+being the thing that has to be general.
 
 The stages are the contract's own, in order, and each is one module: parse
 (`params`), resolve the scope once (`scope`), price and refuse (`guard`),
@@ -72,7 +72,7 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     if payload.get('components') or payload.get('operation') in _compose.OPERATIONS:
 
         # A composition is not a fast path around the engine — it is the engine
-        # entered with a component list instead of one parameter set (FR-054).
+        # entered with a component list instead of one parameter set.
         return _composition(payload, conn = conn)
 
     if payload.get('discover') in _discover.QUESTIONS:
@@ -106,9 +106,10 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     answer: dict[str, Any] = {
         'interactions': interactions,
         'total': int(total),
-        # R24 removed the stored collapse, so the unscoped total is an estimate
-        # like every other. An unlabelled estimate is the quietly wrong number
-        # FR-048 exists to prevent, so the label is a required field.
+        # Nothing stores the collapse any more, so the unscoped total is an
+        # estimate like every other. An unlabelled estimate is the same kind of
+        # quietly wrong number as a summary folded over resources the caller
+        # excluded, so the label is a required field.
         'total_is_estimate': not query.exact_total,
         'limit': query.limit,
         'offset': query.offset,
@@ -180,7 +181,7 @@ def _discovery(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
 
 def _composition(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     """
-    Answer one composition request (T020m, contracts §1a).
+    Answer one composition request.
 
     A caller assembles a dataset from generic queries exactly as `metalinksdb`
     does, and may pass a saved preset as one component. The cost governor

@@ -1,9 +1,9 @@
 """
-Key selection over the interaction record (T020i, R25, FR-051).
+Key selection over the interaction record.
 
-This is the only module in the service that names the interaction tables
-(FR-054). Everything else reaches them through the statements built here, which
-is what keeps a dataset a parameter set rather than a query function of its own.
+This is the only module in the service that names the interaction tables.
+Everything else reaches them through the statements built here, which is what
+keeps a dataset a parameter set rather than a query function of its own.
 
 **The shape is binding, not stylistic.** Select the page's group keys —
 `(subject_entity_id, object_entity_id, interaction_class_id)` — in key order
@@ -39,7 +39,7 @@ from .scope import ResolvedScope
 RECORD_TABLE = 'interaction_fact_resource'
 
 # Leads on exactly the collapse key columns, so an ordered read of it is the
-# page's key list (R25 step 1).
+# page's key list.
 COLLAPSE_INDEX = 'interaction_fact_resource_collapse_idx'
 
 # `(subject, object, class, source_id, is_directed, is_stimulation,
@@ -62,7 +62,7 @@ GROUP_KEYS: tuple[str, ...] = (
 # `collapse` is a flag on one builder rather than three statements: `none`
 # extends the key to the record's own grain and `assertion` to the resources
 # that agree on sign and direction, and both are the same fold with a longer
-# key (contracts §1, R19).
+# key.
 COLLAPSE_KEYS: dict[str, tuple[str, ...]] = {
     'endpoints': GROUP_KEYS,
     'assertion': GROUP_KEYS + ('is_directed', 'is_stimulation', 'is_inhibition'),
@@ -149,9 +149,10 @@ def record_filter(
     Every pre-fold predicate of one request, as one expression over `r`.
 
     Scope, selection and range all land here, because all three restrict the
-    **record rows** the fold may see. That is what makes the FR-048 rule hold
-    without a second mechanism: the summaries are aggregates over exactly these
-    rows, so a narrowed scope narrows the numbers by construction.
+    **record rows** the fold may see. That is what makes the recomputation
+    rule hold without a second mechanism: the summaries are aggregates over
+    exactly these rows, so a narrowed scope narrows the numbers by
+    construction.
 
     Args:
         query: The parsed request.
@@ -424,7 +425,7 @@ def key_selection_sql(
         record: RecordFilter | None = None,
 ) -> tuple[str, Sequence[Any]]:
     """
-    The page's group keys, in key order, with the page bound applied (R25).
+    The page's group keys, in key order, with the page bound applied.
 
     Three shapes, chosen by what the request asks for and not by which dataset
     it is:
@@ -501,14 +502,15 @@ def key_selection_sql(
 
     elif resolved.record_share < NARROW_SHARE:
 
-        # R25 step 1, the narrow branch. The collapse index does not lead on
-        # `source_id`, so an ordered read of it finds a rare resource by
-        # sweeping: `neuronchat` contributes 373 rows out of 14.7 million, and
-        # filling a hundred-key page means walking a quarter of the index. The
-        # `OFFSET 0` fence stops the page bound from being pushed into that
-        # scan, so the rows are found through the source index — the same
-        # cardinality the `source` facet of `facet_relation_bitmap` reports —
-        # and sorted afterwards, over the narrow scope rather than the record.
+        # The narrow branch of the key selection. The collapse index does
+        # not lead on `source_id`, so an ordered read of it finds a rare
+        # resource by sweeping: `neuronchat` contributes 373 rows out of 14.7
+        # million, and filling a hundred-key page means walking a quarter of
+        # the index. The `OFFSET 0` fence stops the page bound from being
+        # pushed into that scan, so the rows are found through the source
+        # index — the same cardinality the `source` facet of
+        # `facet_relation_bitmap` reports — and sorted afterwards, over the
+        # narrow scope rather than the record.
         sql = f"""SELECT DISTINCT ON ({distinct_on}) {distinct_on}
     FROM (
       SELECT {keys}
@@ -547,8 +549,8 @@ def key_estimate_sql(
     The unbounded key statement, built to be **planned** and never run.
 
     `guard` reads the planner's row estimate off it, which is the cheap
-    scope-aware cardinality contracts §4 asks for — an exact count of the keys
-    in a scope is the full fold under another name.
+    scope-aware cardinality the cost governor needs — an exact count of the
+    keys in a scope is the full fold under another name.
 
     Args:
         query: The parsed request.
@@ -576,7 +578,7 @@ def key_count_sql(
         record: RecordFilter | None = None,
 ) -> tuple[str, Sequence[Any]]:
     """
-    An exact count of the collapse keys in one scope (contracts §1b, `total`).
+    An exact count of the collapse keys in one scope — the reported `total`.
 
     This is the full fold under another name and is priced as one by `guard`
     before it runs — it is an explicit request, never a default.

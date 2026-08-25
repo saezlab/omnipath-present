@@ -1,18 +1,18 @@
 """
 General interactions API over the interaction record (cycle 008).
 
-The scaffold this module used to be is retired (T020o). It probed for a
-precomputed `combined` fact table and answered every route with a
-not-implemented placeholder; R24 removed that table from the build, so there is
-nothing to probe for and the fold happens here, per request, for the scope the
-request states.
+The scaffold this module used to be is retired. It probed for a precomputed
+`combined` fact table and answered every route with a not-implemented
+placeholder. The build no longer holds that table, so there is nothing to
+probe for: the fold happens here, per request, for the scope the request
+states.
 
 What is left is a seam: `main.py`'s imports do not move, and every route body
-below reaches the one engine and nothing else. That boundary is FR-054, and it
-is asserted rather than intended — exactly one module of this service names the
-interaction record, every `/interactions*` route reaches it through
-`engine.run`, and no function anywhere in the service is named after a dataset.
-A dataset is a parameter set or a composition.
+below reaches the one engine and nothing else. That boundary is asserted
+rather than intended — exactly one module of this service names the interaction
+record, every `/interactions*` route reaches it through `engine.run`, and no
+function anywhere in the service is named after a dataset. A dataset is a
+parameter set or a composition.
 
 This surface is separate from `relations/*`: that block keeps serving the
 normalized canonical graph and is not overloaded here.
@@ -111,12 +111,12 @@ def dataset(name: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 def compose_query(payload: dict[str, Any]) -> dict[str, Any]:
     """
-    A dataset assembled from components, as `metalinksdb` is assembled (T020m).
+    A dataset assembled from components, as `metalinksdb` is assembled.
 
     A component is a parameter set or a saved preset, and the operations are
     `union`, `collapse`, `exclude` and `annotate`. The collapse runs after the
-    union and the exclusion runs before the collapse; both orders carry FR-048,
-    and `compose` holds them.
+    union and the exclusion runs before the collapse; both orders carry the
+    recomputation rule, and `compose` holds them.
 
     Args:
         payload: The component list, the operation, and the paging window.

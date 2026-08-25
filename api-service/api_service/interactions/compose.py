@@ -1,5 +1,5 @@
 """
-The composition algebra (T020k, R26, contracts §1a).
+The composition algebra.
 
 A dataset is a named composition of calls to the one engine, never a query
 function of its own. `metalinksdb` is a `union` of three components, an
@@ -7,13 +7,14 @@ function of its own. `metalinksdb` is a `union` of three components, an
 presets; a caller's own dataset is the same object, assembled through
 `POST /interactions/compose`.
 
-**Two orders are binding, and both carry FR-048.**
+**Two orders are binding, and both keep the fold counting only the resources
+the caller kept.**
 
 The `collapse` runs **after** the `union` and over the union's own resolved
 scope. Collapsing each component first and then unioning them emits one row per
 component for an interaction several components report, each carrying summaries
-folded over its own component's resources — the defect R19 removed between
-tables, reintroduced between components.
+folded over its own component's resources — the defect that keeping one
+per-resource record removed between tables, reintroduced between components.
 
 The `exclude` runs **before** the `collapse`, so an excluded resource
 contributes no row **and no count**. Dropping it afterwards leaves its
@@ -130,7 +131,7 @@ def exclude(node: Any, resources: Sequence[str]) -> Node:
 
 def annotate(node: Any, layer: str) -> Node:
     """
-    Attach the per-entity annotation layer to a node's rows (contracts §7).
+    Attach the per-entity annotation layer to a node's rows.
 
     Args:
         node: The component or node to annotate.
@@ -530,8 +531,9 @@ def _preset(name: str, conn) -> Any:
         conn: An open connection.
 
     Returns:
-        The composition. FR-035's per-component override works because a
-        preset is a component like any other: replacing one leaves the rest.
+        The composition. A per-component override — `nichenet`'s, say —
+        works because a preset is a component like any other: replacing one
+        component leaves the rest standing.
     """
 
     row = conn.execute(

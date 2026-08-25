@@ -1,5 +1,5 @@
 """
-The parameter model of the general interactions query (T020h, contracts §1a).
+The parameter model of the general interactions query.
 
 Every parameter is optional and they combine freely; each contributes one SQL
 fragment downstream, so the parameter count grows without the statement count
@@ -22,7 +22,7 @@ from typing import Any
 
 from . import annotate
 
-# contracts §1a, the seven groups. Kept as one mapping so nothing downstream
+# The contract's seven groups. Kept as one mapping so nothing downstream
 # has to re-derive which stage owns a parameter.
 PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
     'scope': ('resources', 'exclude_resources', 'datasets', 'license'),
@@ -57,7 +57,7 @@ PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
 
 # The values that do not exist before the fold produces them. Sorting on one of
 # these means folding every key in scope and then sorting — no page bound, no
-# index, no tail to degrade into — so `guard` refuses it (contracts §1b).
+# index, no tail to degrade into — so `guard` refuses it.
 # `affinity`, `pchembl` and `score` are deliberately absent: they are stored
 # columns of the record and must stay sortable, or the guardrail becomes a
 # blanket ban rather than a targeted one.
@@ -274,10 +274,10 @@ def _flag(value: Any) -> bool | None:
 
 @dataclass
 class Filters:
-    """Every filter of contracts §1a, grouped as the contract groups them."""
+    """Every filter of the query, grouped as the contract groups them."""
 
     # Scope — collapsed to one `source_id` set by `scope.resolve`, before
-    # anything touches the interaction tables (R20).
+    # anything touches the interaction tables.
     resources: list[str] = field(default_factory = list)
     exclude_resources: list[str] = field(default_factory = list)
     datasets: list[str] = field(default_factory = list)
@@ -308,7 +308,7 @@ class Filters:
     pchembl: dict[str, Any] | None = None
     score: dict[str, Any] | None = None
 
-    # Post-fold — a `HAVING` over the fold, never a sort (contracts §1b).
+    # Post-fold — a `HAVING` over the fold, never a sort.
     source_count: dict[str, Any] | None = None
     reference_count: dict[str, Any] | None = None
     sign_source_count: dict[str, Any] | None = None
@@ -397,7 +397,7 @@ class InteractionQuery:
 
 def parse(payload: dict[str, Any]) -> InteractionQuery:
     """
-    Read one request payload into the parameter model of contracts §1a.
+    Read one request payload into the parameter model.
 
     Filters are read from `payload['filters']` or from the payload's own top
     level, so the POST body and the query-string routes reach the same object.

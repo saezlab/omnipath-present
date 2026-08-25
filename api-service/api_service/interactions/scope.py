@@ -1,16 +1,17 @@
 """
-Scope resolution — one `source_id` set, resolved once (T020h, R20, FR-048).
+Scope resolution — one `source_id` set, resolved once.
 
 `resources`, `exclude_resources`, `datasets` and `license` are four spellings
 of one question: which resources may contribute a row. They are collapsed here,
-**before anything touches the interaction tables**, so the FR-048 recomputation
-rule has exactly one place to hold: everything downstream sees the resolved
-scope and nothing downstream sees the names it came from.
+**before anything touches the interaction tables**, so one rule holds in one
+place: the fold counts only the resources the caller kept. Everything
+downstream sees the resolved scope, and nothing downstream sees the names it
+came from.
 
-A license filter *is* a resource filter (R20). The ordinal levels of
+A license filter *is* a resource filter. The ordinal levels of
 `data_source_license` make "usable commercially" a `purpose_level >= 15`
 comparison over a 44-row table, and a resource whose license is unknown is
-excluded rather than admitted by a permissive default (FR-049).
+excluded rather than admitted by a permissive default.
 
 The class slugs, entity types and organisms are resolved here too, for a
 duller reason: `select` builds SQL without a connection, so every name-to-id
@@ -62,7 +63,7 @@ class ResolvedScope:
     """The resource set a query may read, plus the ids `select` needs."""
 
     # None means "every resource" — the widest scope, and not an exception to
-    # the fold rule: it is the scope containing all of them (R24).
+    # the fold rule: it is the scope containing all of them.
     source_ids: list[int] | None = None
     excluded_source_ids: list[int] = field(default_factory = list)
     resources: list[str] = field(default_factory = list)
@@ -125,7 +126,7 @@ def connection(conn = None) -> Iterator[Any]:
 
 def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
     """
-    Collapse every scope parameter into one `source_id` set (contracts §1a).
+    Collapse every scope parameter into one `source_id` set.
 
     Args:
         query: The parsed request.
@@ -283,7 +284,7 @@ def _source_ids_by_name(conn) -> dict[str, int]:
 
 def _presets(conn, names: list[str]) -> list[dict[str, Any]]:
     """
-    The `network_registry` rows a request names, whole (contracts §1a).
+    The `network_registry` rows a request names, whole.
 
     A preset is more than a resource list: it also states which interaction
     classes it covers, how far its rows collapse, and which attributes they are
@@ -380,7 +381,7 @@ def _class_scope(requested: list[str], presets: list[dict[str, Any]]) -> list[st
 
 def _preset_collapse(presets: list[dict[str, Any]]) -> str | None:
     """
-    The collapse mode the named presets agree on (contracts §1, `collapse`).
+    The collapse mode the named presets agree on.
 
     Args:
         presets: The registry rows.
@@ -423,7 +424,7 @@ def _preset_attributes(presets: list[dict[str, Any]], column: str) -> list[str]:
 
 def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[str]:
     """
-    The resources whose license meets every requested minimum level (R20).
+    The resources whose license meets every requested minimum level.
 
     Args:
         conn: An open connection.
@@ -434,7 +435,7 @@ def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[s
     Returns:
         The admitted resource slugs. `is_known = false` is excluded, and it is
         the exclusion — never a NULL level, which a comparison would let
-        through (FR-049).
+        through.
     """
 
     floors: dict[str, int] = {}
@@ -497,7 +498,7 @@ def _license_resources(conn, terms: list[str], by_name: dict[str, int]) -> set[s
 
 def _class_ids(conn, slugs: list[str]) -> list[int]:
     """
-    Resolve interaction-class slugs to ids (contracts §1, `vocab_interaction_class`).
+    Resolve interaction-class slugs to ids against `vocab_interaction_class`.
 
     Args:
         conn: An open connection.
@@ -656,9 +657,9 @@ def _record_share(conn, scope: ResolvedScope, by_name: dict[str, int]) -> float:
         by_name: The `data_source` name-to-id map.
 
     Returns:
-        A number in (0, 1]. This is the cardinality estimate contracts §4 asks
-        the cost governor to take from `facet_relation_bitmap` rather than from
-        a count over the record.
+        A number in (0, 1]. This is the cardinality estimate the cost
+        governor takes from `facet_relation_bitmap` rather than from a count
+        over the record.
     """
 
     if scope.unscoped:

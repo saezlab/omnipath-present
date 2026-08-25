@@ -439,8 +439,8 @@ def get_relation_evidence(relation_id: str):
 
 # ── General interactions API (cycle 008) — the fold, per request ────────────
 # Separate from the /relations block above, which keeps serving the canonical
-# graph. R24 removed the precomputed collapse, so every endpoint here folds the
-# record for the scope it states, through the one engine (FR-054).
+# graph. Nothing precomputes the collapse, so every endpoint here folds the
+# record for the scope it states, through the one engine.
 
 
 @app.post("/interactions")

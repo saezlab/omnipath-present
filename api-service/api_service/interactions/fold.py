@@ -1,9 +1,9 @@
 """
-The fold — the collapse, computed at query time (T020i, R24, FR-048).
+The fold — the collapse, computed at query time.
 
-R24 removed the precomputed collapse from the build, so the claim this module
-has to make good is that folding the record for a scope reproduces the removed
-table exactly. It does, because it is the same aggregation: the body below is
+The build no longer precomputes the collapse, so the claim this module has to
+make good is that folding the record for a scope reproduces the removed table
+exactly. It does, because it is the same aggregation: the body below is
 the build's `_COLLAPSE_SQL` reimplemented column by column beside its one
 remaining caller, not an approximation of it. Nothing is imported from
 `omnipath-build`; the service declares no dependency on it and must not gain
@@ -27,7 +27,8 @@ reference came off.
 and `reference_count` are aggregates over the filtered record, so a narrowed
 scope narrows the numbers by construction. Selecting a wider row and testing
 `sources && ARRAY[…]` returns the right interactions carrying numbers that
-describe resources the caller excluded, which is the FR-048 defect.
+describe resources the caller excluded. Right rows, wrong numbers — the defect
+this module exists to prevent.
 """
 
 from __future__ import annotations
@@ -97,16 +98,17 @@ def fold_sql(
     """
     The page statement, unexecuted, so a caller can plan it before running it.
 
-    The two steps of R25 are the two halves of the `FROM`: the subquery selects
+    The page-first fold is the two halves of the `FROM`: the subquery selects
     the page's keys in key order with the bound applied, and the join folds
     **only those keys**. At mean `source_count` 1.027 and maximum 9 a
     hundred-key page reads about a hundred and three record rows, so the cost
     tracks the page and not the scope.
 
     The trailing `ORDER BY` is not decoration. It is what keeps the aggregation
-    a streaming `GroupAggregate` over sorted input: a `HashAggregate` here is
-    blocking, folds every group before the first row comes back, and is exactly
-    the failure R25 names.
+    a streaming `GroupAggregate` over sorted input. A `HashAggregate` here
+    blocks: it folds every group before the first row comes back, so the cost
+    tracks the scope instead of the page. That is the failure this shape
+    avoids.
 
     Args:
         query: The parsed request.
@@ -191,8 +193,8 @@ def count_groups(
     The exact number of collapse keys in one scope.
 
     This is the full fold of that scope, and it is only ever run because a
-    caller asked for an exact total explicitly (contracts §1b). `guard` prices
-    it as the whole fold before it runs.
+    caller asked for an exact total explicitly. `guard` prices it as the
+    whole fold before it runs.
 
     Args:
         query: The parsed request.

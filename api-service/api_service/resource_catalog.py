@@ -138,7 +138,7 @@ def list_resources() -> list[dict[str, Any]]:
     ]
 
 
-# ── Forgiving resource filter resolution (Milestone M, FR-026/SC-019) ────────
+# ── Forgiving resource filter resolution ────────────────────────────────────
 import re
 import functools
 

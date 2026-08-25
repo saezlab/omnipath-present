@@ -600,7 +600,7 @@ def _relation_where(filters: dict[str, Any], params: list[Any]) -> str:
 
 def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
     filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else payload
-    # Selectable level (T034): when a chemical structural level is requested,
+    # Selectable level: when a chemical structural level is requested,
     # serve the collapsed edges from the materialised resolution-level table.
     chemical_level = (
         payload.get("chemicalLevel")
@@ -674,15 +674,15 @@ def search_relations(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Selectable levels (spec-003 T034/T035)
+# Selectable levels
 #
 # A "selectable level" picks how endpoints of a relation are projected. There
 # are two axes of one shared concept:
 #   * chemical_structure — the InChIKey structural-specificity level
 #     (connectivity / stereo_isotope_tautomer / full), served from the
 #     pre-materialised ``chemical_resolution_relation`` (no request-time GROUP
-#     BY). This is the chemical instance of the level mechanism (T034).
-#   * entity_layout — the gene↔protein↔state representation axis (T035). 'entity'
+#     BY). This is the chemical instance of the level mechanism.
+#   * entity_layout — the gene↔protein↔state representation axis. 'entity'
 #     (the base graph) is implemented today; gene/protein/state re-projection is
 #     the remaining build, registered here so both axes share one concept.
 # ---------------------------------------------------------------------------
@@ -845,7 +845,7 @@ def _search_chemical_level_relations(
     level: str,
 ) -> dict[str, Any]:
     """Serve relations at a chemical structural level from the materialised
-    ``chemical_resolution_relation`` table (T034)."""
+    ``chemical_resolution_relation`` table."""
     available = _chemical_level_names()
     if level not in available:
         return {
