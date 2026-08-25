@@ -57,6 +57,7 @@ _SOURCE_FACET = 'source'
 
 # The preset registry, cached per schema: it changes only when the build does.
 _REGISTRY_CACHE: dict[str, list[dict[str, Any]]] = {}
+_SPECIFICATION_CACHE: dict[str, dict[str, Any]] = {}
 
 
 @dataclass
@@ -80,6 +81,10 @@ class ResolvedScope:
     annotated_entity_ids: list[str] | None = None
     interaction_class_ids: list[int] = field(default_factory = list)
     entity_type_ids: list[int] = field(default_factory = list)
+    # The chemical classes an endpoint may carry. Ids rather than entities:
+    # `metabolite` alone names 730,668 of them, so resolving the class to an
+    # entity list would make the class gate one very large query argument.
+    chemical_class_ids: list[int] = field(default_factory = list)
     # The organism request, resolved to taxa the record can actually match.
     organism: OrganismScope = field(default_factory = OrganismScope)
     # What the named presets declare beyond their resource list: how far to
@@ -240,6 +245,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
             ),
             interaction_class_ids = _class_ids(live, classes),
             entity_type_ids = _entity_type_ids(live, filters.entity_types),
+            chemical_class_ids = _chemical_class_ids(live, filters.chemical_classes),
             organism = resolve_organisms(filters.organisms, conn = live),
             collapse_mode = _preset_collapse(presets),
             default_attributes = _preset_attributes(presets, 'default_attributes'),
@@ -252,6 +258,13 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
                 and not scope.annotated_entity_ids
             )
             or (bool(classes) and not scope.interaction_class_ids)
+            # A chemical class the vocabulary does not carry admits no entity,
+            # which is an empty answer. Reading it as no restriction would hand
+            # back the whole record under the name of a gate.
+            or (
+                bool(filters.chemical_classes)
+                and not scope.chemical_class_ids
+            )
             # A preset whose class scope and the caller's own do not overlap
             # asks for the interactions of no class at all, which is an empty
             # answer rather than an unrestricted one.
@@ -558,6 +571,37 @@ def _entity_type_ids(conn, names: list[str]) -> list[int]:
     return sorted(int(row['entity_type_id']) for row in rows)
 
 
+def _chemical_class_ids(conn, names: list[str]) -> list[int]:
+    """
+    Resolve chemical-class names to ids for the selection filter.
+
+    Args:
+        conn: An open connection.
+        names: Class names as the vocabulary spells them — `metabolite`,
+            `drug`, `lipid`, `food` — matched case-insensitively.
+
+    Returns:
+        The class ids, sorted. An empty list for no filter, and also for names
+        the vocabulary does not carry, which `resolve` then reads as an empty
+        scope rather than as no restriction.
+    """
+
+    if not names:
+
+        return []
+
+    rows = conn.execute(
+        f"""
+        SELECT chemical_class_id
+        FROM {SEARCH_SCHEMA}.vocab_chemical_class
+        WHERE lower(name) = ANY(%s::text[])
+        """,
+        ([name.lower() for name in names],),
+    ).fetchall()
+
+    return sorted(int(row['chemical_class_id']) for row in rows)
+
+
 def _refuse_unknown(parameter: str, unknown: list[str], carried: list[str]) -> None:
     """
     Refuse a filter value the build carries nothing under.
@@ -736,6 +780,58 @@ def _annotated_entities(values: list[str], conn) -> list[str] | None:
     return entities
 
 
+def dataset_specifications(conn) -> dict[str, dict[str, Any]]:
+    """
+    The full spec of every registered dataset, for discovery.
+
+    A consumer has to be able to read what a dataset *is* over the wire — what
+    kind of thing it is, what it selects, what it always returns and how it
+    folds — or it is coupled to the build's source tree. The matview-era
+    columns are deliberately not among them: they describe a relation, they are
+    on their way out, and a client that learns to read them breaks when they go.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        `{name: spec}`, one entry per registered dataset.
+    """
+
+    if SEARCH_SCHEMA in _SPECIFICATION_CACHE:
+
+        return _SPECIFICATION_CACHE[SEARCH_SCHEMA]
+
+    rows = conn.execute(
+        f"""
+        SELECT name, kind, included_sources, interaction_class_scope,
+               default_attributes, mandatory_attributes, collapse_mode,
+               labels, curation, attribute_sources, composition
+        FROM {SEARCH_SCHEMA}.network_registry
+        """,
+    ).fetchall()
+
+    _SPECIFICATION_CACHE[SEARCH_SCHEMA] = {
+        row['name']: {
+            'kind': row['kind'],
+            'included_sources': list(row['included_sources'] or []),
+            'interaction_class_scope': list(row['interaction_class_scope'] or []),
+            'default_attributes': list(row['default_attributes'] or []),
+            'mandatory_attributes': list(row['mandatory_attributes'] or []),
+            'collapse_mode': row['collapse_mode'],
+            'labels': row['labels'],
+            'curation': row['curation'],
+            'attribute_sources': row['attribute_sources'],
+            # The recipe itself, not a flag: a caller reproducing the dataset
+            # from its resource list alone would get a different row set, and
+            # this is where they can see why.
+            'composition': row['composition'],
+        }
+        for row in rows
+    }
+
+    return _SPECIFICATION_CACHE[SEARCH_SCHEMA]
+
+
 def dataset_registry(conn) -> list[dict[str, Any]]:
     """
     What every registered preset would claim, read once per process.
@@ -791,6 +887,7 @@ def forget_registry() -> None:
     """
 
     _REGISTRY_CACHE.clear()
+    _SPECIFICATION_CACHE.clear()
 
 
 def dataset_tags(

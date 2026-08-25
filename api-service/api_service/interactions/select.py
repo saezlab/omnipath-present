@@ -239,6 +239,22 @@ def record_filter(
         )
         args.append(list(resolved.entity_type_ids))
 
+    if resolved.chemical_class_ids:
+
+        # The same semi-join shape as the entity type above, and for the same
+        # reason: the classification is a column of the entity, so it cannot be
+        # asserted by a resource. A protein carries no chemical class at all,
+        # so gating on either end gates the small-molecule end of a
+        # compound-protein pair without having to say which end that is.
+        clauses.append(
+            f"""EXISTS (
+              SELECT 1 FROM {SEARCH_SCHEMA}.entity e
+              WHERE e.entity_id IN (r.subject_entity_id, r.object_entity_id)
+                AND e.chemical_class_id = ANY(%s::smallint[])
+            )""",
+        )
+        args.append(list(resolved.chemical_class_ids))
+
     if filters.curation_flags:
 
         clauses.append('r.curation_flags && %s::text[]')

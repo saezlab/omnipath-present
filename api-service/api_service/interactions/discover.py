@@ -134,7 +134,7 @@ def parameter_values(
 
     return {
         'fact_table': RECORD_TABLE,
-        'scope': _scope_block(resolved),
+        'scope': _scope_block(resolved, conn),
         'parameter_groups': {
             group: list(names) for group, names in params.PARAMETER_GROUPS.items()
         },
@@ -307,7 +307,7 @@ def statistics(
 
     answer: dict[str, Any] = {
         'fact_table': RECORD_TABLE,
-        'scope': _scope_block(resolved),
+        'scope': _scope_block(resolved, conn),
         'total': int(total),
         'total_is_estimate': is_estimate,
         'total_source': source,
@@ -777,15 +777,18 @@ def _classes(conn) -> dict[int, dict[str, str]]:
     }
 
 
-def _scope_block(resolved: ResolvedScope) -> dict[str, Any]:
+def _scope_block(resolved: ResolvedScope, conn = None) -> dict[str, Any]:
     """
     What the filters resolved to, said out loud beside the answer.
 
     Args:
         resolved: The resolved scope.
+        conn: An open connection, for the datasets' declared recipes.
 
     Returns:
-        The resources, exclusions, presets and organism the counts hold under.
+        The resources, exclusions, presets and organism the counts hold under,
+        and — where a named dataset is assembled rather than scoped — a warning
+        that these counts are of its declared scope and not of what it returns.
     """
 
     block: dict[str, Any] = {
@@ -799,6 +802,28 @@ def _scope_block(resolved: ResolvedScope) -> dict[str, Any]:
     if resolved.organism.asked:
 
         block['organism'] = resolved.organism.as_dict()
+
+    if conn is not None and resolved.preset_names:
+
+        # A dataset with a recipe reaches fewer rows than its resource list
+        # suggests: the recipe restricts some components and excludes others,
+        # and these counts come from the resource facet, which cannot express
+        # either. Reporting them without saying so would list a resource among
+        # the reachable values of a dataset that returns none of its rows.
+        specifications = _scope.dataset_specifications(conn)
+        assembled = sorted(
+            name for name in resolved.preset_names
+            if (specifications.get(name) or {}).get('composition')
+        )
+
+        if assembled:
+
+            block['assembled_datasets'] = assembled
+            block['note'] = (
+                'these counts hold for the declared scope of '
+                f'{", ".join(assembled)}; each is assembled from restricted '
+                'components, so it returns a subset of what is counted here'
+            )
 
     return block
 
@@ -821,8 +846,20 @@ def _resource_values(query, resolved, conn, facets, profile):
 
 def _dataset_values(query, resolved, conn, facets, profile):
 
+    # The counts alone answer "which datasets can this scope still reach"; they
+    # do not answer "what is this dataset". A consumer that has to be told the
+    # second out of band is coupled to the build's source tree, so the whole
+    # registered spec travels with each name — what it selects, what it always
+    # returns, how it folds, and the recipe where it has one.
+    specifications = _scope.dataset_specifications(conn)
+    entry = _counted(profile['datasets'], 'value')
+
+    for item in entry['values']:
+
+        item.update(specifications.get(item['value'], {}))
+
     return {
-        **_counted(profile['datasets'], 'value'),
+        **entry,
         'source': 'network_registry',
         'unit': 'record_rows',
     }
@@ -881,6 +918,32 @@ def _entity_type_values(query, resolved, conn, facets, profile):
         'source': 'facet_relation_bitmap',
         'unit': 'record_rows',
         'note': 'the prefix alone answers too — `protein` reaches `Protein:MI:0326`',
+    }
+
+
+def _chemical_class_values(query, resolved, conn, facets, profile):
+
+    rows = conn.execute(
+        f"""
+        SELECT vc.name AS value, count(*) AS entities
+        FROM {SEARCH_SCHEMA}.entity e
+        JOIN {SEARCH_SCHEMA}.vocab_chemical_class vc
+          ON vc.chemical_class_id = e.chemical_class_id
+        GROUP BY 1
+        """
+    ).fetchall()
+
+    return {
+        **_counted({row['value']: row['entities'] for row in rows}, 'value'),
+        'source': 'entity',
+        # Entities and not record rows, and the difference is worth naming: the
+        # classification belongs to the molecule, so the count says how many
+        # molecules carry the class, not how many interactions they appear in.
+        'unit': 'entities',
+        'note': (
+            'the class of an endpoint, read off the entity; a gate on it '
+            'admits an interaction with a matching end at either side'
+        ),
     }
 
 
@@ -1097,6 +1160,7 @@ _ENTRIES = {
     'organisms': _organism_values,
     'entities': _entity_values,
     'entity_types': _entity_type_values,
+    'chemical_classes': _chemical_class_values,
     'entity_annotations': _annotation_values,
     'curation_flags': _curation_flag_values,
     'sign': _flag_values(

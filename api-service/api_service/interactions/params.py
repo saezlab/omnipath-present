@@ -31,6 +31,7 @@ PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
         'organisms',
         'entities',
         'entity_types',
+        'chemical_classes',
         'entity_annotations',
         'curation_flags',
         'sign',
@@ -292,6 +293,14 @@ class Filters:
     # integers here would silently drop every name a caller could write.
     organisms: list[str] = field(default_factory = list)
     entity_types: list[str] = field(default_factory = list)
+    # The chemical classification of an endpoint — `metabolite`, `drug`,
+    # `lipid`, `food`. It sits beside `entity_types` because it is the same
+    # kind of predicate: a property of the entity, resolved to ids once and
+    # applied as a semi-join over both ends. It is a separate parameter and not
+    # a value of `entity_types` because the two are orthogonal — every one of
+    # these is a chemical, and a caller asking for metabolites is not asking
+    # about the entity's type at all.
+    chemical_classes: list[str] = field(default_factory = list)
     entity_annotations: list[str] = field(default_factory = list)
     curation_flags: list[str] = field(default_factory = list)
     sign: bool | None = None
@@ -442,6 +451,9 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         entities = _strings(pick('entities', 'entity')),
         organisms = _strings(pick('organisms', 'organism')),
         entity_types = _strings(pick('entity_types', 'entityTypes')),
+        chemical_classes = _strings(
+            pick('chemical_classes', 'chemicalClasses', 'chemical_class'),
+        ),
         entity_annotations = _strings(
             pick('entity_annotations', 'entityAnnotations'),
         ),
