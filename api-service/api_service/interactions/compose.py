@@ -183,6 +183,99 @@ def resolve_payload(payload: dict[str, Any], *, conn = None) -> Node:
         return _node_from(payload or {}, live)
 
 
+def for_presets(names: Sequence[str], *, conn) -> Any | None:
+    """
+    The composition behind the datasets a request named, or None.
+
+    A dataset that stores a recipe must be *served* by it, or the recipe is
+    decoration: `/interactions/metalinksdb` would resolve the union of the
+    dataset's resources and keep neither the mechanism restriction nor the
+    exclusion, returning several times the rows under the dataset's name. So
+    this is the lookup the engine does before it treats a named dataset as a
+    plain resource scope.
+
+    Args:
+        names: The preset names the request resolved to.
+        conn: An open connection.
+
+    Returns:
+        The composition — a union where several named datasets carry one — or
+        None when none of them stores a recipe, which is the common case.
+    """
+
+    nodes = []
+
+    for name in names:
+
+        node = _preset(name, conn)
+
+        if isinstance(node, Node):
+
+            nodes.append(node)
+
+    if not nodes:
+
+        return None
+
+    return nodes[0] if len(nodes) == 1 else union(nodes)
+
+
+def layers(node: Any) -> list[str]:
+    """
+    The annotation layers a composition's `annotate` steps ask for.
+
+    Args:
+        node: The composition.
+
+    Returns:
+        The layer names, in tree order, without duplicates.
+    """
+
+    if isinstance(node, Component):
+
+        return []
+
+    found = [name for child in node.children for name in layers(child)]
+
+    if node.operation == 'annotate' and node.layer:
+
+        found.append(node.layer)
+
+    return list(dict.fromkeys(found))
+
+
+def record_filter_for(node: Any, *, conn) -> RecordFilter | None:
+    """
+    The record predicate a composition resolves to, or None where it has one.
+
+    Args:
+        node: The composition.
+        conn: An open connection.
+
+    Returns:
+        One boolean expression over the record alias `r`, or None when the
+        composition holds a component that has already been folded and so is a
+        row set rather than a filter.
+    """
+
+    inner = node
+
+    # A trailing `collapse` or `annotate` is not part of the selection: the
+    # first is the fold the engine performs anyway and the second decorates the
+    # rows it produces. Both are unwrapped here rather than admitted by
+    # `_scopable`, which is what stops a *union of collapsed components* being
+    # treated as one filter — the wrong order, silently repaired.
+    while isinstance(inner, Node) and inner.operation in ('collapse', 'annotate'):
+
+        inner = inner.children[0]
+
+    if not _scopable(inner):
+
+        return None
+
+    return _record_filter(inner, conn)
+
+
 def preset(name: str, *, conn = None) -> Any:
     """
     One named preset as a composition.

@@ -30,6 +30,7 @@ from . import nodes as _nodes
 from . import params as _params
 from . import project as _projection
 from . import scope as _scope
+from . import select as _select
 from . import shape as _shape
 
 _log = logging.getLogger(__name__)
@@ -88,16 +89,36 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
     with _scope.connection(conn) as live:
 
         resolved = _scope.resolve(query, conn = live)
+        # A named dataset may store a recipe rather than a resource list, and
+        # then the recipe is what the dataset *is*. Resolving it to the union
+        # of its resources would drop the restrictions that define it — here,
+        # several times the rows under the dataset's own name.
+        recipe = _compose.for_presets(resolved.preset_names, conn = live)
+
+        if recipe is not None:
+
+            resolved.mandatory_attributes = list(dict.fromkeys(
+                [*resolved.mandatory_attributes, *_compose.layers(recipe)]
+            ))
+
         _apply_preset(query, resolved)
-        estimate = _guard.check(query, resolved, conn = live)
-        rows = _fold.fold_rows(query, resolved, conn = live)
+        record = _recipe_filter(recipe, query, resolved, live)
+        # The guardrail is priced without the long-tail predicates, because
+        # what it needs to know is how many rows one of them would be applied
+        # to. Handing it the predicate it is measuring would answer with the
+        # rows that survive it.
+        priced = _recipe_filter(recipe, query, resolved, live, long_tail = False)
+        estimate = _guard.check(query, resolved, conn = live, record = priced)
+        rows = _fold.fold_rows(query, resolved, conn = live, record = record)
         interactions = _project_page(rows, query, live, resolved)
 
         if query.exact_total:
 
             # An exact count is the full fold of the scope and is only run
             # because the caller asked; the guardrail has already priced it.
-            total = _fold.count_groups(query, resolved, conn = live)
+            total = _fold.count_groups(
+                query, resolved, conn = live, record = record,
+            )
 
         else:
 
@@ -145,6 +166,44 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         answer['estimate'] = estimate.as_dict()
 
     return answer
+
+
+def _recipe_filter(recipe, query, resolved, conn, *, long_tail = True):
+    """
+    The record predicate for a request whose dataset stores a recipe.
+
+    The caller's own filters are intersected with the recipe rather than
+    replacing it: a recipe narrows the dataset and a filter narrows the
+    request, and both hold at once. The intersection is safe in the other
+    direction too, because the recipe's components are drawn from the
+    dataset's own resource scope — so the scope contributes nothing the recipe
+    has not already said, and contradicts nothing it has.
+
+    Args:
+        recipe: The composition, or None for a dataset that is one query.
+        query: The parsed request.
+        resolved: The resolved scope.
+        conn: An open connection.
+        long_tail: Whether the caller's own predicates on the attribute
+            document belong in the expression. `guard` wants them out.
+
+    Returns:
+        The combined predicate, or None where the request has no recipe.
+    """
+
+    if recipe is None:
+
+        return None
+
+    predicate = _compose.record_filter_for(recipe, conn = conn)
+
+    if predicate is None:
+
+        return None
+
+    return predicate.combined(
+        _select.record_filter(query, resolved, long_tail = long_tail), 'AND',
+    )
 
 
 def _discovery(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
