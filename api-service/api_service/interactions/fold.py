@@ -60,8 +60,8 @@ __all__ = [
     'encode_cursor',
 ]
 
-# data-model §3b, in the order the collapsed row carries them. Each entry is an
-# aggregate over the record rows the scope kept.
+# The summary columns of the collapsed row, in the order it carries them.
+# Each entry is an aggregate over the record rows the scope kept.
 _PROJECTION = """array_agg(DISTINCT contributor.name) AS sources,
       count(DISTINCT r.source_id)::int AS source_count,
       bool_or(r.is_directed) AS is_directed,
@@ -162,7 +162,7 @@ def fold_rows(
         record: RecordFilter | None = None,
 ) -> list[dict[str, Any]]:
     """
-    The collapsed rows of one page, in the shape of data-model §3b.
+    The collapsed rows of one page.
 
     Args:
         query: The parsed request.

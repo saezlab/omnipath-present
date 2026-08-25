@@ -35,8 +35,9 @@ from .params import InteractionQuery
 
 _log = logging.getLogger(__name__)
 
-# data-model §8a. The ordinal levels `pypath/internals/license.py` models, so a
-# license question is a range predicate rather than a name match.
+# The ordinal levels `data_source_license` stores, in the form
+# `pypath/internals/license.py` models, so a license question is a range
+# predicate rather than a name match.
 LICENSE_LEVELS: dict[str, dict[str, int]] = {
     'purpose': {
         'ignore': 0, 'academic': 5, 'nonprofit': 10,

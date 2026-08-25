@@ -205,7 +205,7 @@ def test_an_exact_total_is_exact_for_a_narrow_scope(client, narrow_scope_keys):
 
 
 def test_an_exact_total_passes_through_the_guardrail(db):
-    """§4: an exact count is priced as the full fold it is, before it runs."""
+    """An exact count is priced as the full fold it is, before it runs."""
 
     params = _engine('params')
     scope = _engine('scope')

@@ -274,7 +274,7 @@ def test_a_narrow_scope_does_not_buy_a_folded_sort(client, column):
 
 
 def test_the_guard_refuses_a_folded_sort_before_the_query_runs(db):
-    """§4: estimate then refuse, and the refusal is an exception, not a row."""
+    """Estimate then refuse, and the refusal is an exception, not a row."""
 
     params = _engine('params')
     scope = _engine('scope')
@@ -363,7 +363,7 @@ def test_having_plans_as_group_aggregate(db, minimum):
 
 @pytest.mark.parametrize('minimum', HAVING_LEVELS)
 def test_having_response_carries_the_guardrail_estimate(client, db, minimum):
-    """§4(d): the histogram prices the request, and the caller can see it."""
+    """The histogram prices the request, and the caller can see it."""
 
     body = client.post('/interactions', json = _having_payload(minimum)).json()
     estimate = body.get('estimate')

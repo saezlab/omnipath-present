@@ -13,8 +13,8 @@ from typing import Any
 
 SEARCH_SCHEMA = os.getenv('OMNIPATH_PG_SCHEMA', 'public')
 
-# Exclude the controlled-vocabulary term entity type from entity-facing counts,
-# consistent with the derived tables (research §2 / A).
+# Exclude the controlled-vocabulary term entity type from entity-facing
+# counts, consistent with the derived tables.
 _CV_TERM_ENTITY_TYPE = 'Cv Term:OM:0012'
 
 

@@ -153,8 +153,8 @@ def run(node: Any, *, conn = None) -> list[dict[str, Any]]:
         conn: An open connection, or None to open one.
 
     Returns:
-        Rows in the shape of data-model §3b, so a composition and a plain query
-        are comparable row for row.
+        Collapsed rows, one per ordered `(subject, object, class)`, so a
+        composition and a plain query are comparable row for row.
     """
 
     with _scope.connection(conn) as live:

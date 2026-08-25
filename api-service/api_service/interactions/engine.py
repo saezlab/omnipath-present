@@ -34,8 +34,8 @@ from . import shape as _shape
 
 _log = logging.getLogger(__name__)
 
-# The row keys of data-model §3b that carry an entity id or a uuid; rendered as
-# text so a response is JSON without a custom encoder.
+# The collapsed-row keys that carry an entity id or a uuid; rendered as text
+# so a response is JSON without a custom encoder.
 _UUID_KEYS = ('subject_entity_id', 'object_entity_id', 'interaction_id')
 
 _CLASS_NAMES: dict[str, dict[int, dict[str, Any]]] = {}
@@ -320,7 +320,8 @@ def _project(
     Render one collapsed row for the response.
 
     Args:
-        row: The folded row, in the shape of data-model §3b.
+        row: The folded row: one `(subject, object, class)` key with the
+            summaries recomputed over the resources the scope kept.
         query: The parsed request, for the projection parameters.
         conn: An open connection, for the class vocabulary.
         index: The page's per-node lookup, keyed by entity id.

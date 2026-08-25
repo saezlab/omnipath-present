@@ -56,9 +56,9 @@ from .select import (
 
 _log = logging.getLogger(__name__)
 
-# data-model §12. Nine rows: one per observed `source_count` level, with the
-# number of collapse keys at that level. The derive writes it; where it is
-# absent the same nine rows are computed once and the estimate says so.
+# Nine rows: one per observed `source_count` level, with the number of
+# collapse keys at that level. The derive writes it; where it is absent the
+# same nine rows are computed once and the estimate says so.
 HISTOGRAM_TABLE = 'interaction_source_count_histogram'
 
 # Cached per schema. The computed fallback is a full fold (about four seconds
@@ -634,9 +634,10 @@ def _qualifying(
 
         lower = int(bounds.get('min') or 0)
         upper = int(bounds['max']) if bounds.get('max') is not None else None
-        # data-model §12 stores per-level values; the predicate is cumulative,
-        # so the guard sums the levels the predicate admits. Reading the table's
-        # cumulative-looking row as a per-level one is the trap it sets.
+        # `interaction_source_count_histogram` stores per-level values; the
+        # predicate is cumulative, so the guard sums the levels the predicate
+        # admits. Reading the table's cumulative-looking row as a per-level
+        # one is the trap it sets.
         matched = sum(
             count for level, count in levels.items()
             if level >= lower and (upper is None or level <= upper)
@@ -770,7 +771,8 @@ def _computed_histogram_sql() -> str:
     The fallback histogram, folded from the record itself.
 
     Returns:
-        A statement producing the same nine rows data-model §12 records.
+        A statement producing the same nine rows that
+        `interaction_source_count_histogram` holds.
     """
 
     from .select import record_source

@@ -33,9 +33,9 @@ from ..graph import SEARCH_SCHEMA
 from .params import InteractionQuery
 from .scope import ResolvedScope
 
-# data-model §3a. One row per ordered `(subject, object, class)` **and
-# contributing resource** — the record the fold collapses, and the only
-# interaction table this cycle's query engine reads.
+# One row per ordered `(subject, object, class)` **and contributing
+# resource** — the record the fold collapses, and the only interaction table
+# this cycle's query engine reads.
 RECORD_TABLE = 'interaction_fact_resource'
 
 # Leads on exactly the collapse key columns, so an ordered read of it is the
