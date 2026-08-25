@@ -1,4 +1,4 @@
-"""Chemical resolution-level serving + selectable-level mechanism (T034/T035).
+"""Chemical resolution-level serving, and the selectable-level mechanism.
 
 Mock-based tests assert the param plumbing and routing; the integration tests
 (gated on ``DATABASE_URL``) run the real SQL against a built database's

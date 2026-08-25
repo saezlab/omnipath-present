@@ -1,10 +1,12 @@
-"""The composition order rule, asserted as a failure and as a fix (T020l).
+"""The composition order rule, asserted as a failure and as a fix.
 
-FR-048 says the per-resource summaries describe the scope that produced them.
-R19 removed the way that used to break between tables. R26 reintroduces the
-same defect between **components**: collapsing each component and then unioning
-them emits one row per component for an interaction several components report,
-each carrying summaries folded over its own component's resources.
+The per-resource summaries must describe the scope that produced them, never a
+wider one. Serving a narrow scope from a precomputed all-resources collapse
+used to break that between tables, and the build no longer stores one. The
+composition engine can reintroduce the same defect between **components**.
+Collapsing each component and then unioning them emits one row per component
+for an interaction that several components report. Each row carries summaries
+folded over its own component's resources alone.
 
 The rule — collapse **after** the union, over the union's own resolved scope —
 is otherwise held by a comment, so this asserts the wrong order actually
@@ -15,7 +17,7 @@ had no order at all.
 The same rule in its second form: `exclude` runs **before** the collapse, so an
 excluded resource contributes no row and no count. Dropping it afterwards
 leaves its contribution inside `source_count`, `references` and the sign flags,
-which is the FR-048 defect under another name ("retained for provenance" means
+which is the same defect under another name ("retained for provenance" means
 the rows stay in `interaction_fact_resource` for another query to find, not
 that the resource appears in this composition's provenance).
 
@@ -28,7 +30,7 @@ Expected of the engine (`api_service/interactions/compose.py`):
     annotate(node: Node, layer: str) -> Node
     run(node: Node, *, conn = None) -> list[dict]
 
-`run` returns the collapsed shape of data-model §3b keyed by entity ids, the
+`run` returns the collapsed shape keyed by entity ids, the
 same shape `fold.fold_rows` returns, so a composition and a query are
 comparable row for row.
 
@@ -50,7 +52,8 @@ pytestmark = pytest.mark.skipif(
     not DATABASE_URL, reason='DATABASE_URL not set; the composition test needs a built DB'
 )
 
-# The FR-048 fixture of T020d, split across two components that both report it.
+# A key several resources report, split across two components that both
+# report it.
 # On dev4 2026-08-24 the key carries chembl, drugcentral, guidetopharma and
 # stitch; the two components below take three of the four between them.
 FIXTURE_SUBJECT = '70e58f8b-e6bf-eb86-e03f-e58428627c09'
@@ -73,7 +76,7 @@ def _engine(name: str):
     except ModuleNotFoundError as exc:
         pytest.fail(
             f'the interaction query engine has no `{name}` module '
-            f'(expected api_service/interactions/{name}.py, T020k): {exc}'
+            f'(expected api_service/interactions/{name}.py): {exc}'
         )
 
 
@@ -159,7 +162,7 @@ def test_collapsing_before_the_union_emits_one_row_per_component(db):
 
 
 def test_collapsing_before_the_union_folds_each_row_over_its_own_component(db):
-    """Each split row carries its component's numbers — the FR-048 defect."""
+    """A split row carries its component's numbers, not the whole scope's."""
 
     compose = _compose()
     collapse = _member(compose, 'collapse', 'compose.collapse(node) -> Node')
@@ -234,7 +237,7 @@ def test_the_two_orders_disagree(db):
     assert len(wrong) != len(right)
     assert max(row['source_count'] for row in wrong) < right[0]['source_count'], (
         'no component-local fold can reach the union\'s source_count, which is '
-        'exactly why the order carries FR-048'
+        'exactly why the collapse must run after the union'
     )
 
 

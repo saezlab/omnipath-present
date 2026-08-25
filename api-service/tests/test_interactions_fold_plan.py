@@ -1,15 +1,15 @@
-"""The page-first fold plan shape (T020c, FR-051, SC-024, research R25).
+"""The page-first fold plan shape.
 
-R24 removed `interaction_fact_combined`, so every interaction query folds
-`interaction_fact_resource` for its own scope — including the unscoped one.
-R25 binds the shape that makes it affordable: select the page's group keys
-`(subject_entity_id, object_entity_id, interaction_class_id)` in key order from
-`interaction_fact_resource_collapse_idx`, then fold **only those keys**.
+The build no longer precomputes the all-resources collapse, so every
+interaction query folds `interaction_fact_resource` for its own scope —
+including the unscoped one. One shape makes that affordable: select the page's
+group keys `(subject_entity_id, object_entity_id, interaction_class_id)` in key
+order from `interaction_fact_resource_collapse_idx`, then fold **only those
+keys**.
 
 This asserts the **plan shape**, never the latency. A blocking `HashAggregate`
-over the whole scope is fast enough to pass a timing test on an idle machine
-and is exactly the failure mode R25 identifies, so the number alone would pass
-where the design fails.
+over the whole scope is fast enough to pass a timing test on an idle machine,
+so the number alone would pass where the design fails.
 
 Expected of the engine (`api_service/interactions/`):
 
@@ -41,7 +41,7 @@ pytestmark = pytest.mark.skipif(
 RECORD_TABLE = 'interaction_fact_resource'
 COLLAPSE_INDEX = 'interaction_fact_resource_collapse_idx'
 
-# data-model §3b, measured on dev4: mean source_count 1.0271, maximum 9. A page
+# Measured on dev4: mean source_count 1.0271, maximum 9. A page
 # of N keys therefore folds at most 9N record rows and about 1.03N in practice.
 MAX_SOURCE_COUNT = 9
 
@@ -54,7 +54,7 @@ def _engine(name: str):
     except ModuleNotFoundError as exc:
         pytest.fail(
             f'the interaction query engine has no `{name}` module '
-            f'(expected api_service/interactions/{name}.py, T020h-T020i): {exc}'
+            f'(expected api_service/interactions/{name}.py): {exc}'
         )
 
 
@@ -152,7 +152,7 @@ def _widest_read(plan: dict[str, Any]) -> float:
 
 
 def test_unscoped_first_page_folds_through_group_aggregate(db):
-    """FR-051: the fold streams, so the outer LIMIT can stop it."""
+    """The fold streams, so the outer LIMIT can stop it."""
 
     plan = _page_plan(db, {'limit': 100})
 
@@ -163,20 +163,20 @@ def test_unscoped_first_page_folds_through_group_aggregate(db):
 
 
 def test_unscoped_first_page_never_reaches_hash_aggregate(db):
-    """SC-024: a hash aggregation is blocking and folds the whole scope."""
+    """A hash aggregation is blocking, and folds the whole scope."""
 
     aggregates = _aggregates(plan := _page_plan(db, {'limit': 100}))
 
     assert 'HashAggregate' not in aggregates, (
         f'HashAggregate is blocking: it folds every group in scope before the '
-        f'first row is returned, which is the failure R25 names. Plan '
-        f'aggregates: {aggregates}'
+        f'first row is returned, so the cost tracks the scope and not the '
+        f'page. Plan aggregates: {aggregates}'
     )
     assert plan.get('Node Type') != 'HashAggregate'
 
 
 def test_unscoped_first_page_reads_the_collapse_index_in_key_order(db):
-    """R25 step 1: key selection is an ordered read of the collapse index."""
+    """First step: key selection is an ordered read of the collapse index."""
 
     plan = _page_plan(db, {'limit': 100})
     reads = _index_reads(plan, COLLAPSE_INDEX)
@@ -189,7 +189,7 @@ def test_unscoped_first_page_reads_the_collapse_index_in_key_order(db):
 
 
 def test_index_entries_read_are_on_the_order_of_the_page(db, record_rows):
-    """R25 step 2: the fold costs the page, not the scope."""
+    """Second step: the fold costs the page, not the scope."""
 
     limit = 100
     plan = _page_plan(db, {'limit': limit})
@@ -221,7 +221,7 @@ def test_the_page_bound_scales_with_the_page_and_not_with_the_scope(db, record_r
 
 
 def test_a_narrow_scope_folds_through_group_aggregate_too(db):
-    """SC-024 binds every scope; `neuronchat` is the narrowest on dev4."""
+    """Every scope streams, the narrowest included: `neuronchat` on dev4."""
 
     aggregates = _aggregates(_page_plan(db, {'filters': {'resources': ['neuronchat']}, 'limit': 100}))
 

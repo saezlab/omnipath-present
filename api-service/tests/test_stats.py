@@ -1,7 +1,7 @@
 """Integration tests for the statistics API (Milestone H).
 
 Counts from /stats/* must equal direct queries against the same precomputed
-tables in the same build (SC-008). Needs DATABASE_URL pointing at a built DB and
+tables in the same build. Needs DATABASE_URL pointing at a built DB and
 the api-service deps (fastapi, psycopg). Skipped when DATABASE_URL is unset.
 
     DATABASE_URL=postgresql://omnipath:omnipath@localhost:5404/omnipath \

@@ -1,14 +1,14 @@
-"""`total` is an estimate, and it says so (T020g, FR-053, SC-026, research R25).
+"""`total` is an estimate, and it says so.
 
 An exact count of collapsed rows in a scope is a full fold over that scope
 under another name, and `facet_relation_bitmap` cannot answer it either — the
 bitmaps carry relation ids per source, at a different grain from the collapse
 key. So every response labels its `total` as estimated.
 
-**The unscoped response is not an exception.** R24 removed the stored table
-that used to answer it with a `count(*)`, so its `total` is an estimate like
-every other. An unlabelled estimate is the kind of quietly wrong number FR-048
-exists to prevent, which is why the label is asserted and not the number.
+**The unscoped response is not an exception.** The build no longer stores the
+precomputed collapse that used to answer it with a `count(*)`, so its `total`
+is an estimate like every other. An unlabelled estimate is a quietly wrong
+number, which is why the label is asserted and not the number.
 
 An exact count stays available as an **explicit** request that passes through
 the cost governor, and a deep `offset` is refused in favour of the `cursor`
@@ -77,7 +77,7 @@ def _engine(name: str):
     except ModuleNotFoundError as exc:
         pytest.fail(
             f'the interaction query engine has no `{name}` module '
-            f'(expected api_service/interactions/{name}.py, T020h-T020j): {exc}'
+            f'(expected api_service/interactions/{name}.py): {exc}'
         )
 
 
@@ -150,14 +150,14 @@ def _body(response) -> str:
 
 @pytest.mark.parametrize('name', sorted(SCOPES))
 def test_every_response_labels_its_total(client, name):
-    """SC-026: the label is a required field, not an optional annotation."""
+    """The label is a required field, not an optional annotation."""
 
     body = client.post('/interactions', json = SCOPES[name]).json()
 
     assert 'total' in body, f'{name}: response carries no total ({sorted(body)})'
     assert 'total_is_estimate' in body, (
         f'{name}: `total` is unlabelled. An estimate that does not say it is '
-        f'one is the quietly wrong number FR-048 exists to prevent'
+        f'one is quietly wrong'
     )
     assert isinstance(body['total_is_estimate'], bool)
 
@@ -175,7 +175,7 @@ def test_an_unrequested_total_is_an_estimate(client, name):
 
 
 def test_the_unscoped_total_is_an_estimate_too(client):
-    """R24 removed the stored table that answered this one with a count(*)."""
+    """No stored table answers this one with a `count(*)` any more."""
 
     body = client.post('/interactions', json = {'limit': 10}).json()
 
@@ -247,7 +247,7 @@ def test_a_deep_offset_is_refused(client):
 
 
 def test_the_deep_offset_refusal_names_the_cursor(client):
-    """FR-009: the refusal names the alternative that is cheap."""
+    """The refusal names the alternative that is cheap."""
 
     body = _body(client.post('/interactions', json = {'limit': 100, 'offset': DEEP_OFFSET}))
 

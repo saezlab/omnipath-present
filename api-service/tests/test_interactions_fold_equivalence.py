@@ -1,15 +1,16 @@
-"""The live fold is the collapse (T020d, FR-048, research R24/R25).
+"""The live fold is the collapse.
 
-R24 deleted `interaction_fact_combined`. The claim that replaces it is that
-folding `interaction_fact_resource` at query time reproduces the removed table
-exactly, so the collapse was a cache and not a computation. That claim is a row
-count, and it is read from **the derive's own record** rather than pinned here,
-because the number moves with the build.
+The build no longer stores `interaction_fact_combined`. The claim that replaces
+it is that folding `interaction_fact_resource` at query time reproduces the
+removed table exactly, so the collapse was a cache and not a computation. That
+claim is a row count, and it is read from **the derive's own record** rather
+than pinned here, because the number moves with the build.
 
-The second half is the FR-048 fixture T013e verified against the deleted
-routine, and which moves here with the fold: a four-resource drug-target row
-reads all four resources unscoped, and scoped to one resource reports **that
-resource's numbers** — not the wider fold's, selected by `sources && ARRAY[...]`.
+The second half is the summary-recomputation fixture, verified against the
+deleted routine before it moved here with the fold: a four-resource drug-target
+row reads all four resources unscoped, and scoped to one resource reports
+**that resource's numbers** — not the wider fold's, selected by
+`sources && ARRAY[...]`.
 
 Expected of the engine (`api_service/interactions/`):
 
@@ -18,7 +19,7 @@ Expected of the engine (`api_service/interactions/`):
     fold.fold_rows(query, resolved, *, conn = None) -> list[dict]
     fold.count_groups(query, resolved, *, conn = None) -> int
 
-`fold_rows` returns the collapsed shape of data-model §3b keyed by entity ids —
+`fold_rows` returns the collapsed shape keyed by entity ids —
 `subject_entity_id`, `object_entity_id`, `interaction_class_id`, `sources`,
 `source_count`, `is_directed`, `is_stimulation`, `is_inhibition`,
 `sign_source_count`, `direction_source_count`, `reference_pubmed_ids`,
@@ -42,8 +43,8 @@ pytestmark = pytest.mark.skipif(
     not DATABASE_URL, reason='DATABASE_URL not set; the fold-equivalence test needs a built DB'
 )
 
-# The FR-048 fixture, pinned by entity id so it survives a rebuild of the
-# surrogate keys. Found on dev4 2026-08-24: a chemical (InChIKey
+# The summary-recomputation fixture, pinned by entity id so it survives a
+# rebuild of the surrogate keys. Found on dev4 2026-08-24: a chemical (InChIKey
 # VKHAHZOOUSRJNA-GCNJZUOMSA-N) acting on NCBI Gene 5241, class `orthosteric`.
 FIXTURE_SUBJECT = '70e58f8b-e6bf-eb86-e03f-e58428627c09'
 FIXTURE_OBJECT = '18d34c29-41d4-4d67-546a-75b45f5bc336'
@@ -67,7 +68,7 @@ def _engine(name: str):
     except ModuleNotFoundError as exc:
         pytest.fail(
             f'the interaction query engine has no `{name}` module '
-            f'(expected api_service/interactions/{name}.py, T020h-T020i): {exc}'
+            f'(expected api_service/interactions/{name}.py): {exc}'
         )
 
 
@@ -119,7 +120,7 @@ def _folded(db, payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _fixture_row(db, resources: list[str] | None) -> dict[str, Any]:
-    """The pinned FR-048 row, folded over the given resource scope."""
+    """The pinned fixture row, folded over the given resource scope."""
 
     payload: dict[str, Any] = {
         'filters': {
@@ -139,7 +140,7 @@ def _fixture_row(db, resources: list[str] | None) -> dict[str, Any]:
     ]
 
     assert len(matching) == 1, (
-        f'the pinned FR-048 key must fold to exactly one row for scope '
+        f'the pinned fixture key must fold to exactly one row for scope '
         f'{resources!r}; got {len(matching)}'
     )
 
@@ -147,7 +148,7 @@ def _fixture_row(db, resources: list[str] | None) -> dict[str, Any]:
 
 
 def _recorded_group_count(db) -> int:
-    """The number of collapse keys as the derive recorded it (data-model §12)."""
+    """The number of collapse keys as the derive recorded it."""
 
     present = db.execute(
         'SELECT 1 FROM information_schema.tables '
@@ -172,14 +173,14 @@ def _recorded_group_count(db) -> int:
 
     pytest.fail(
         f'the derive records no collapse-key count: neither {SCHEMA}.{_HISTOGRAM_TABLE} '
-        f'(T013m, data-model §12) nor build_manifest.interactions_derive_cost carries '
-        f'one of {_MANIFEST_COUNT_KEYS}. The equivalence claim of R24 has nothing to '
-        f'be checked against.'
+        f'nor build_manifest.interactions_derive_cost carries one of '
+        f'{_MANIFEST_COUNT_KEYS}. The claim that the live fold reproduces the '
+        f'removed collapse has nothing to be checked against.'
     )
 
 
 def test_full_fold_reproduces_the_recorded_collapse_count(db):
-    """R24: the fold *is* the removed table, not an approximation of it."""
+    """The fold *is* the removed table, not an approximation of it."""
 
     params = _engine('params')
     scope = _engine('scope')
@@ -220,7 +221,7 @@ def test_full_fold_is_smaller_than_the_record_it_folds(db):
     assert 0 < folded < record
 
 
-def test_fr048_fixture_unscoped_reads_every_contributing_resource(db):
+def test_the_pinned_fixture_unscoped_reads_every_contributing_resource(db):
     """Unscoped, the pinned row carries all four resources and both signs."""
 
     row = _fixture_row(db, None)
@@ -234,14 +235,14 @@ def test_fr048_fixture_unscoped_reads_every_contributing_resource(db):
     assert row['reference_count'] == 3
 
 
-def test_fr048_fixture_scoped_to_one_resource_reports_that_resource(db):
-    """FR-048: the summaries are recomputed over the surviving scope."""
+def test_the_pinned_fixture_scoped_to_one_resource_reports_that_resource(db):
+    """The summaries are recomputed over the surviving scope."""
 
     row = _fixture_row(db, ['chembl'])
 
     assert sorted(row['sources']) == ['chembl'], (
         'a scoped fold must list only the resources in scope; listing four '
-        'resources here is the `sources && ARRAY[...]` defect R19 removed'
+        'resources here is the `sources && ARRAY[...]` defect'
     )
     assert row['source_count'] == 1, (
         f"source_count {row['source_count']} describes a wider resource set "
@@ -254,20 +255,20 @@ def test_fr048_fixture_scoped_to_one_resource_reports_that_resource(db):
     assert row['sign_source_count'] == 1
 
 
-def test_fr048_fixture_scoped_sign_returns_to_null(db):
+def test_the_pinned_fixture_scoped_sign_returns_to_null(db):
     """A sign no in-scope resource asserts is NULL, never a defaulted false."""
 
     row = _fixture_row(db, ['chembl'])
 
     assert row['is_stimulation'] is None, (
         f"chembl asserts no positive sign for this interaction, so "
-        f"is_stimulation must be NULL, not {row['is_stimulation']!r} (FR-044a)"
+        f"is_stimulation must be NULL, not {row['is_stimulation']!r}"
     )
     assert row['is_inhibition'] is True
     assert row['is_directed'] is True
 
 
-def test_fr048_fixture_scope_partitions_the_wider_fold(db):
+def test_the_pinned_fixture_scope_partitions_the_wider_fold(db):
     """Two disjoint scopes account for the whole unscoped fold, and no more."""
 
     whole = _fixture_row(db, None)

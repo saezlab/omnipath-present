@@ -1,4 +1,4 @@
-"""Facet-registration consistency (Milestone H / FR-026).
+"""Facet-registration consistency (Milestone H).
 
 The derived classification facets must be registered in BOTH the api-service
 (`facets.py::CLASSIFICATION_FACETS`) and the SvelteKit entity query

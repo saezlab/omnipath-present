@@ -51,7 +51,7 @@ CURATED_RESOURCE = 'signor'
 AFFINITY_RESOURCE = 'drugcentral'
 
 #: A class slug, and the display label that is output-side only. The label is
-#: never a query value: filtering is by slug (contracts §1).
+#: never a query value: filtering is by slug.
 CLASS_SLUG = 'ligand_receptor'
 CLASS_LABEL = 'Ligand-receptor'
 

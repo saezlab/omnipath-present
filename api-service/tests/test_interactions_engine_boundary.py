@@ -1,9 +1,9 @@
-"""One engine reads the interaction tables, and nothing else does (T020n).
+"""One engine reads the interaction tables, and nothing else does.
 
-FR-054 / R26. The build already forbids per-dataset materialised views. Without
-the same rule on the serving side the 1,571 lines of view definitions reappear
-as route code, one query function per dataset, and the parameter surface stops
-being the thing that has to be general.
+The build already forbids per-dataset materialised views. Without the same
+rule on the serving side the 1,571 lines of view definitions reappear as route
+code, one query function per dataset, and the parameter surface stops being the
+thing that has to be general.
 
 So this is a grep-shaped test, deliberately. It asserts a boundary rather than
 a behaviour, because the boundary is what erodes: exactly one module names
@@ -34,8 +34,9 @@ _API = _HERE.parents[1] / 'api_service'
 _PACKAGE = _API / 'interactions'
 _MAIN = _API / 'main.py'
 
-# The record table, and the one R24 removed. The removed name must not survive
-# anywhere: a module still probing for it would read a fold of a wider scope.
+# The record table, and the precomputed all-resources collapse the build no
+# longer stores. The removed name must not survive anywhere: a module still
+# probing for it would read a fold of a wider scope.
 RECORD_TABLE = 'interaction_fact_resource'
 REMOVED_TABLE = 'interaction_fact_combined'
 OTHER_INTERACTION_TABLES = ('interaction_party', 'interaction_assay', 'interaction_ptm')
@@ -50,7 +51,7 @@ ENGINE_MODULES = (
     'engine',
 )
 
-# Every dataset this cycle registers (contracts §1a). Each is a parameter set
+# Every dataset this cycle registers. Each is a parameter set
 # or a composition, and none of them may be a function.
 DATASETS = (
     'liana',
@@ -98,7 +99,7 @@ def _require_engine_package() -> None:
         pytest.fail(
             f'the query engine is not a package yet: expected '
             f'api_service/interactions/ with {list(ENGINE_MODULES)}, missing '
-            f'{missing or ["the package itself"]} (T020h-T020o)'
+            f'{missing or ["the package itself"]}'
         )
 
 
@@ -126,13 +127,13 @@ def _route_paths_and_bodies() -> list[tuple[str, ast.FunctionDef]]:
 
 
 def test_the_engine_is_a_package_with_the_stages_of_the_contract():
-    """contracts §1a: scope, selection, fold, guard, composition, projection."""
+    """Scope, selection, fold, guard, composition, projection."""
 
     _require_engine_package()
 
 
 def test_exactly_one_module_names_the_record_table():
-    """FR-054: one reader of the interaction tables, not one per dataset."""
+    """One reader of the interaction tables, not one per dataset."""
 
     naming = _naming(RECORD_TABLE)
 
@@ -146,7 +147,7 @@ def test_exactly_one_module_names_the_record_table():
 
 
 def test_the_removed_table_is_named_nowhere():
-    """R24 dropped it; a module still probing for it reads a wider fold."""
+    """The build no longer precomputes it; a probe would read a wider fold."""
 
     naming = _naming(REMOVED_TABLE)
 
@@ -236,7 +237,7 @@ def test_the_package_entry_points_hold_no_sql():
 
 @pytest.mark.parametrize('dataset', DATASETS)
 def test_no_per_dataset_query_function_exists(dataset):
-    """R26: a dataset is a parameter set or a composition, never a function."""
+    """A dataset is a parameter set or a composition, never a function."""
 
     _require_engine_package()
 

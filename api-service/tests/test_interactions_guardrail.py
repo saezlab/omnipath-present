@@ -1,16 +1,17 @@
 """The post-fold guardrail: filters are served, sorts are refused.
 
-T020e (FR-052, SC-025) and T020f (FR-052), in one file because they are two
-halves of one rule and share its fixtures.
+Both halves are here, in one file, because they are two halves of one rule and
+share its fixtures.
 
-R25's distinction is the one the whole design rests on. A `HAVING` on a folded
-value **streams**: with input ordered on the group key, `GroupAggregate` emits
-each group as its key changes and the outer `LIMIT` stops the scan, so the cost
-is page ÷ selectivity. An `ORDER BY` on a folded value **cannot** stop early —
-to know which key sorts first the engine folds every key in scope and then
-sorts, measured at 5,538 ms unscoped over all 14,291,204 groups, with the
-`LIMIT` saving nothing because the top-N heapsort only sees rows the fold has
-already produced. So one is priced from the histogram and the other is refused.
+The distinction between them is the one the whole design rests on. A `HAVING`
+on a folded value **streams**: with input ordered on the group key,
+`GroupAggregate` emits each group as its key changes and the outer `LIMIT`
+stops the scan, so the cost is page ÷ selectivity. An `ORDER BY` on a folded
+value **cannot** stop early — to know which key sorts first the engine folds
+every key in scope and then sorts, measured at 5,538 ms unscoped over all
+14,291,204 groups, with the `LIMIT` saving nothing because the top-N heapsort
+only sees rows the fold has already produced. So one is priced from the
+histogram and the other is refused.
 
 Treating the two alike would either forbid a cheap request or promise an
 unbounded one, which is why both halves are asserted here.
@@ -48,7 +49,7 @@ pytestmark = pytest.mark.skipif(
     not DATABASE_URL, reason='DATABASE_URL not set; the guardrail test needs a built DB'
 )
 
-# contracts §1a Post-fold, plus the summarised sign flags of §6. None of these
+# The post-fold parameters, plus the summarised sign flags. None of these
 # exists before its group is folded, so none of them can be sorted on.
 FOLDED_COLUMNS = (
     'source_count',
@@ -78,7 +79,7 @@ def _engine(name: str):
     except ModuleNotFoundError as exc:
         pytest.fail(
             f'the interaction query engine has no `{name}` module '
-            f'(expected api_service/interactions/{name}.py, T020h-T020j): {exc}'
+            f'(expected api_service/interactions/{name}.py): {exc}'
         )
 
 
@@ -201,7 +202,7 @@ def _histogram_at_least(db, minimum: int) -> int | None:
     return int(row['n']) if row and row['n'] else None
 
 
-# ── T020e — `ORDER BY` on a folded value is refused ──────────────────────────
+# ── `ORDER BY` on a folded value is refused ──────────────────────────────────
 
 
 def test_the_engine_names_the_folded_columns():
@@ -222,7 +223,7 @@ def test_the_engine_names_the_folded_columns():
 @pytest.mark.parametrize('column', FOLDED_COLUMNS)
 @pytest.mark.parametrize('direction', ['asc', 'desc'])
 def test_sorting_on_a_folded_value_is_refused(client, column, direction):
-    """SC-025: 100% of the time, not most of the time."""
+    """Refused 100% of the time, not most of the time."""
 
     response = client.post('/interactions', json = _sorted_payload(column, direction))
 
@@ -235,7 +236,7 @@ def test_sorting_on_a_folded_value_is_refused(client, column, direction):
 
 @pytest.mark.parametrize('column', FOLDED_COLUMNS)
 def test_the_refusal_names_the_folded_column(client, column):
-    """FR-009: the message is actionable, not a bare status."""
+    """The message is actionable, not a bare status."""
 
     response = client.post('/interactions', json = _sorted_payload(column, 'desc'))
 
@@ -247,7 +248,7 @@ def test_the_refusal_names_the_folded_column(client, column):
 
 @pytest.mark.parametrize('column', FOLDED_COLUMNS)
 def test_the_refusal_says_what_to_narrow(client, column):
-    """A refusal that names no alternative is a dead end (SC-008)."""
+    """A refusal that names no alternative is a dead end."""
 
     response = client.post('/interactions', json = _sorted_payload(column, 'desc'))
     body = _body(response)
@@ -295,7 +296,7 @@ def test_the_guard_refuses_a_folded_sort_before_the_query_runs(db):
 
 
 def test_sorting_on_a_stored_column_is_unaffected(client):
-    """R25: the endpoints, the class, affinity, pchembl and score still sort."""
+    """The endpoints, the class, affinity, pchembl and score still sort."""
 
     response = client.post(
         '/interactions', json = _sorted_payload(STORED_COLUMN, 'desc')
@@ -311,12 +312,12 @@ def test_sorting_on_a_stored_column_is_unaffected(client):
     )
 
 
-# ── T020f — `HAVING` on a folded value is served, and streams ────────────────
+# ── `HAVING` on a folded value is served, and streams ────────────────────────
 
 
 @pytest.mark.parametrize('minimum', HAVING_LEVELS)
 def test_having_on_a_folded_value_is_served(client, minimum):
-    """FR-052: the whole tail is inside SC-002 at present cardinality."""
+    """The whole tail stays inside the latency target at this cardinality."""
 
     response = client.post('/interactions', json = _having_payload(minimum))
 
@@ -346,7 +347,7 @@ def test_having_returns_only_qualifying_rows(client, minimum):
 
 @pytest.mark.parametrize('minimum', HAVING_LEVELS)
 def test_having_plans_as_group_aggregate(db, minimum):
-    """R25: `HashAggregate` is blocking and would fold the whole scope."""
+    """`HashAggregate` is blocking, and would fold the whole scope."""
 
     aggregates = _aggregates(_plan(db, _having_payload(minimum)))
 
@@ -369,7 +370,7 @@ def test_having_response_carries_the_guardrail_estimate(client, db, minimum):
 
     assert estimate, (
         'a post-fold filter is priced from the source_count histogram before '
-        'it runs (data-model §12), and the estimate is reported rather than '
+        'it runs, and the estimate is reported rather than '
         f'kept internal; response keys were {sorted(body)}'
     )
     assert 'histogram' in json.dumps(estimate).lower(), (
