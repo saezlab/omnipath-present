@@ -2,7 +2,7 @@
 
 MetaLinksDB was fifteen materialized views and 1,571 lines of hand-written SQL.
 The claim this cycle makes is that all of it is a *parameter set*: a union of
-components, an exclusion, a class gate, a fold, and an annotation layer — the
+components, an exclusion, a type gate, a fold, and an annotation layer — the
 same engine every other dataset runs through. This file is where that claim is
 either kept or shown to be short, so it compares the served dataset against the
 matview it replaces rather than against a description of it.
@@ -17,17 +17,20 @@ each fails differently:
 
 - **ChEMBL contributes mechanism-of-action pairs only.** An affinity threshold
   floods the set — pChEMBL above 6 is 1.6 M pairs — and the mechanism annotation
-  is the curated statement. As it happens ChEMBL then contributes nothing at
-  all, because a mechanism-of-action compound is a drug rather than a
-  metabolite and the class gate removes it. That is the delivered behaviour and
-  it is asserted as such, so the empty contribution cannot be mistaken for a
-  resource that failed to load.
+  is the curated statement. Those pairs reach the output, where the matview has
+  none of them: a mechanism-of-action compound classifies as a drug, and the
+  gate that read the chemical class is now on the entity type. That is the one
+  deliberate divergence from the matview, and it is asserted as such so it
+  cannot be mistaken for a gate that stopped working.
 - **BindingDB is excluded, and excluded before the fold.** Its rows stay in the
   record for another query to find. What must not happen is that they stay
   inside this dataset's `source_count`, references or sign flags — right rows
   carrying numbers describing a resource the dataset dropped.
-- **Both ends are gated.** One end is a metabolite; the class comes off the
-  entity and not off the interaction, so no resource can smuggle a drug in.
+- **Both ends are gated.** One end is a small molecule. The type comes off the
+  entity and not off the interaction, so no resource can route a pair around
+  it. The dataset says nothing beyond that. It once said metabolite, but the
+  chemical class behind that word follows the resources that contributed a
+  compound rather than the compound.
 
 The last group is the swap test. The role and localization attributes a caller
 requests today come from the resources that already publish those terms; later
@@ -66,8 +69,8 @@ EXCLUDED = 'bindingdb'
 #: Contributes through its mechanism-of-action annotation alone.
 CURATED_BY_MECHANISM = 'chembl'
 
-#: The entity class one end of every row must carry.
-GATE = 'metabolite'
+#: The entity type one end of every row must carry.
+GATE_ENTITY_TYPE = 'Chemical:OM:0037'
 
 #: The page the row-level assertions read.
 PAGE = 200
@@ -264,15 +267,15 @@ def test_the_composition_excludes_before_it_collapses(registered):
     )
 
 
-def test_the_class_gate_is_recorded_as_curation(registered):
+def test_the_type_gate_is_recorded_as_curation(registered):
     """The gate is a configurable field, not a line of SQL somewhere."""
 
     curation = registered['curation'] or {}
 
-    assert GATE in str(curation), (
+    assert GATE_ENTITY_TYPE in str(curation), (
         f'{DATASET} records curation {curation!r}, which does not name the '
-        f'{GATE} gate; a threshold that is not a field is a threshold nobody '
-        f'can change without editing the build'
+        f'{GATE_ENTITY_TYPE} gate; a threshold that is not a field is a '
+        f'threshold nobody can change without editing the build'
     )
 
 
@@ -326,43 +329,54 @@ def test_chembl_contributes_through_the_mechanism_annotation_only(db):
     )
 
 
-def test_the_dataset_reports_chembl_as_an_empty_contribution(page, legacy):
-    """The gate removes every mechanism pair, and that is the delivered state.
+def test_the_dataset_serves_chembl_where_the_matview_does_not(client, legacy):
+    """The type gate keeps the mechanism pairs the class gate removed.
 
-    A drug is not a metabolite, so the curated ChEMBL component survives the
-    recipe and dies at the class gate. The matview delivers exactly this. The
-    assertion pins it so a future reader meets a documented emptiness rather
-    than a resource that looks broken.
+    A mechanism-of-action compound classifies as a drug, so every ChEMBL pair
+    died at the chemical-class gate and the matview carries none. The gate
+    reads the entity type now, which says the end is a small molecule and
+    nothing about what kind, so the curated component reaches the output. This
+    is the dataset's one deliberate divergence from the matview, and asserting
+    it from both sides is what keeps it deliberate.
     """
 
     assert CURATED_BY_MECHANISM not in legacy['contributors'], (
-        f'{CURATED_BY_MECHANISM} now contributes to the matview; the class '
-        f'gate or the compound classification changed, and this test and the '
-        f'dataset both need re-reading'
+        f'{CURATED_BY_MECHANISM} contributes to the matview as well now, so '
+        f'the divergence this test describes is gone and the comparison says '
+        f'nothing; re-read both'
     )
 
-    served = {name for row in page for name in _sources(row)}
+    response = client.get(
+        f'/interactions/{DATASET}',
+        params = {'resources': CURATED_BY_MECHANISM, 'limit': 1},
+    )
 
-    assert CURATED_BY_MECHANISM not in served, (
-        f'{CURATED_BY_MECHANISM} contributes to the served dataset and not to '
-        f'the matview; the class gate is not being applied'
+    assert response.status_code == 200, (
+        f'{DATASET} does not answer a {CURATED_BY_MECHANISM} request: '
+        f'{response.status_code} {response.text[:400]}'
+    )
+
+    assert response.json()['interactions'], (
+        f'{CURATED_BY_MECHANISM} reaches the recipe and contributes no row; '
+        f'either the mechanism flag selects nothing or a gate is removing '
+        f'the component, and the entity-type gate should not be'
     )
 
 
-def test_every_row_has_a_metabolite_end(page, db):
-    """The gate is on the entity, so no resource can smuggle a drug through."""
+def test_every_row_has_a_chemical_end(page, db):
+    """The gate is on the entity, so no resource can route a pair around it."""
 
     ids = _entity_ids(page)
 
     assert ids, 'the page names no endpoint entity; the gate cannot be checked'
 
-    classed = {
-        str(row['entity_id']): row['chemical_class'] for row in db.execute(
+    typed = {
+        str(row['entity_id']): row['entity_type'] for row in db.execute(
             f"""
-            SELECT e.entity_id, vc.name AS chemical_class
+            SELECT e.entity_id, vt.name AS entity_type
             FROM {SCHEMA}.entity e
-            LEFT JOIN {SCHEMA}.vocab_chemical_class vc
-              ON vc.chemical_class_id = e.chemical_class_id
+            LEFT JOIN {SCHEMA}.vocab_entity_type vt
+              ON vt.entity_type_id = e.entity_type_id
             WHERE e.entity_id = ANY(%s::uuid[])
             """,
             (ids,),
@@ -371,15 +385,15 @@ def test_every_row_has_a_metabolite_end(page, db):
 
     ungated = [
         row for row in page
-        if GATE not in {
-            classed.get(str(row.get(key))) for key in
+        if GATE_ENTITY_TYPE not in {
+            typed.get(str(row.get(key))) for key in
             ('subject_entity_id', 'object_entity_id')
         }
     ]
 
     assert not ungated, (
-        f'{len(ungated)} of {len(page)} rows have no {GATE} end; the class '
-        f'gate is the whole definition of this dataset'
+        f'{len(ungated)} of {len(page)} rows have no {GATE_ENTITY_TYPE} end; '
+        f'the compound side is what makes this dataset the one it is'
     )
 
 
