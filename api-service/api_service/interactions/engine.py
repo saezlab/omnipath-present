@@ -35,16 +35,20 @@ from . import shape as _shape
 
 _log = logging.getLogger(__name__)
 
-# The collapsed-row keys that carry an entity id or a uuid; rendered as text
-# so a response is JSON without a custom encoder.
-_UUID_KEYS = ('subject_entity_id', 'object_entity_id', 'interaction_id')
+# The key columns that carry a uuid, read off the key's own types rather than
+# spelled out: the grain decides which of them a row is keyed by, and a list
+# written out here would have gone stale the moment a further key appeared.
+# They are rendered as text so a response is JSON without a custom encoder.
+_UUID_KEYS: frozenset[str] = frozenset(
+    name for name, cast in _select.KEY_CASTS.items() if cast == 'uuid'
+)
+
+# The suffix the fold aliases a group key apart under, where its own
+# projection emits a column of the same name. The key still has to be rendered
+# as the key it is, so the alias is stripped before the name is recognised.
+_GROUP_ALIAS = '_group'
 
 _CLASS_NAMES: dict[str, dict[int, dict[str, Any]]] = {}
-
-# Which folded column holds the entity behind each output side.
-_NODE_ENTITY: dict[str, str] = {
-    output: f'{record}_entity_id' for record, output in _nodes.SIDES.items()
-}
 
 # The delimiter the legacy columns join with. One character, one meaning: a
 # resource name and a reference id never contain it.
@@ -365,11 +369,22 @@ def _project_page(
         The page, ready to serialise.
     """
 
-    index = _nodes.lookup(_nodes.entity_ids(rows), conn = conn)
+    # Where the page is keyed on the interaction rather than on a pair, the
+    # row's ends are its participants, and they are read here — once for the
+    # page, over interaction ids the key selection has already bounded, which
+    # is one indexed read and not a second pass over the scope.
+    members = (
+        _nodes.party_detail(rows, conn = conn)
+        if rows and not _select.keys_an_ordered_pair(query) else {}
+    )
+    index = _nodes.lookup(_nodes.entity_ids(rows, members), conn = conn)
     annotations = _annotate.index(conn) if rows else {}
     registry = _scope.dataset_registry(conn) if rows else []
     projected = [
-        _project(row, query, conn, index, annotations, registry, resolved)
+        _project(
+            row, query, conn, index, annotations, registry, resolved,
+            members.get(str(row.get('interaction_id'))) or [],
+        )
         for row in rows
     ]
 
@@ -384,21 +399,26 @@ def _project(
         annotations: dict[str, dict[str, tuple[str, ...]]] | None = None,
         registry: list[dict[str, Any]] | None = None,
         resolved: _scope.ResolvedScope | None = None,
+        members: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Render one collapsed row for the response.
 
     Args:
-        row: The folded row: one `(subject, object, class)` key with the
-            summaries recomputed over the resources the scope kept.
+        row: The folded row: one `(subject, object, class)` key, or one
+            interaction, with the summaries recomputed over the resources the
+            scope kept.
         query: The parsed request, for the projection parameters.
         conn: An open connection, for the class vocabulary.
         index: The page's per-node lookup, keyed by entity id.
+        members: This interaction's participants, where the page was keyed on
+            the interaction and its ends were read from the graph.
 
     Returns:
-        The row as JSON-ready values, with the class slug and label added, both
-        endpoints projected into the standard per-node columns, and the
-        requested long-tail keys gathered under `attributes`.
+        The row as JSON-ready values, with the class slug and label added, its
+        ends projected into the standard per-node columns where the row is an
+        ordered pair, and the requested long-tail keys gathered under
+        `attributes`.
     """
 
     out: dict[str, Any] = {}
@@ -409,7 +429,7 @@ def _project(
 
             continue
 
-        elif name in _UUID_KEYS:
+        elif name.removesuffix(_GROUP_ALIAS) in _UUID_KEYS:
 
             out[name] = str(value) if value is not None else None
 
@@ -426,24 +446,39 @@ def _project(
         out['interaction_type'] = class_slug
         out['interaction_type_label'] = vocabulary.get('label')
 
-    blocks = _nodes.blocks(row, index or {}, query.view, class_slug)
+    if _select.keys_an_ordered_pair(query):
 
-    for side, block in blocks.items():
+        rendered = _nodes.binary_nodes(row, index or {}, query.view, class_slug)
 
-        block.update(
+    else:
+
+        # The row is one interaction, so its ends are the members the graph
+        # names and the flat pair is left off it entirely. Emitting the pair
+        # empty would be the wrong half of a true sentence: it would say the
+        # interaction has a source and a target and that the build does not
+        # know them, when what is true is that it has participants instead.
+        rendered = _nodes.member_nodes(members or (), index or {}, query.view)
+
+    for node in rendered:
+
+        node.columns.update(
             _annotate.columns(
-                row.get(_NODE_ENTITY[side]),
-                side,
+                node.entity_id,
+                node.prefix,
                 query.annotation_layers,
                 annotations or {},
             ),
         )
-        out.update(block)
 
-    # The binary pair, seen whole. A reaction has no first and second endpoint
-    # to flatten into, so the array is the shape that generalises; here it is
-    # the same values the flat columns carry, arranged the way they will be.
-    out['participants'] = _nodes.participants(blocks)
+        if node.flat:
+
+            out.update(node.columns)
+
+    # The interaction, seen whole. A reaction has no first and second endpoint
+    # to flatten into, so the array is the shape that generalises; over an
+    # ordered pair it is the same values the flat columns carry, arranged the
+    # way they are when there is no pair to carry them.
+    out['participants'] = _nodes.participants(rendered)
     out.update(_standard_columns(row, class_slug, registry or [], resolved))
 
     if query.attributes:

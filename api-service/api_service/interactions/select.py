@@ -121,6 +121,29 @@ def page_keys(query: InteractionQuery) -> tuple[str, ...]:
     return GRAIN_KEYS.get(query.grain, GROUP_KEYS)
 
 
+def keys_an_ordered_pair(query: InteractionQuery) -> bool:
+    """
+    Whether one row of the page stands for an ordered endpoint pair.
+
+    The projection asks this rather than reading the grain's name, because it
+    is the key that decides what a row is. Where the key carries the subject
+    and the object, the row has a first and a second end and the flat
+    `source_*`/`target_*` columns say which is which. Where it does not, the
+    row is one interaction of whatever arity, and naming a first and second end
+    of it would invent an order the graph never asserted.
+
+    Args:
+        query: The parsed request.
+
+    Returns:
+        True when the page key carries both endpoint columns.
+    """
+
+    keys = page_keys(query)
+
+    return all(name in keys for name in ('subject_entity_id', 'object_entity_id'))
+
+
 def group_keys(query: InteractionQuery) -> tuple[str, ...]:
     """
     The columns the fold groups on, for one request.

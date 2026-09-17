@@ -30,11 +30,19 @@ Alongside the flat pair, every row also carries a `participants` array — lengt
 two for a binary interaction — so the hyperedge form is the same object seen
 whole rather than a second shape bolted on later.
 
+**At participant grain the array is the only shape there is.** A row keyed on
+the interaction itself speaks for one interaction of whatever arity, so it has
+no first and second end, the flat pair is absent from it rather than empty, and
+the members come back from the graph's own participant table carrying the role
+each is filed under and the side, ordinal, stoichiometry and compartment of
+that participation.
+
     DATABASE_URL=... pytest tests/test_interactions_output_shape.py -v
 """
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -79,6 +87,19 @@ NODE_COLUMNS = ('', '_label', '_organism', '_entity_type', '_intercell_class')
 
 #: The two sides, as the tabular output names them.
 SIDES = ('source', 'target')
+
+#: Every column the flat pair puts on a row, named in full. `source_count` is
+#: deliberately not among them: it begins with a side and is a per-interaction
+#: count, so a test that swept the prefix would demand the fold's own resource
+#: count be dropped along with the endpoints.
+FLAT_NODE_COLUMNS = tuple(
+    f'{side}{suffix}'
+    for side in SIDES
+    for suffix in (*NODE_COLUMNS, '_uniprots', '_gene_ids', '_role')
+)
+
+#: What the graph stores about one participation rather than about the entity.
+PARTICIPATION_DETAIL = ('side', 'ordinal', 'stoichiometry', 'compartment')
 
 #: A page wide enough that the annotation layers meet more than one resource.
 PAGE = 200
@@ -382,6 +403,349 @@ def test_a_participant_says_the_same_thing_as_the_flat_columns(gene_rows):
             assert participant['organism'] == row[f'{side}_organism']
             assert participant['entity_type'] == row[f'{side}_entity_type']
             assert participant['role'] == row[f'{side}_role']
+
+
+def test_a_folded_pair_reports_no_participation_detail(gene_rows):
+    """A pair may speak for several interactions, so it names none of theirs.
+
+    The side, the ordinal, the stoichiometry and the compartment are stored per
+    participation, and a row keyed on an ordered pair folds every interaction
+    reported under that pair. There is no one participant row for it to report,
+    and a null in its place would claim the build looked and found nothing.
+    """
+
+    for row in gene_rows:
+
+        for participant in row['participants']:
+
+            named = [
+                name for name in PARTICIPATION_DETAIL if name in participant
+            ]
+
+            assert not named, (
+                f'a folded ordered pair reports {named} per participant, which '
+                f'it can only have taken from one of the interactions it folds'
+            )
+
+
+# ── One row per interaction ─────────────────────────────────────────────────
+
+
+@pytest.fixture(scope = 'module')
+def participant_rows(db) -> list[dict[str, Any]]:
+    """The same preset read one row per interaction, whatever its arity."""
+
+    rows = _preset_page(db, view = 'gene', grain = 'participant')
+
+    if not rows:
+
+        pytest.skip('the ligand-receptor preset returned no rows per interaction')
+
+    return rows
+
+
+def _party_of(db, identifiers: list[str]) -> dict[str, list[tuple[Any, ...]]]:
+    """What the graph itself says the members of these interactions are.
+
+    Read straight from the participant table rather than through the engine, so
+    the comparison is against the record and not against the projection being
+    tested.
+
+    Args:
+        db: An open connection.
+        identifiers: The interaction ids of one page.
+
+    Returns:
+        `{interaction_id: [(role, side, ordinal, label), …]}`, in the order the
+        graph holds them.
+    """
+
+    rows = db.execute(
+        f"""
+        SELECT p.interaction_id,
+               role.name AS role,
+               p.side,
+               p.ordinal,
+               COALESCE(e.label, e.canonical_identifier) AS label
+        FROM {SCHEMA}.interaction_party p
+        JOIN {SCHEMA}.vocab_relation_role role
+          ON role.relation_role_id = p.role_id
+        JOIN {SCHEMA}.entity e ON e.entity_id = p.entity_id
+        WHERE p.interaction_id = ANY(%s::uuid[])
+        ORDER BY p.interaction_id, p.ordinal NULLS LAST, p.side NULLS LAST,
+                 p.entity_id
+        """,
+        (identifiers,),
+    ).fetchall()
+
+    out: dict[str, list[tuple[Any, ...]]] = {}
+
+    for row in rows:
+
+        out.setdefault(str(row['interaction_id']), []).append(
+            (row['role'], row['side'], row['ordinal'], row['label']),
+        )
+
+    return out
+
+
+def test_a_row_per_interaction_drops_the_flat_pair(participant_rows):
+    """No first and second end, so no column that names one."""
+
+    for row in participant_rows:
+
+        named = [name for name in FLAT_NODE_COLUMNS if name in row]
+
+        assert not named, (
+            f'{named} came back on a row that stands for one interaction; an '
+            f'empty endpoint column says the build has a source and a target '
+            f'and does not know them, which is not what is true of a reaction'
+        )
+
+        assert 'source_count' in row, (
+            'the per-interaction resource count was dropped along with the '
+            'endpoints, on the strength of its name beginning with a side'
+        )
+
+
+def test_the_members_are_the_ones_the_graph_names(db, participant_rows):
+    """Role, side, ordinal and identity, each checked against the record."""
+
+    identifiers = [str(row['interaction_id']) for row in participant_rows]
+    party = _party_of(db, identifiers)
+
+    assert party, 'the participant table holds nothing for this page at all'
+
+    for row in participant_rows:
+
+        recorded = party[str(row['interaction_id'])]
+        served = [
+            (
+                participant['role'],
+                participant['side'],
+                participant['ordinal'],
+                participant['label'],
+            )
+            for participant in row['participants']
+        ]
+
+        assert served == recorded, (
+            f'the members of {row["interaction_id"]} came back as {served} '
+            f'where the graph holds {recorded}'
+        )
+
+
+def test_the_member_count_is_the_arity_the_graph_holds(db, participant_rows):
+    """Two for a pair of molecules, one for a molecule acting on itself.
+
+    This is where the array stops being the flat pair rewritten. An
+    interaction of an entity with itself is stored as the one participant it
+    names, and the flat columns report it twice because they have two slots to
+    fill. The array reports it once, and reads correctly for a reaction of five
+    members for the same reason it reads correctly for this one.
+    """
+
+    arity = {
+        str(row['interaction_id']): int(row['members'])
+        for row in db.execute(
+            f"""
+            SELECT interaction_id, count(DISTINCT entity_id) AS members
+            FROM {SCHEMA}.interaction_party
+            WHERE interaction_id = ANY(%s::uuid[])
+            GROUP BY 1
+            """,
+            ([str(row['interaction_id']) for row in participant_rows],),
+        ).fetchall()
+    }
+
+    for row in participant_rows:
+
+        held = arity[str(row['interaction_id'])]
+
+        assert len(row['participants']) == held, (
+            f'{row["interaction_id"]} names {held} entities and came back with '
+            f'{len(row["participants"])} participants'
+        )
+
+    assert sorted(set(arity.values())) == [1, 2], (
+        f'this page carries arities {sorted(set(arity.values()))}; it is meant '
+        f'to hold both a pair and a molecule acting on itself, and a page of '
+        f'one of them alone cannot show that the count is read rather than '
+        f'assumed'
+    )
+
+
+def test_a_member_is_named_the_way_the_requested_view_names_it(db):
+    """The view chooses the identifier per participant exactly as per side."""
+
+    rows = _preset_page(db, view = 'protein', grain = 'participant')
+
+    assert rows, 'the protein view returned no rows per interaction'
+
+    for row in rows:
+
+        for participant in row['participants']:
+
+            assert participant['entity'] is not None, (
+                'a member came back with no identifier at all'
+            )
+            assert 'gene_ids' in participant, (
+                'the array the protein view is named for is absent from a '
+                'member, so the view reaches the flat pair and not the array'
+            )
+
+    leading = [
+        participant
+        for row in rows
+        for participant in row['participants']
+        if participant['gene_ids']
+        and participant['entity'] not in participant['gene_ids']
+    ]
+
+    assert leading, (
+        'no member leads with an accession carrying its gene ids; the protein '
+        'view renders the participant array as the gene view does'
+    )
+
+
+def test_a_page_of_interactions_is_serialisable(participant_rows):
+    """The key of this grain is a uuid, and a uuid is not JSON on its own."""
+
+    json.dumps(participant_rows)
+
+
+def test_the_participation_detail_is_projected_even_where_it_is_empty(
+        db,
+        participant_rows,
+):
+    """Both columns are read; this build happens to hold neither.
+
+    The keys are asserted first and unconditionally, because their presence is
+    the projection doing its work. Only the values depend on a build that
+    states any, and where none are stated the test says so rather than passing
+    on the silence.
+    """
+
+    for row in participant_rows:
+
+        for participant in row['participants']:
+
+            missing = [
+                name for name in PARTICIPATION_DETAIL
+                if name not in participant
+            ]
+
+            assert not missing, f'{missing} absent from a member'
+
+    stated = db.execute(
+        f"""
+        SELECT p.interaction_id, p.stoichiometry, p.compartment
+        FROM {SCHEMA}.interaction_party p
+        WHERE p.stoichiometry IS NOT NULL OR p.compartment IS NOT NULL
+        LIMIT 1
+        """,
+    ).fetchone()
+
+    if stated is None:
+
+        pytest.skip(
+            'no participant row of this build states a stoichiometry or a '
+            'compartment: every one of the 28,003,036 of them leaves both '
+            'null, so a value assertion here would pass on the absence of the '
+            'data rather than on the projection of it'
+        )
+
+    served = [
+        participant
+        for row in _run(
+            db,
+            {
+                'filters': {'entities': _entities_of(db, stated['interaction_id'])},
+                'grain': 'participant',
+                'limit': PAGE,
+            },
+        )['interactions']
+        if str(row['interaction_id']) == str(stated['interaction_id'])
+        for participant in row['participants']
+    ]
+
+    assert served, (
+        f'{stated["interaction_id"]} states a stoichiometry or a compartment '
+        f'and no page reached it'
+    )
+    assert any(
+        participant['stoichiometry'] is not None
+        or participant['compartment'] is not None
+        for participant in served
+    ), (
+        'the interaction the record states a stoichiometry or a compartment '
+        'for came back with neither on any member'
+    )
+
+
+def _entities_of(db, interaction_id) -> list[str]:
+    """The entity ids one interaction names, as a filter reaches them.
+
+    Args:
+        db: An open connection.
+        interaction_id: The interaction.
+
+    Returns:
+        The entity ids, as strings.
+    """
+
+    rows = db.execute(
+        f'SELECT entity_id FROM {SCHEMA}.interaction_party '
+        f'WHERE interaction_id = %s::uuid',
+        (str(interaction_id),),
+    ).fetchall()
+
+    return [str(row['entity_id']) for row in rows]
+
+
+def test_a_reaction_comes_back_as_one_row_naming_every_member(db):
+    """The case the grain exists for, when a build carries one."""
+
+    wide = db.execute(
+        f"""
+        SELECT interaction_id, count(DISTINCT entity_id) AS members
+        FROM {SCHEMA}.interaction_party
+        GROUP BY 1
+        HAVING count(DISTINCT entity_id) > 2
+        ORDER BY 2 DESC
+        LIMIT 1
+        """,
+    ).fetchone()
+
+    if wide is None:
+
+        pytest.skip(
+            'no interaction of this build names more than two entities — '
+            '13,998,969 name a pair and 5,098 a molecule acting on itself — '
+            'because the record stores ordered pairs and no derive has run '
+            'since the wider shape landed; there is no reaction here whose '
+            'members could outnumber a pair'
+        )
+
+    rows = [
+        row for row in _run(
+            db,
+            {
+                'filters': {'entities': _entities_of(db, wide['interaction_id'])},
+                'grain': 'participant',
+                'limit': PAGE,
+            },
+        )['interactions']
+        if str(row['interaction_id']) == str(wide['interaction_id'])
+    ]
+
+    assert len(rows) == 1, (
+        f'a reaction of {wide["members"]} members came back as {len(rows)} rows'
+    )
+    assert len(rows[0]['participants']) == wide['members'], (
+        f'a reaction of {wide["members"]} members came back naming '
+        f'{len(rows[0]["participants"])} of them'
+    )
 
 
 # ── The layered node annotations ────────────────────────────────────────────
