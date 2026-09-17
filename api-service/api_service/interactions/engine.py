@@ -18,6 +18,7 @@ rather than as each of its components.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from ..graph import SEARCH_SCHEMA
@@ -113,7 +114,7 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         # rows that survive it.
         priced = _recipe_filter(recipe, query, resolved, live, long_tail = False)
         estimate = _guard.check(query, resolved, conn = live, record = priced)
-        rows = _fold.fold_rows(query, resolved, conn = live, record = record)
+        rows = _dataset_rows(recipe, query, resolved, live, record)
         interactions = _project_page(rows, query, live, resolved)
 
         if query.exact_total:
@@ -162,11 +163,28 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         # quietly wrong number under a third name, and the label costs one key.
         answer['total_is_lower_bound'] = True
 
-    if len(rows) >= query.limit and rows:
+    grains = {_grain_of(row, query) for row in rows}
+
+    if len(grains) > 1:
+
+        # Said out loud beside `grain`, because a recipe spanning two shape
+        # groups answers in rows of two kinds and no single word describes the
+        # page. `grain` stays the one the request was answered at, and a row
+        # folded at the other says so itself.
+        answer['grains'] = sorted(grains)
+
+    if len(rows) >= query.limit and rows and len(grains) < 2:
 
         # The key columns come off the query rather than being spelled out,
         # so a cursor is minted at the grain the page was answered at and
-        # carries exactly the columns that grain resumes on.
+        # carries exactly the columns that grain resumes on. A page spanning
+        # two grains is minted none, because the key a cursor names belongs to
+        # a grain: one of the two halves would decode it against a key list of
+        # the wrong arity, drop it as stale and resume from its own first row
+        # — the same interactions returned twice under a bookmark that looked
+        # sound. `offset` is what resumes a page like that, and it advances
+        # every shape group at once, since each applies it to its own key
+        # selection.
         answer['cursor'] = _fold.encode_cursor([
             rows[-1][name] for name in _select.page_keys(query)
         ])
@@ -176,6 +194,45 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         answer['estimate'] = estimate.as_dict()
 
     return answer
+
+
+def _dataset_rows(recipe, query, resolved, conn, record):
+    """
+    The folded rows of one page, for a request that named a dataset.
+
+    A recipe whose components fold on different keys has no single fold: its
+    rows are of two kinds, and a key list that answers one of them answers
+    neither. `compose` already folds such a recipe once per shape — that is
+    where the grouping, the restriction of the tree to one group and the
+    per-row grain tag live — so the recipe goes back there rather than the
+    engine growing a second copy of the rule that decides when two rows are the
+    same kind of thing. The request's own paging, projection and predicates
+    travel with it, because this is the request's page and not the recipe's.
+
+    Everything else takes the single fold it has always taken, over the
+    predicate the recipe and the caller's filters are already intersected
+    into: a recipe of one shape, and a dataset that stores no recipe at all.
+    That is every request this service serves today, and it must cost what it
+    costs.
+
+    Args:
+        recipe: The composition behind the named datasets, or None.
+        query: The parsed request.
+        resolved: The resolved scope.
+        conn: An open connection.
+        record: The recipe's predicate, intersected with the request's own.
+
+    Returns:
+        The folded rows of the page.
+    """
+
+    if recipe is not None and _compose.spans_shapes(recipe):
+
+        return _compose.fold_by_shape(
+            recipe, conn = conn, page = query, resolved = resolved,
+        )
+
+    return _fold.fold_rows(query, resolved, conn = conn, record = record)
 
 
 def _recipe_filter(recipe, query, resolved, conn, *, long_tail = True):
@@ -359,6 +416,15 @@ def _project_page(
     one indexed statement, so the projection costs the same whether the page is
     one dataset's or another's.
 
+    **A row folded at a grain of its own is rendered at that one.** A recipe
+    spanning two shape groups returns rows of two kinds and tags each with the
+    grain it was folded at, and deciding once for the whole page renders one
+    half of it wrong whichever way the decision falls: the interactions come
+    back with no members, or the ordered pairs are looked up for members they
+    have none of. A row carrying no tag was folded at the request's grain,
+    which is every row of every request that reads one shape — and there the
+    reads below are the same reads, over the same rows, as before.
+
     Args:
         rows: The folded rows of one page.
         query: The parsed request, for the projection parameters.
@@ -369,26 +435,130 @@ def _project_page(
         The page, ready to serialise.
     """
 
-    # Where the page is keyed on the interaction rather than on a pair, the
-    # row's ends are its participants, and they are read here — once for the
-    # page, over interaction ids the key selection has already bounded, which
-    # is one indexed read and not a second pass over the scope.
-    members = (
-        _nodes.party_detail(rows, conn = conn)
-        if rows and not _select.keys_an_ordered_pair(query) else {}
-    )
+    shapes = {
+        grain: _at_grain(query, grain)
+        for grain in {_grain_of(row, query) for row in rows}
+    }
+    # Where a row is keyed on the interaction rather than on a pair, its ends
+    # are its participants, and they are read here — once for the page, over
+    # interaction ids the key selection has already bounded, which is one
+    # indexed read and not a second pass over the scope. It is handed the rows
+    # of that grain rather than the page, because the read takes the rows it is
+    # given: selecting them keeps the single statement and stops an ordered
+    # pair being looked up for a participant list it does not have.
+    whole = [
+        row for row in rows
+        if not _select.keys_an_ordered_pair(shapes[_grain_of(row, query)])
+    ]
+    members = _nodes.party_detail(whole, conn = conn) if whole else {}
     index = _nodes.lookup(_nodes.entity_ids(rows, members), conn = conn)
     annotations = _annotate.index(conn) if rows else {}
     registry = _scope.dataset_registry(conn) if rows else []
     projected = [
         _project(
-            row, query, conn, index, annotations, registry, resolved,
+            row, shapes[_grain_of(row, query)], conn, index, annotations,
+            registry, resolved,
             members.get(str(row.get('interaction_id'))) or [],
         )
         for row in rows
     ]
 
-    return _shape.apply(projected, rows, query, resolved, conn = conn)
+    return _shaped_page(projected, rows, query, resolved, conn)
+
+
+def _grain_of(row: dict[str, Any], query: _params.InteractionQuery) -> str:
+    """
+    The grain one folded row was folded at.
+
+    Args:
+        row: The folded row.
+        query: The parsed request.
+
+    Returns:
+        The row's own grain where it carries one — a composition that spans
+        two shape groups tags every row it returns — and the request's grain
+        otherwise, which is the grain a single fold answered at.
+    """
+
+    return row.get('grain') or query.grain
+
+
+def _at_grain(
+        query: _params.InteractionQuery,
+        grain: str,
+) -> _params.InteractionQuery:
+    """
+    The request as it reads at one row's grain.
+
+    Args:
+        query: The parsed request.
+        grain: The grain the rows in question were folded at.
+
+    Returns:
+        `query` itself where that is the request's own grain, so a page of one
+        shape passes the object it always passed, and a copy at the row's
+        grain otherwise. Only the grain moves: the filters, the projection and
+        the paging are the request's whatever shape a row is.
+    """
+
+    return query if grain == query.grain else replace(query, grain = grain)
+
+
+def _shaped_page(
+        projected: list[dict[str, Any]],
+        rows: list[dict[str, Any]],
+        query: _params.InteractionQuery,
+        resolved: _scope.ResolvedScope,
+        conn,
+) -> list[dict[str, Any]]:
+    """
+    Attach the Shape group's answers, one grain at a time.
+
+    The Shape group reads by the page key, and the page key belongs to a
+    grain: the ordered pair and the class at one, the interaction itself at the
+    other. A page holding both holds two key shapes, and one key list read off
+    the request names columns half the rows do not carry. So the rows are split
+    by the grain they were folded at, each half is read under its own key, and
+    the page is handed back in the order the fold produced it. The blocks land
+    on the rendered row objects themselves, which is why the halves need no
+    reassembling.
+
+    A page of one grain is a single call with the request's own query. That is
+    what it has always been, and it is every page any request could produce
+    before a dataset could span two shapes.
+
+    Args:
+        projected: The rendered rows, in the order of `rows`.
+        rows: The folded rows they came from.
+        query: The parsed request.
+        resolved: The resolved scope.
+        conn: An open connection.
+
+    Returns:
+        The rendered rows.
+    """
+
+    grains = {_grain_of(row, query) for row in rows}
+
+    if len(grains) < 2:
+
+        return _shape.apply(projected, rows, query, resolved, conn = conn)
+
+    for grain in grains:
+
+        at = [
+            position for position, row in enumerate(rows)
+            if _grain_of(row, query) == grain
+        ]
+        _shape.apply(
+            [projected[position] for position in at],
+            [rows[position] for position in at],
+            _at_grain(query, grain),
+            resolved,
+            conn = conn,
+        )
+
+    return projected
 
 
 def _project(

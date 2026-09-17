@@ -332,6 +332,53 @@ def record_filter_for(node: Any, *, conn) -> RecordFilter | None:
     return _record_filter(inner, conn)
 
 
+def spans_shapes(node: Any) -> bool:
+    """
+    Whether a composition's components fold on more than one key.
+
+    Args:
+        node: The composition.
+
+    Returns:
+        True where no single fold answers it, so its rows have to be obtained
+        one shape at a time.
+    """
+
+    return len(_shape_groups(node)) > 1
+
+
+def fold_by_shape(
+        node: Any,
+        *,
+        conn,
+        page: _params.InteractionQuery | None = None,
+        resolved: _scope.ResolvedScope | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fold a composition once per shape, under an enclosing request's paging.
+
+    `run` is this same fold for a composition that **is** the request. This is
+    the entry for a composition a request merely names: the rows are that
+    request's page and carry its projection, while what one row *is* stays the
+    recipe's to say. Without it the engine would have to group the components
+    itself to serve a two-grain dataset, and the rule that decides when two
+    rows are the same kind of thing would be written down twice.
+
+    Args:
+        node: The composition.
+        conn: An open connection.
+        page: The request whose page these rows are.
+        resolved: That request's resolved scope, whose own predicates narrow
+            the recipe.
+
+    Returns:
+        The collapsed rows of every shape, each naming the grain it was folded
+        at where more than one shape is present.
+    """
+
+    return _fold_scope(node, conn, page = page, resolved = resolved)
+
+
 def preset(name: str, *, conn = None) -> Any:
     """
     One named preset as a composition.
@@ -399,7 +446,13 @@ def _rows(node: Any, conn) -> list[dict[str, Any]]:
     raise ValueError(f'unknown composition operation {node.operation!r}')
 
 
-def _fold_scope(node: Any, conn) -> list[dict[str, Any]]:
+def _fold_scope(
+        node: Any,
+        conn,
+        *,
+        page: _params.InteractionQuery | None = None,
+        resolved: _scope.ResolvedScope | None = None,
+) -> list[dict[str, Any]]:
     """
     Fold whatever record filter a node resolves to, once per shape it holds.
 
@@ -414,6 +467,12 @@ def _fold_scope(node: Any, conn) -> list[dict[str, Any]]:
     Args:
         node: The composition.
         conn: An open connection.
+        page: The enclosing request, where the composition is being served as
+            a named dataset rather than being the request itself. None leaves
+            each group paging under its own widest component, which is what a
+            composition asked for directly means.
+        resolved: The enclosing request's resolved scope, or None where the
+            composition's own filters are the whole of the selection.
 
     Returns:
         The collapsed rows. Where more than one shape is present, each row
@@ -422,16 +481,17 @@ def _fold_scope(node: Any, conn) -> list[dict[str, Any]]:
     """
 
     groups = _shape_groups(node)
+    scope = resolved if resolved is not None else _scope.ResolvedScope()
 
     if len(groups) < 2:
 
         only = next(iter(groups.values()), [])
 
         return _fold.fold_rows(
-            _representative([query for _, query in only]),
-            _scope.ResolvedScope(),
+            _paged(only, page),
+            scope,
             conn = conn,
-            record = _record_filter(node, conn),
+            record = _narrowed(_record_filter(node, conn), page, scope),
         )
 
     rows: list[dict[str, Any]] = []
@@ -439,12 +499,12 @@ def _fold_scope(node: Any, conn) -> list[dict[str, Any]]:
     for members in groups.values():
 
         part = _restricted(node, {id(one) for one, _ in members})
-        query = _representative([query for _, query in members])
+        query = _paged(members, page)
         folded = _fold.fold_rows(
             query,
-            _scope.ResolvedScope(),
+            scope,
             conn = conn,
-            record = _record_filter(part, conn),
+            record = _narrowed(_record_filter(part, conn), page, scope),
         )
 
         for row in folded:
@@ -566,6 +626,68 @@ def _representative(
         return _params.parse({})
 
     return max(queries, key = lambda one: one.limit)
+
+
+def _paged(
+        members: Sequence[tuple[Component, _params.InteractionQuery]],
+        page: _params.InteractionQuery | None,
+) -> _params.InteractionQuery:
+    """
+    The query one shape group is folded under.
+
+    Two statements meet here, and each is taken from the side that made it. The
+    group says what one of its rows **is**: the grain and the collapse mode are
+    the key it folds on. An enclosing request says how much of it comes back
+    and what is projected onto it. A request that names a dataset is not one of
+    that dataset's components, so its `limit` makes no claim about their shape
+    — the same separation `_representative` keeps between the components
+    themselves.
+
+    Args:
+        members: One shape group's components and their effective queries.
+        page: The enclosing request, or None where the composition is itself
+            the request and each group pages under its widest component.
+
+    Returns:
+        The query to fold under.
+    """
+
+    shape = _representative([query for _, query in members])
+
+    if page is None:
+
+        return shape
+
+    return replace(page, grain = shape.grain, collapse = shape.collapse)
+
+
+def _narrowed(
+        record: RecordFilter,
+        page: _params.InteractionQuery | None,
+        scope: _scope.ResolvedScope,
+) -> RecordFilter:
+    """
+    One shape group's filter, intersected with the request that asked for it.
+
+    A recipe narrows the dataset and a caller's filters narrow the request, and
+    both hold at once. That is the intersection the engine already makes for a
+    recipe of one shape; here it is made once per group, because here there is
+    more than one filter to make it against.
+
+    Args:
+        record: The group's own record filter.
+        page: The enclosing request, or None where there is none to intersect.
+        scope: The resolved scope the request's own predicates read against.
+
+    Returns:
+        The filter the group folds.
+    """
+
+    if page is None:
+
+        return record
+
+    return record.combined(record_filter(page, scope), 'AND')
 
 
 def _shape_groups(
