@@ -28,12 +28,32 @@ check: a component, a union and an exclusion are all **record filters**, and a
 collapse is the fold of whatever filter reaches it. So the collapse cannot see
 rows an exclusion removed, and a union that has not been collapsed has no
 summaries to be wrong.
+
+**A shape is per component, and the order rule binds inside one shape.**
+
+The grain and the collapse mode together decide what one row *is* — the key it
+is folded on. A component carries its own, because a composition is allowed to
+span two of them: a union of a binary dataset and a reaction projection is a
+union of rows that are not the same kind of thing, and no single key answers
+both. So the components are grouped by the key their rows fold on, each group
+is unioned and folded **once**, and the groups are concatenated. Inside a
+group the order rule above holds unchanged — that is where two rows can be the
+same row, and where collapsing before the union would split one interaction in
+two. Across groups there are two rows because there are two questions, and
+each row says which grain answered it.
+
+A recipe may also state the shape of the rows it returns, on its `union` or on
+its `collapse`. That is a different statement from a component's own: the
+component's is the grain it is **read** at, the recipe's is the grain its union
+**folds** at, and where the recipe states one it is the shape every component
+under it takes. A recipe that states nothing lets its components disagree, and
+disagreeing is what spans two grains.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
 
 from ..graph import SEARCH_SCHEMA
@@ -41,7 +61,7 @@ from ..resource_catalog import resolve_resource_filters
 from . import fold as _fold
 from . import params as _params
 from . import scope as _scope
-from .select import RecordFilter, record_filter
+from .select import RecordFilter, group_keys, page_keys, record_filter
 
 _log = logging.getLogger(__name__)
 
@@ -65,6 +85,12 @@ class Node:
     children: list[Any] = field(default_factory = list)
     resources: list[str] = field(default_factory = list)
     layer: str | None = None
+    # The shape the recipe states for the rows under this node, where it states
+    # one. It overrides what the components say, because the nearest enclosing
+    # statement is the one made about these rows. None leaves each component
+    # its own, which is how a recipe spans two grains.
+    grain: str | None = None
+    collapse_mode: str | None = None
 
 
 def component(payload: dict[str, Any]) -> Component:
@@ -81,33 +107,53 @@ def component(payload: dict[str, Any]) -> Component:
     return Component(query = _params.parse(payload), payload = dict(payload or {}))
 
 
-def union(components: Sequence[Any]) -> Node:
+def union(
+        components: Sequence[Any],
+        *,
+        grain: str | None = None,
+        collapse: str | None = None,
+) -> Node:
     """
     Combine the row sets of several components or nodes.
 
     Args:
         components: The components or nodes to combine.
+        grain: The grain the union folds at, where the recipe states one. It
+            replaces the grain the components were read at, so stating one is
+            how a recipe asks for a single shape from components that disagree.
+        collapse: The collapse mode the union folds at, on the same terms.
 
     Returns:
         The union node. It carries no summaries of its own — a `collapse` over
         it recomputes them over the scope the union actually holds.
     """
 
-    return Node(operation = 'union', children = list(components))
+    return Node(
+        operation = 'union',
+        children = list(components),
+        grain = _shape_word(grain, _params.GRAINS),
+        collapse_mode = _shape_word(collapse, _params.COLLAPSE_MODES),
+    )
 
 
-def collapse(node: Any) -> Node:
+def collapse(node: Any, *, mode: str | None = None) -> Node:
     """
     Fold a node to one row per key, over that node's own resolved scope.
 
     Args:
         node: The component or node to fold.
+        mode: How far to fold, where the recipe says. A mode stated here is the
+            recipe's statement about its own rows and replaces the components'.
 
     Returns:
         The collapse node.
     """
 
-    return Node(operation = 'collapse', children = [node])
+    return Node(
+        operation = 'collapse',
+        children = [node],
+        collapse_mode = _shape_word(mode, _params.COLLAPSE_MODES),
+    )
 
 
 def exclude(node: Any, resources: Sequence[str]) -> Node:
@@ -153,8 +199,12 @@ def run(node: Any, *, conn = None) -> list[dict[str, Any]]:
         conn: An open connection, or None to open one.
 
     Returns:
-        Collapsed rows, one per ordered `(subject, object, class)`, so a
-        composition and a plain query are comparable row for row.
+        Collapsed rows, one per key of the shape the composition folds at — an
+        ordered `(subject, object, class)` at the default grain, so a
+        composition and a plain query are comparable row for row. A composition
+        that spans two shapes returns the rows of each, and every one of them
+        carries the `grain` it was folded at, because the page can no longer
+        name one for all of them.
     """
 
     with _scope.connection(conn) as live:
@@ -256,6 +306,12 @@ def record_filter_for(node: Any, *, conn) -> RecordFilter | None:
         One boolean expression over the record alias `r`, or None when the
         composition holds a component that has already been folded and so is a
         row set rather than a filter.
+
+        This is the composition's selection and nothing else. A composition
+        whose components fold on different keys still resolves to one
+        predicate — the rows it may see are one set — but no single fold turns
+        that set into its rows, and `run` is the path that folds it once per
+        shape.
     """
 
     inner = node
@@ -345,25 +401,66 @@ def _rows(node: Any, conn) -> list[dict[str, Any]]:
 
 def _fold_scope(node: Any, conn) -> list[dict[str, Any]]:
     """
-    Fold whatever record filter a node resolves to.
+    Fold whatever record filter a node resolves to, once per shape it holds.
+
+    Components that fold on the same key are one fold: their filters are ORed
+    and the summaries are recomputed over everything the union admits, which is
+    the order rule. Components that fold on different keys cannot be: the rows
+    of one are not the rows of the other, and folding them together would
+    answer one of the two questions under the name of both. Each shape is
+    therefore restricted out of the tree — exclusions and all — folded on its
+    own, and the results concatenated.
 
     Args:
         node: The composition.
         conn: An open connection.
 
     Returns:
-        The collapsed rows.
+        The collapsed rows. Where more than one shape is present, each row
+        names the grain it was folded at, since no single value describes the
+        page any more.
     """
 
-    predicate = _record_filter(node, conn)
-    query = _representative(node)
+    groups = _shape_groups(node)
 
-    return _fold.fold_rows(
-        query,
-        _scope.ResolvedScope(),
-        conn = conn,
-        record = predicate,
-    )
+    if len(groups) < 2:
+
+        only = next(iter(groups.values()), [])
+
+        return _fold.fold_rows(
+            _representative([query for _, query in only]),
+            _scope.ResolvedScope(),
+            conn = conn,
+            record = _record_filter(node, conn),
+        )
+
+    rows: list[dict[str, Any]] = []
+
+    for members in groups.values():
+
+        part = _restricted(node, {id(one) for one, _ in members})
+        query = _representative([query for _, query in members])
+        folded = _fold.fold_rows(
+            query,
+            _scope.ResolvedScope(),
+            conn = conn,
+            record = _record_filter(part, conn),
+        )
+
+        for row in folded:
+
+            row['grain'] = query.grain
+
+            if query.grain == 'interaction':
+
+                # The collapse mode describes how far an ordered endpoint pair
+                # folds. At the other grain nothing reads it, so naming it on
+                # the row would be a claim the fold never made.
+                row['collapse'] = query.collapse
+
+        rows.extend(folded)
+
+    return rows
 
 
 def _scopable(node: Any) -> bool:
@@ -444,45 +541,156 @@ def _record_filter(node: Any, conn) -> RecordFilter:
     raise ValueError(f'unknown composition operation {node.operation!r}')
 
 
-def _representative(node: Any) -> _params.InteractionQuery:
+def _representative(
+        queries: Sequence[_params.InteractionQuery],
+) -> _params.InteractionQuery:
     """
-    The paging and shape a composition folds under.
+    The paging **one shape group** folds under.
+
+    Paging only: every query here already folds on the same key, so the widest
+    one carries the group's shape as much as any other does. Choosing a
+    representative for the shape as well is what used to drop a component's
+    own collapse mode whenever another component asked for more rows — a
+    comparison of limits deciding what a row is.
 
     Args:
-        node: The composition.
+        queries: The effective queries of one shape group.
 
     Returns:
-        The widest of the components' own queries, so a composition returns at
-        least as much as its largest component asked for.
+        The widest of them, so a composition returns at least as much as its
+        largest component asked for.
     """
-
-    queries = _queries(node)
 
     if not queries:
 
         return _params.parse({})
 
-    widest = max(queries, key = lambda one: one.limit)
-
-    return widest
+    return max(queries, key = lambda one: one.limit)
 
 
-def _queries(node: Any) -> list[_params.InteractionQuery]:
+def _shape_groups(
+        node: Any,
+) -> dict[Any, list[tuple[Component, _params.InteractionQuery]]]:
     """
-    Every component query under a node.
+    The components under a node, gathered by the key their rows fold on.
 
     Args:
         node: The composition.
 
     Returns:
-        The queries, in tree order.
+        `{key: [(component, effective query), …]}`, in tree order, where the
+        key is the page key and the fold key together — which is the whole of
+        what makes two rows the same kind of thing.
+    """
+
+    groups: dict[Any, list[tuple[Component, _params.InteractionQuery]]] = {}
+
+    for one, query in _shaped(node):
+
+        groups.setdefault((page_keys(query), group_keys(query)), []).append(
+            (one, query),
+        )
+
+    return groups
+
+
+def _shaped(
+        node: Any,
+        grain: str | None = None,
+        collapse: str | None = None,
+) -> list[tuple[Component, _params.InteractionQuery]]:
+    """
+    Every component under a node, with the shape it is actually folded at.
+
+    A component states the grain and the collapse it is read at. A `union` or
+    a `collapse` may state the shape the recipe folds its rows at. The nearest
+    enclosing statement wins, so a nested union's own grain governs its own
+    components and nothing else.
+
+    Args:
+        node: The composition.
+        grain: The grain stated by an enclosing node, or None.
+        collapse: The collapse mode stated by an enclosing node, or None.
+
+    Returns:
+        The components and their effective queries, in tree order.
     """
 
     if isinstance(node, Component):
 
-        return [node.query]
+        return [(
+            node,
+            replace(
+                node.query,
+                grain = grain or node.query.grain,
+                collapse = collapse or node.query.collapse,
+            ),
+        )]
 
-    return [query for child in node.children for query in _queries(child)]
+    return [
+        pair
+        for child in node.children
+        for pair in _shaped(
+            child,
+            node.grain or grain,
+            node.collapse_mode or collapse,
+        )
+    ]
+
+
+def _restricted(node: Any, keep: set[int]) -> Any | None:
+    """
+    The same composition with only some of its components left in it.
+
+    The tree is rebuilt rather than the components collected, so that an
+    `exclude` standing over the union still stands over the part of it that is
+    folded here. A branch that keeps no component drops out. A union left with
+    one child is that child's filter, which is what a union of one means.
+
+    Args:
+        node: The composition.
+        keep: The `id()` of every component to keep.
+
+    Returns:
+        The restricted composition, or None where it holds nothing.
+    """
+
+    if isinstance(node, Component):
+
+        return node if id(node) in keep else None
+
+    children = [
+        child for child in
+        (_restricted(one, keep) for one in node.children)
+        if child is not None
+    ]
+
+    return replace(node, children = children) if children else None
+
+
+def _shape_word(value: Any, vocabulary: Sequence[str]) -> str | None:
+    """
+    One stated shape word, or None where nothing usable was stated.
+
+    A word outside the vocabulary is dropped rather than refused, the same way
+    the parameter surface drops one: a shape says how to present an answer, so
+    a typo in it costs the presentation and never the answer.
+
+    Args:
+        value: The word as the recipe wrote it.
+        vocabulary: The words this dimension admits.
+
+    Returns:
+        The word, or None.
+    """
+
+    word = str(value or '').strip().lower()
+
+    if value and word not in vocabulary:
+
+        _log.warning('ignoring unknown composition shape %r', value)
+
+    return word if word in vocabulary else None
 
 
 def _source_ids(resources: Sequence[str], conn) -> list[int]:
@@ -543,7 +751,20 @@ def _node_from(payload: dict[str, Any], conn) -> Any:
 
         components = [component(payload)]
 
-    node: Any = union(components) if len(components) > 1 else components[0]
+    # A shape written beside the component list is the recipe's own statement
+    # about the rows it returns, and it is the same word a request writes for
+    # the same purpose. Stating it is how a recipe asks for one shape from
+    # components read at several. Leaving it out is how `cosmos` keeps the
+    # reaction projection at its own grain.
+    stated = {
+        'grain': payload.get('grain'),
+        'collapse': payload.get('collapse'),
+    }
+    node: Any = (
+        union(components, **stated)
+        if len(components) > 1 or any(stated.values())
+        else components[0]
+    )
     steps = list(payload.get('steps') or [])
 
     if (operation := payload.get('operation')) in OPERATIONS and operation != 'union':
@@ -581,7 +802,7 @@ def _apply(node: Any, step: dict[str, Any], conn) -> Any:
 
     if operation == 'collapse':
 
-        return collapse(node)
+        return collapse(node, mode = step.get('collapse') or step.get('mode'))
 
     if operation == 'annotate':
 
@@ -627,12 +848,21 @@ def _preset(name: str, conn) -> Any:
         The composition. A per-component override — `nichenet`'s, say —
         works because a preset is a component like any other: replacing one
         component leaves the rest standing.
+
+        The shape it declares travels with it: a preset used as a component of
+        a wider recipe is read at its own grain and its own collapse, which is
+        the whole of what lets one recipe hold a binary dataset beside a
+        reaction one. The grain is probed rather than named, because a serving
+        copy older than the column would otherwise turn every preset into an
+        error; a build without it declares no grain, and the component keeps
+        the default.
     """
 
     row = conn.execute(
         f"""
         SELECT name, composition, included_sources, interaction_class_scope,
-               collapse_mode
+               collapse_mode,
+               {_scope._optional_column(conn, 'network_registry', 'grain', 'text')}
         FROM {SEARCH_SCHEMA}.network_registry
         WHERE name = %s
         """,
@@ -655,4 +885,5 @@ def _preset(name: str, conn) -> Any:
             'interaction_classes': list(row['interaction_class_scope'] or []),
         },
         'collapse': row['collapse_mode'],
+        'grain': row['grain'],
     })
