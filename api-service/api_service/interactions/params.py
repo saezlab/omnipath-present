@@ -139,6 +139,30 @@ MAX_LONG_TAIL_ROWS = 1_000_000
 # keys costs 0.282 s and answers exactly wherever the answer fits inside it.
 KEY_PROBE_CEILING = 100_000
 
+# The participants one page may return, counted across every key on it.
+#
+# The binary grain has no counterpart to this bound and needs none: a page of
+# keys is a page of exactly twice as many nodes, so bounding the keys bounds
+# the answer. Grouping on the interaction itself breaks that identity. One row
+# is one interaction whatever its arity, and the arity varies by three orders
+# of magnitude — measured over this build's reaction star rows: mean 10.91,
+# median about 7, 99th percentile 75, maximum 4,853. A full 500-key page
+# therefore returns about 5,500 participants typically and 37,500 with every
+# key at the 99th percentile, while a hundred keys at the widest return
+# 485,300 behind an unchanged `limit`.
+#
+# The value sits between those, and it has a floor as well as a ceiling. The
+# floor is the load-bearing half: an interaction has to stay reachable on a
+# page of its own, because a bound under a single interaction's participant
+# count makes that row unfetchable at every page size, which refuses the data
+# rather than the page. `arity` is a smallint, so no interaction any build can
+# store holds more than 32,767 participants, and a bound above that number
+# keeps every one of them fetchable whatever a later derive loads. The ceiling
+# is the pathological page, 485,300. Between the two, this admits a full page
+# at the 99th percentile with room to spare, at fifty times the nodes a full
+# binary page returns.
+MAX_PAGE_PARTICIPANTS = 50_000
+
 
 def _strings(value: Any) -> list[str]:
     """

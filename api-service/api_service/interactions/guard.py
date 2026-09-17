@@ -26,6 +26,12 @@ a post-fold **sort**, and the two are treated apart here on purpose.
 
 Treating the two alike would either forbid a cheap request or promise an
 unbounded one.
+
+One refusal here does not belong to that frame and is written apart from it:
+where the page groups on the interaction itself, the page bound stops bounding
+the answer, because one row is one interaction whatever its arity. That one is
+counted from the page's own keys instead of priced from a distribution, and
+`_refuse_wide_participant_page` says why a distribution cannot do it.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ from .params import (
     MAX_ATTRIBUTES,
     MAX_LONG_TAIL_ROWS,
     MAX_OFFSET,
+    MAX_PAGE_PARTICIPANTS,
     SORTABLE_COLUMNS,
     InteractionQuery,
 )
@@ -52,6 +59,8 @@ from .select import (
     group_keys,
     key_estimate_sql,
     key_probe_sql,
+    key_selection_sql,
+    page_keys,
     record_scan_sql,
 )
 
@@ -59,12 +68,23 @@ from .select import (
 # them cannot have it rewritten afterwards.
 _SIGN_KEYS = frozenset({'is_directed', 'is_stimulation', 'is_inhibition'})
 
+# The page key that returns a variable number of nodes per row. A page keyed on
+# the ordered endpoint pair returns two nodes per row and always will; a page
+# keyed on this one returns however many participants each interaction has.
+_PARTICIPANT_KEY = 'interaction_id'
+
 _log = logging.getLogger(__name__)
 
 # Nine rows: one per observed `source_count` level, with the number of
 # collapse keys at that level. The derive writes it; where it is absent the
 # same nine rows are computed once and the estimate says so.
 HISTOGRAM_TABLE = 'interaction_source_count_histogram'
+
+# The interaction header: one row per interaction, carrying the stored `arity`
+# the participant fan-out is counted from. `select` names the record table and
+# is the only module that may; this one is named here because pricing a request
+# is the only thing the service reads it for.
+HEADER_TABLE = 'interaction'
 
 # Cached per schema. The computed fallback is a full fold (about four seconds
 # over 14.7 million record rows), so it is paid once per process and not once
@@ -155,8 +175,9 @@ def check(
     Raises:
         GuardrailRefusal: For a sort on a folded value, a sort on a column that
             reaches no index, a page too deep for `offset`, a filter on an
-            unindexed long-tail key at scale, or an unbounded long-tail
-            projection.
+            unindexed long-tail key at scale, an unbounded long-tail
+            projection, or a page whose participants outrun what one response
+            may carry.
     """
 
     # The refusals that need no number come first, so a request that is wrong
@@ -171,6 +192,10 @@ def check(
         _refuse_unindexed_long_tail_filter(query, resolved, live, record)
         estimate = _price(query, resolved, live, record)
         _refuse_unbounded_projection(query, estimate, live)
+        # Last, because it is the one check that runs the page's own statement
+        # rather than reading a plan or a stored distribution. Everything a
+        # cheaper source can answer has been answered by the time it runs.
+        _refuse_wide_participant_page(query, resolved, live, record)
 
         return estimate
 
@@ -449,6 +474,141 @@ def _refuse_widening_the_group_key(query: InteractionQuery) -> None:
         status_code = 400,
         parameter = 'include_outofscope_signdir',
         collapse = query.collapse,
+    )
+
+
+def _refuse_wide_participant_page(
+        query: InteractionQuery,
+        resolved: ResolvedScope,
+        conn,
+        record: RecordFilter | None,
+) -> None:
+    """
+    Refuse a page whose participants outrun what one response may carry.
+
+    A page keyed on the ordered endpoint pair returns two nodes per row, so
+    bounding the keys bounds the answer and nothing else is needed. A page
+    keyed on the interaction itself returns one row per interaction whatever
+    its arity, and over this build's reaction star rows the arity runs mean
+    10.91, median about 7, 99th percentile 75, maximum 4,853. So the same
+    hundred-key page returns about 1,091 participants typically, 7,500 at the
+    99th percentile and 485,300 at the widest reaction — three orders of
+    magnitude behind one unchanged `limit`. The key is asked for rather than
+    the grain read, for the reason the widening refusal above gives: it is the
+    key that fans out, and a parameter that does not change the key makes no
+    claim about it.
+
+    **Where the number comes from.** `interaction.arity` is a stored smallint
+    on the header row and is exactly the quantity in question, one value per
+    interaction. The rest of this module prices from `facet_relation_bitmap`
+    cardinalities keyed on `source_id`, and that keying is the wrong shape for
+    this question in the way three findings of the cycle already record from
+    other directions: a facet counting record rows per resource cannot say how
+    many participants an interaction has, and scaling it by a record share
+    would produce a confident number that means nothing. The header is one
+    index lookup from the page — the join is a hundred searches of
+    `interaction_pkey` at 0.007 ms each, 0.7 ms and 500 buffers over a
+    hundred-key page — so the honest source is also the cheap one.
+
+    **Counted from the page rather than estimated before it, and why that is
+    still a bound.** Every other rule here prices a request before it runs. A
+    fan-out priced that way cannot bound this one: taken at the mean it admits
+    the pathological page, taken at the maximum it refuses every page, and the
+    distribution offers nothing between them, because which interactions land
+    on a page is not a property of the distribution. Exactness is the only
+    thing that discriminates here, so the page's keys are asked for and their
+    arity summed. That is late by the letter of "priced before it runs" and
+    early by its purpose: the statement is the page-bounded key selection the
+    fold's own `FROM` starts from, and it runs here before the fold, before
+    the participant join, before the node lookup and before one row is
+    rendered — which is all of the work this bound exists to refuse. The cost
+    of asking is that key selection twice, paid only at the grain that has a
+    fan-out.
+
+    Args:
+        query: The parsed request.
+        resolved: The resolved scope.
+        conn: An open connection.
+        record: A pre-built record filter, for a composition.
+
+    Raises:
+        GuardrailRefusal: When the page's own participants pass
+            `MAX_PAGE_PARTICIPANTS`.
+    """
+
+    if _PARTICIPANT_KEY not in page_keys(query):
+
+        return
+
+    sql, args = key_selection_sql(query, resolved, record = record)
+
+    try:
+
+        # Behind a savepoint, because the page itself runs on this connection a
+        # moment later: a statement that fails without one takes the caller's
+        # whole transaction down with it, and a bound that cannot be taken must
+        # cost the request nothing but the bound.
+        with conn.transaction():
+
+            # An inner join, because the record's foreign key to the header
+            # guarantees every page key a row there. A left join would let a
+            # page key with no header silently weigh nothing, which is a
+            # fan-out under-counted rather than one reported as unknown.
+            counted = conn.execute(
+                f"""WITH page AS (
+    {sql}
+    )
+    SELECT coalesce(sum(header.arity), 0)::bigint AS participants,
+           count(*)::bigint AS keys
+    FROM page
+    JOIN {SEARCH_SCHEMA}.{HEADER_TABLE} header USING ({_PARTICIPANT_KEY})""",
+                args,
+            ).fetchone()
+
+    except Exception as exc:  # pragma: no cover - a build without the header
+
+        # A build whose header table or `arity` column is absent cannot serve
+        # this grain at all, since the participant detail comes from the same
+        # side of the schema. Failing the count here would turn that into an
+        # error naming the cost governor rather than the missing table.
+        _log.warning(
+            'the participant fan-out could not be counted, so this page is not '
+            'bounded by it: %s', exc,
+        )
+
+        return
+
+    participants = int(counted['participants'])
+    keys = int(counted['keys'])
+
+    if participants <= MAX_PAGE_PARTICIPANTS:
+
+        return
+
+    # This page's own mean, and named as that in the message. It is the one
+    # number here that is not exact, and a caller retrying on it either fits or
+    # is refused again with a smaller page — which is why a hint is worth more
+    # than the silence that leaves them halving `limit` blindly.
+    fits = max(1, keys * MAX_PAGE_PARTICIPANTS // participants)
+
+    raise GuardrailRefusal(
+        f'this page of {keys:,} interactions returns {participants:,} '
+        f'participants between them, past the {MAX_PAGE_PARTICIPANTS:,} one '
+        f'page may return. A row here is one interaction whatever its arity, '
+        f'so the page bound is not a bound on the nodes and a wide reaction '
+        f'costs what a thousand ordinary rows cost. Ask for fewer keys with '
+        f'`limit` — this page averages {participants / max(keys, 1):.1f} '
+        f'participants per interaction, so a limit near {fits:,} fits it — or '
+        f'narrow the scope with `resources` or `datasets`, or ask for the '
+        f'binary projection with grain=interaction. One interaction always '
+        f'fits on a page of its own: `arity` is a smallint, so none of them '
+        f'reaches this bound alone.',
+        status_code = 400,
+        parameter = 'limit',
+        grain = query.grain,
+        page_interactions = keys,
+        page_participants = participants,
+        maximum_participants = MAX_PAGE_PARTICIPANTS,
     )
 
 

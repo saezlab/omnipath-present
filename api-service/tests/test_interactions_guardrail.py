@@ -812,3 +812,331 @@ def test_an_unscoped_estimate_is_not_bounded_by_the_scan(client):
         f'the unscoped total came back as {body["total"]}; the planner prices '
         f'the whole record within half a percent and there is nothing to bound'
     )
+
+
+# ── The participant fan-out: a page of keys is not a page of nodes ───────────
+#
+# Every bound above counts keys, rows or documents, and each of them bounds the
+# answer because a key at the binary grain is two nodes and always will be.
+# Grouping on the interaction itself breaks that identity: one row is one
+# interaction whatever its arity. **Measured on dev3 2026-09-15** over the
+# reaction star rows: participants per reaction run mean 10.91, median about 7,
+# 99th percentile 75, maximum 4,853. So one unchanged `limit` of 100 returns
+# about 1,091 participants typically, 7,500 at the 99th percentile and 485,300
+# at the widest reaction in the build.
+#
+# **What the build can and cannot show.** `interaction.arity` is a stored
+# smallint on the header row and is exactly the quantity in question, but it
+# holds 1 and 2 and nothing wider here — 5,098 and 13,998,969 — because no
+# derive has run since the hyperedge code landed. The distribution above is a
+# property of the record's star rows rather than of that column. So the tests
+# split: the mechanism is asserted against the build, where a page of a hundred
+# interactions carries exactly 200 participants and the bound is lowered to
+# meet it, and the threshold's own shape is asserted against interactions built
+# for it in a temporary schema. A test of a 4,853-participant refusal that
+# passed on this build would be passing because the row is missing.
+
+# The bound's floor. `arity` is a smallint, so no interaction any build can
+# store holds more participants than this, and a bound above it keeps every
+# interaction fetchable on a page of its own. A bound below one interaction's
+# own count would make that row unreachable at every page size, which refuses
+# the data rather than the page.
+WIDEST_STORABLE_INTERACTION = 32_767
+
+# The measured distribution, as pages of a hundred keys: the typical page, the
+# 99th-percentile page and the page of the widest reaction in the build.
+FAN_OUT_MEAN = 11
+FAN_OUT_99TH = 75
+FAN_OUT_WIDEST = 4_853
+
+
+def _participant_payload(**extra: Any) -> dict:
+    return {'grain': 'participant', 'limit': 100, **extra}
+
+
+def _page_participants(db, limit: int = 100) -> int:
+    """
+    The participants of the first page, counted without the engine's statement.
+
+    Args:
+        db: An open connection.
+        limit: The page size.
+
+    Returns:
+        `sum(arity)` over the first `limit` interactions in key order, which is
+        what the guard's own count has to agree with.
+    """
+
+    row = db.execute(
+        f"""
+        SELECT coalesce(sum(header.arity), 0)::bigint AS participants
+        FROM (
+          SELECT DISTINCT interaction_id
+          FROM {SCHEMA}.interaction_fact_resource
+          ORDER BY 1
+          LIMIT %s
+        ) page
+        JOIN {SCHEMA}.interaction header USING (interaction_id)
+        """,
+        (limit,),
+    ).fetchone()
+
+    return int(row['participants'])
+
+
+@pytest.fixture
+def scratch(monkeypatch):
+    """
+    Interactions as wide as this build has none, in a schema of its own.
+
+    Nothing is written to the build. The tables live in the connection's own
+    temporary schema, they are created empty for each test and they are gone
+    when the connection closes, which is what makes it acceptable to fabricate
+    rows against a database that is also a serving copy.
+
+    The scope is resolved against the real schema first and the engine's schema
+    pointed at the temporary one afterwards, because resolving a scope reads
+    the resource facet and the vocabularies, and only the record and the header
+    are being stood in for.
+    """
+
+    pytest.importorskip('psycopg')
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+    select = _engine('select')
+
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+    def priced(count: int, arity: int, payload: dict[str, Any]):
+        """Stand up `count` interactions of `arity` participants, then price one page."""
+
+        conn.execute('CREATE TEMP TABLE interaction_fact_resource (interaction_id uuid NOT NULL)')
+        conn.execute(
+            'CREATE TEMP TABLE interaction '
+            '(interaction_id uuid PRIMARY KEY, arity smallint NOT NULL)'
+        )
+        conn.execute(
+            'INSERT INTO pg_temp.interaction (interaction_id, arity) '
+            'SELECT gen_random_uuid(), %s FROM generate_series(1, %s)',
+            (arity, count),
+        )
+        conn.execute(
+            'INSERT INTO pg_temp.interaction_fact_resource '
+            'SELECT interaction_id FROM pg_temp.interaction'
+        )
+
+        query = _member(params, 'parse', 'params.parse(payload)')(payload)
+        resolved = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')(
+            query, conn = conn
+        )
+
+        monkeypatch.setattr(guard, 'SEARCH_SCHEMA', 'pg_temp')
+        monkeypatch.setattr(select, 'SEARCH_SCHEMA', 'pg_temp')
+
+        return _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')(
+            query, resolved, conn = conn,
+        )
+
+    try:
+        yield priced
+    finally:
+        conn.close()
+
+
+def test_one_interaction_always_fits_on_a_page_of_its_own():
+    """A bound under a single interaction makes that row unreachable, not cheap."""
+
+    params = _engine('params')
+    bound = _member(
+        params, 'MAX_PAGE_PARTICIPANTS', 'params.MAX_PAGE_PARTICIPANTS: int',
+    )
+
+    assert bound > WIDEST_STORABLE_INTERACTION, (
+        f'the fan-out bound is {bound:,} and `arity` is a smallint, so an '
+        f'interaction of up to {WIDEST_STORABLE_INTERACTION:,} participants '
+        f'can be stored and none of them could then be read at any page size'
+    )
+
+
+def test_the_widest_interaction_in_the_build_stays_reachable(db):
+    """The same floor, against what this build actually holds."""
+
+    params = _engine('params')
+    bound = _member(
+        params, 'MAX_PAGE_PARTICIPANTS', 'params.MAX_PAGE_PARTICIPANTS: int',
+    )
+    widest = int(db.execute(f'SELECT max(arity) AS widest FROM {SCHEMA}.interaction').fetchone()['widest'])
+
+    assert widest <= bound, (
+        f'the widest interaction of this build has {widest:,} participants and '
+        f'the page bound is {bound:,}, so that interaction cannot be read at '
+        f'any page size; raise the bound or the row is unservable'
+    )
+
+
+def test_the_fan_out_is_counted_from_the_stored_arity(db, monkeypatch):
+    """The header says how many participants an interaction has; the facet cannot."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    refusal = _member(guard, 'GuardrailRefusal', 'guard.GuardrailRefusal(Exception)')
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+    parse = _member(params, 'parse', 'params.parse(payload)')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')
+
+    query = parse(_participant_payload())
+    resolved = resolve(query, conn = db)
+    counted = _page_participants(db)
+
+    monkeypatch.setattr(guard, 'MAX_PAGE_PARTICIPANTS', counted - 1)
+
+    with pytest.raises(refusal) as raised:
+        check(query, resolved, conn = db)
+
+    assert raised.value.context.get('page_participants') == counted, (
+        f'the refusal prices this page at '
+        f'{raised.value.context.get("page_participants")} participants against '
+        f'the {counted} the page holds; a count taken from anything but the '
+        f'header\'s own arity is a number about a different question'
+    )
+
+
+def test_the_refusal_says_what_to_ask_for_instead(db, monkeypatch):
+    """A refusal that names no alternative is a dead end, here as everywhere."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    refusal = _member(guard, 'GuardrailRefusal', 'guard.GuardrailRefusal(Exception)')
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+    parse = _member(params, 'parse', 'params.parse(payload)')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')
+
+    query = parse(_participant_payload())
+    resolved = resolve(query, conn = db)
+
+    monkeypatch.setattr(guard, 'MAX_PAGE_PARTICIPANTS', 10)
+
+    with pytest.raises(refusal) as raised:
+        check(query, resolved, conn = db)
+
+    message = raised.value.message.lower()
+
+    assert 400 <= raised.value.status_code < 500
+    assert raised.value.context.get('parameter') == 'limit', (
+        f'the refusal names `{raised.value.context.get("parameter")}`; the '
+        f'parameter a caller turns to fit this page is the page size'
+    )
+    assert 'limit' in message and 'grain=interaction' in message, (
+        f'the message must name the smaller page and the binary projection as '
+        f'the two ways out; it reads {message}'
+    )
+
+
+def test_the_binary_grain_is_not_bounded_by_a_fan_out_it_cannot_have(db, monkeypatch):
+    """Two nodes a row, always — so the same page is priced and served."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+    parse = _member(params, 'parse', 'params.parse(payload)')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')
+
+    query = parse({'limit': 100})
+    resolved = resolve(query, conn = db)
+
+    # Below the 200 nodes a hundred binary keys return, so a bound applied to
+    # the wrong grain would fire here and refuse a request whose node count was
+    # never in question.
+    monkeypatch.setattr(guard, 'MAX_PAGE_PARTICIPANTS', 10)
+
+    assert check(query, resolved, conn = db), (
+        'a binary page was refused by the participant fan-out bound; the key '
+        'there is the endpoint pair and the answer is two nodes a row'
+    )
+
+
+def test_the_route_refuses_a_page_it_cannot_return(client, monkeypatch):
+    """The refusal reaches the caller as a 4xx body, not as a long response."""
+
+    guard = _engine('guard')
+
+    monkeypatch.setattr(guard, 'MAX_PAGE_PARTICIPANTS', 10)
+
+    response = client.post('/interactions', json = _participant_payload())
+
+    assert 400 <= response.status_code < 500, (
+        f'a page past the participant bound answered {response.status_code}; '
+        f'a bound that refuses after the work is done is not a bound'
+    )
+    assert 'limit' in _body(response)
+
+
+@pytest.mark.parametrize(
+    'arity, refused',
+    [(FAN_OUT_MEAN, False), (FAN_OUT_99TH, False), (FAN_OUT_WIDEST, True)],
+)
+def test_the_bound_admits_the_ordinary_page_and_refuses_the_pathological_one(
+        scratch, arity, refused,
+):
+    """The threshold's own shape, against interactions this build does not hold."""
+
+    guard = _engine('guard')
+    refusal = _member(guard, 'GuardrailRefusal', 'guard.GuardrailRefusal(Exception)')
+
+    if not refused:
+
+        assert scratch(100, arity, _participant_payload()), (
+            f'a hundred interactions of {arity} participants — '
+            f'{100 * arity:,} in all — were refused; the typical page and the '
+            f'99th-percentile page are what this bound exists to keep serving'
+        )
+
+        return
+
+    with pytest.raises(refusal) as raised:
+        scratch(100, arity, _participant_payload())
+
+    assert raised.value.context.get('page_participants') == 100 * arity, (
+        f'the refusal prices the page at '
+        f'{raised.value.context.get("page_participants")} against the '
+        f'{100 * arity:,} participants it holds'
+    )
+
+
+def test_a_build_without_the_header_is_left_servable(db, monkeypatch):
+    """A bound that cannot be taken costs the request the bound and nothing else."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    guard = _engine('guard')
+
+    check = _member(guard, 'check', 'guard.check(query, resolved, *, conn = None)')
+    parse = _member(params, 'parse', 'params.parse(payload)')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None)')
+
+    query = parse(_participant_payload())
+    resolved = resolve(query, conn = db)
+
+    monkeypatch.setattr(guard, 'HEADER_TABLE', 'interaction_no_such_header')
+
+    assert check(query, resolved, conn = db), (
+        'a header the build does not carry failed the request; the grain it '
+        'prices cannot be served by such a build either way, and the error a '
+        'caller sees must name the missing table rather than the cost governor'
+    )
+    assert db.execute('SELECT 1 AS ok').fetchone()['ok'] == 1, (
+        'the failed count left the connection in an aborted transaction, so '
+        'the page that runs on it next fails for a reason of the guard\'s '
+        'making'
+    )
