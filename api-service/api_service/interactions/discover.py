@@ -1051,6 +1051,20 @@ def _collapse_values(query, resolved, conn, facets, profile):
     )
 
 
+def _grain_values(query, resolved, conn, facets, profile):
+
+    return _words(
+        params.GRAINS,
+        note = (
+            'what one row stands for: an ordered endpoint pair and class, or '
+            'one interaction whatever its arity. It overrides `collapse`, '
+            'which describes a fold over an endpoint pair and says nothing '
+            'about a reaction'
+        ),
+        default = resolved.grain or 'interaction',
+    )
+
+
 def _by_resource_values(query, resolved, conn, facets, profile):
 
     return {
@@ -1173,6 +1187,7 @@ _ENTRIES = {
     'pchembl': _range_values('pchembl'),
     'score': _range_values('score'),
     'collapse': _collapse_values,
+    'grain': _grain_values,
     'by_resource': _by_resource_values,
     'include_outofscope_signdir': _flag_values(
         'surfaces sign and direction from resources outside the queried scope; '

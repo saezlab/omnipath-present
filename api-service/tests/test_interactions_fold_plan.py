@@ -229,3 +229,173 @@ def test_a_narrow_scope_folds_through_group_aggregate_too(db):
     assert 'HashAggregate' not in aggregates, (
         f'a narrow scope must stream like a wide one; plan aggregates: {aggregates}'
     )
+
+
+# ── Grain: the same shape, whichever key the fold groups on ──────────────────
+#
+# The grain changes which columns the key is built from and nothing else, so
+# the plan shape this file exists to protect has to survive it. That is the
+# measurement the whole key-list design is for: if selecting a page at
+# participant grain fell back to a blocking `HashAggregate`, the key would have
+# stopped being a page bound and a reaction would cost the scope to return.
+#
+# Every branch of `key_selection_sql` is planned below at both grains, and each
+# is checked to be the branch it claims to be before its plan is read — a
+# branch that silently stopped being reachable would otherwise pass this test
+# by never being planned at all.
+
+#: A resource whose share of the record is below the narrow threshold, so the
+#: key selection takes its `OFFSET 0` branch.
+NARROW_RESOURCE = 'neuronchat'
+
+#: One payload per branch, with the fragment that proves the branch was taken.
+BRANCHES = {
+    'default': ({'limit': 100}, 'DISTINCT ON'),
+    'post_fold': ({'source_count': {'min': 2}, 'limit': 100}, 'HAVING'),
+    'ordered_on_a_stored_column': (
+        {'order_by': 'affinity', 'limit': 100}, 'ORDER BY r.affinity',
+    ),
+    'narrow_scope': (
+        {'filters': {'resources': [NARROW_RESOURCE]}, 'limit': 100}, 'OFFSET 0',
+    ),
+}
+
+
+def _key_plan(db, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """The plan of the engine's key selection, and the statement it planned."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    select = _engine('select')
+
+    parse = _member(params, 'parse', 'params.parse(payload) -> InteractionQuery')
+    resolve = _member(scope, 'resolve', 'scope.resolve(query, *, conn = None) -> ResolvedScope')
+    key_selection_sql = _member(
+        select, 'key_selection_sql',
+        'select.key_selection_sql(query, resolved) -> (sql, args)',
+    )
+
+    query = parse(payload)
+    sql, args = key_selection_sql(query, resolve(query, conn = db))
+    row = db.execute(f'EXPLAIN (FORMAT JSON) {sql}', args).fetchone()
+
+    return row['QUERY PLAN'][0]['Plan'], sql
+
+
+def _index_leads_on(db, column: str) -> bool:
+    """Whether some index of the record leads on one column."""
+
+    return bool(
+        db.execute(
+            """
+            SELECT 1
+            FROM pg_index i
+            JOIN pg_class t ON t.oid = i.indrelid
+            JOIN pg_attribute a
+              ON a.attrelid = t.oid AND a.attnum = i.indkey[0]
+            WHERE t.relname = %s AND a.attname = %s
+            LIMIT 1
+            """,
+            (RECORD_TABLE, column),
+        ).fetchone()
+    )
+
+
+@pytest.mark.parametrize('grain', ['interaction', 'participant'])
+@pytest.mark.parametrize('branch', sorted(BRANCHES))
+def test_no_branch_of_the_key_selection_hashes_at_either_grain(db, grain, branch):
+    """A blocking aggregation finds every key in scope before the first row."""
+
+    payload, marker = BRANCHES[branch]
+    plan, sql = _key_plan(db, {**payload, 'grain': grain})
+
+    assert marker in sql, (
+        f'the `{branch}` payload no longer reaches that branch of the key '
+        f'selection at {grain} grain: the statement carries no `{marker}`, so '
+        f'the plan below would prove nothing about it'
+    )
+    assert 'HashAggregate' not in _aggregates(plan), (
+        f'the `{branch}` branch hashes at {grain} grain: it folds every key in '
+        f'scope before returning the first, so the cost tracks the scope and '
+        f'not the page. Plan aggregates: {_aggregates(plan)}'
+    )
+
+
+@pytest.mark.parametrize('grain', ['interaction', 'participant'])
+def test_a_resumed_page_hashes_at_neither_grain(db, grain):
+    """Keyset paging is an index descent, whatever the key is built from."""
+
+    params = _engine('params')
+    scope = _engine('scope')
+    select = _engine('select')
+    fold = _engine('fold')
+
+    query = params.parse({'grain': grain, 'limit': 5})
+    resolved = scope.resolve(query, conn = db)
+    keys = select.page_keys(query)
+    sql, args = select.key_selection_sql(query, resolved)
+    last = db.execute(sql, args).fetchall()[-1]
+
+    plan, resumed = _key_plan(db, {
+        'grain': grain,
+        'limit': 100,
+        'cursor': fold.encode_cursor([last[name] for name in keys]),
+    })
+
+    comparison = ', '.join(f'r.{name}' for name in keys)
+
+    assert f'({comparison}) >' in resumed, (
+        f'the resumed page at {grain} grain does not compare its key columns '
+        f'as one tuple: {resumed}'
+    )
+    assert 'HashAggregate' not in _aggregates(plan), (
+        f'a resumed page hashes at {grain} grain; plan aggregates: '
+        f'{_aggregates(plan)}'
+    )
+
+
+def test_the_participant_page_streams_through_unique_over_sorted_input(db):
+    """Not a hash, and not a materialised set: keys come back as they are read."""
+
+    plan, _ = _key_plan(db, {'grain': 'participant', 'limit': 100})
+    types = {node.get('Node Type') for node in _nodes(plan)}
+
+    assert 'Unique' in types, (
+        f'the participant page deduplicates through {sorted(types)}; `Unique` '
+        f'over sorted input is what lets the outer LIMIT stop the scan'
+    )
+    assert 'HashAggregate' not in _aggregates(plan)
+
+
+def test_the_participant_page_costs_the_page_once_an_index_leads_on_its_key(db):
+    """The page bound is only a bound where an index can deliver the key order.
+
+    This build carries no index leading on `interaction_id`, so the participant
+    page sorts the scope to get its keys in order. The plan shape is right —
+    it streams, it does not hash — but the cost tracks the scope until the
+    build adds that index, and asserting the page bound before then would
+    measure nothing. So the check names what is missing and starts running the
+    day it lands.
+    """
+
+    if not _index_leads_on(db, 'interaction_id'):
+        pytest.skip(
+            f'no index of {RECORD_TABLE} leads on interaction_id, so the '
+            f'participant page cannot read its keys in key order; the page '
+            f'bound is not a bound until the build adds one'
+        )
+
+    params = _engine('params')
+    scope = _engine('scope')
+    fold = _engine('fold')
+
+    query = params.parse({'grain': 'participant', 'limit': 100})
+    sql, args = fold.fold_sql(query, scope.resolve(query, conn = db))
+    plan = db.execute(
+        f'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}', args,
+    ).fetchone()['QUERY PLAN'][0]['Plan']
+
+    assert _widest_read(plan) <= 100 * MAX_SOURCE_COUNT * 2, (
+        f'the widest node of the participant page read {_widest_read(plan)} '
+        f'rows for a hundred-key page; the fold must be bounded by the page'
+    )

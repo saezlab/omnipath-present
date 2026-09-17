@@ -43,7 +43,16 @@ from ..graph import SEARCH_SCHEMA
 from .params import InteractionQuery
 from .project import ALIAS, aggregate_sql, long_tail, render
 from .scope import ResolvedScope
-from .select import GROUP_KEYS, REFERENCE_LATERAL, record_filter, record_source
+from .select import (
+    GROUP_KEYS,
+    KEY_CASTS,
+    REFERENCE_LATERAL,
+    key_value,
+    page_keys,
+    positions,
+    record_filter,
+    record_source,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -68,61 +77,65 @@ _PER_RESOURCE = """bool_or(r.is_directed) AS is_directed,
         AS reference_count"""
 
 
-def key_of(row: dict[str, Any]) -> tuple[str, str, int]:
+def key_of(
+        row: dict[str, Any],
+        keys: Sequence[str] = GROUP_KEYS,
+) -> tuple[Any, ...]:
     """
-    The collapse key of one row, in the form both sides of a merge can compare.
+    The page key of one row, in the form both sides of a merge can compare.
 
     Args:
         row: A folded or projected row.
+        keys: The key columns, in key order. They come from the request's
+            grain, so the key is an ordered pair and a class at one grain and
+            an interaction at the other.
 
     Returns:
-        `(subject, object, class)`, with the entity ids as text.
+        The key values, each read at the type its column compares at.
     """
 
-    return (
-        str(row['subject_entity_id']),
-        str(row['object_entity_id']),
-        int(row['interaction_class_id']),
-    )
+    return tuple(key_value(name, row[name]) for name in keys)
 
 
-def _key_arrays(rows: Sequence[dict[str, Any]]) -> list[list[Any]]:
+def _key_arrays(
+        rows: Sequence[dict[str, Any]],
+        keys: Sequence[str] = GROUP_KEYS,
+) -> list[list[Any]]:
     """
-    One page's keys, as the three arrays a single indexed read takes.
+    One page's keys, as the arrays a single indexed read takes.
 
     Args:
         rows: The folded rows of one page.
+        keys: The key columns, in key order.
 
     Returns:
-        `[subjects, objects, classes]`, deduplicated and aligned.
+        One array per key column, deduplicated by key and aligned.
     """
 
-    keys = list(dict.fromkeys(key_of(row) for row in rows))
+    found = list(dict.fromkeys(key_of(row, keys) for row in rows))
 
-    return [
-        [key[0] for key in keys],
-        [key[1] for key in keys],
-        [key[2] for key in keys],
-    ]
+    return [[key[index] for key in found] for index in range(len(keys))]
 
 
-def _page_keys_sql() -> str:
+def _page_keys_sql(keys: Sequence[str] = GROUP_KEYS) -> str:
     """
     The predicate that restricts a read to the keys of one page.
 
+    Args:
+        keys: The key columns, in key order.
+
     Returns:
-        A `WHERE` fragment taking three array parameters. It is written as a
-        join against the page's own keys so the read is a hundred index
-        descents rather than a scan: everything here runs **after** the page
-        has been chosen, and must cost what a page costs.
+        A `WHERE` fragment taking one array parameter per key column, each
+        typed from the column it is compared against. It is written as a join
+        against the page's own keys so the read is a hundred index descents
+        rather than a scan: everything here runs **after** the page has been
+        chosen, and must cost what a page costs.
     """
 
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    columns = ', '.join(f'r.{name}' for name in keys)
+    arrays = ', '.join(f'%s::{KEY_CASTS[name]}[]' for name in keys)
 
-    return (
-        f'({keys}) IN (SELECT * FROM unnest('
-        '%s::uuid[], %s::uuid[], %s::smallint[]))'
-    )
+    return f'({columns}) IN (SELECT * FROM unnest({arrays}))' 
 
 
 def _outside_sql(resolved: ResolvedScope) -> tuple[str, list[Any]]:
@@ -168,7 +181,7 @@ def by_resource_detail(
         resolved: ResolvedScope,
         *,
         conn,
-) -> dict[tuple[str, str, int], dict[str, dict[str, Any]]]:
+) -> dict[tuple[Any, ...], dict[str, dict[str, Any]]]:
     """
     Each in-scope resource's own attributes, for the keys of one page.
 
@@ -201,7 +214,11 @@ def by_resource_detail(
         named = ' AND contributor.name = ANY(%s::text[])'
         name_args = [list(query.by_resource_names)]
 
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    key_names = page_keys(query)
+    keys = ', '.join(f'r.{name}' for name in key_names)
+    # The resource is the last column of the grouping, whatever the key in
+    # front of it is: one block per key and contributor, at either grain.
+    grouped = positions((*key_names, 'resource'))
     sql = f"""SELECT {keys}, contributor.name AS resource,
       {_PER_RESOURCE}{attributes}
     FROM {record_source()} r
@@ -209,18 +226,21 @@ def by_resource_detail(
       ON contributor.source_id = r.source_id
     {REFERENCE_LATERAL}
     {extraction}
-    WHERE {_page_keys_sql()} AND ({predicate.sql}){named}
-    GROUP BY 1, 2, 3, 4
-    ORDER BY 1, 2, 3, 4"""
+    WHERE {_page_keys_sql(key_names)} AND ({predicate.sql}){named}
+    GROUP BY {grouped}
+    ORDER BY {grouped}"""
 
-    args = [*attribute_args, *_key_arrays(rows), *predicate.args, *name_args]
-    out: dict[tuple[str, str, int], dict[str, dict[str, Any]]] = {}
+    args = [
+        *attribute_args, *_key_arrays(rows, key_names),
+        *predicate.args, *name_args,
+    ]
+    out: dict[tuple[Any, ...], dict[str, dict[str, Any]]] = {}
 
     for row in conn.execute(sql, args).fetchall():
 
         detail = {
             name: value for name, value in row.items()
-            if name not in GROUP_KEYS and name != 'resource'
+            if name not in key_names and name != 'resource'
             and not name.startswith(ALIAS)
         }
         # Within one resource's block the contributor set is that resource, so
@@ -233,7 +253,7 @@ def by_resource_detail(
 
             detail['attributes'] = render(dict(row), detail, query.attributes)
 
-        out.setdefault(key_of(row), {})[row['resource']] = detail
+        out.setdefault(key_of(row, key_names), {})[row['resource']] = detail
 
     return out
 
@@ -243,7 +263,8 @@ def outofscope_signdir(
         resolved: ResolvedScope,
         *,
         conn,
-) -> dict[tuple[str, str, int], dict[str, Any]]:
+        keys: Sequence[str] = GROUP_KEYS,
+) -> dict[tuple[Any, ...], dict[str, Any]]:
     """
     What resources outside the queried scope assert about sign and direction.
 
@@ -251,6 +272,7 @@ def outofscope_signdir(
         rows: The folded rows of one page.
         resolved: The resolved scope.
         conn: An open connection.
+        keys: The page's key columns, in key order.
 
     Returns:
         `{key: {flag: value, …, 'resources': [names]}}`, holding only the keys
@@ -264,25 +286,25 @@ def outofscope_signdir(
 
         return {}
 
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    columns = ', '.join(f'r.{name}' for name in keys)
     flags = ',\n      '.join(
         f'bool_or(r.{flag}) AS {flag}' for flag in SIGN_FLAGS
     )
     asserted = ' OR '.join(f'r.{flag} IS NOT NULL' for flag in SIGN_FLAGS)
 
-    sql = f"""SELECT {keys},
+    sql = f"""SELECT {columns},
       {flags},
       array_agg(DISTINCT contributor.name) AS resources
     FROM {record_source()} r
     JOIN {SEARCH_SCHEMA}.data_source contributor
       ON contributor.source_id = r.source_id
-    WHERE {_page_keys_sql()} AND {outside} AND ({asserted})
-    GROUP BY 1, 2, 3"""
+    WHERE {_page_keys_sql(keys)} AND {outside} AND ({asserted})
+    GROUP BY {positions(keys)}"""
 
-    args = [*_key_arrays(rows), *outside_args]
+    args = [*_key_arrays(rows, keys), *outside_args]
 
     return {
-        key_of(row): {
+        key_of(row, keys): {
             **{flag: row[flag] for flag in SIGN_FLAGS},
             'resources': list(row['resources']),
         }
@@ -334,12 +356,13 @@ def apply(
         fold computed it for the queried scope.
     """
 
+    key_names = page_keys(query)
     detail = (
         by_resource_detail(rows, query, resolved, conn = conn)
         if query.by_resource else {}
     )
     widened = (
-        outofscope_signdir(rows, resolved, conn = conn)
+        outofscope_signdir(rows, resolved, conn = conn, keys = key_names)
         if query.include_outofscope_signdir else {}
     )
 
@@ -352,7 +375,7 @@ def apply(
 
     for row in projected:
 
-        key = key_of(row)
+        key = key_of(row, key_names)
 
         if query.by_resource:
 

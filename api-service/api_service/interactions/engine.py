@@ -136,6 +136,11 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
         'offset': query.offset,
         'view': query.view,
         'collapse': query.collapse,
+        # Said out loud, because the grain decides what one row of the page
+        # stands for. A caller who reads a row count without knowing whether
+        # it counts endpoint pairs or interactions is reading a number whose
+        # unit is unstated.
+        'grain': query.grain,
         'resources': resolved.resources,
     }
 
@@ -155,10 +160,11 @@ def run(payload: dict[str, Any], *, conn = None) -> dict[str, Any]:
 
     if len(rows) >= query.limit and rows:
 
+        # The key columns come off the query rather than being spelled out,
+        # so a cursor is minted at the grain the page was answered at and
+        # carries exactly the columns that grain resumes on.
         answer['cursor'] = _fold.encode_cursor([
-            rows[-1]['subject_entity_id'],
-            rows[-1]['object_entity_id'],
-            rows[-1]['interaction_class_id'],
+            rows[-1][name] for name in _select.page_keys(query)
         ])
 
     if query.filters.post_fold() or query.exact_total or estimate.at_least:
@@ -288,8 +294,8 @@ def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScop
 
     A preset is a parameter set, and this is where the rest of that set — the
     ones the scope resolution could not apply on its own — reaches the query.
-    Its collapse mode is the default for its own rows, and its declared
-    attributes are the ones its consumers expect to find. Both give way to a
+    Its collapse mode and its grain are the defaults for its own rows, and
+    its declared attributes are the ones its consumers expect to find. Both give way to a
     caller who stated something else, which is what makes them defaults.
 
     The names a preset declares that the standard output already carries are
@@ -310,6 +316,10 @@ def _apply_preset(query: _params.InteractionQuery, resolved: _scope.ResolvedScop
     if resolved.collapse_mode and not query.collapse_requested:
 
         query.collapse = resolved.collapse_mode
+
+    if resolved.grain and not query.grain_requested:
+
+        query.grain = resolved.grain
 
     attributes = list(query.attributes) or list(resolved.default_attributes)
 

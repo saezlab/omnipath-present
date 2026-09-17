@@ -40,14 +40,15 @@ from .params import InteractionQuery
 from .project import aggregate_sql, long_tail
 from .scope import ResolvedScope, connection
 from .select import (
-    COLLAPSE_KEYS,
-    GROUP_KEYS,
     REFERENCE_LATERAL,
     RecordFilter,
     decode_cursor,
     encode_cursor,
+    group_keys,
     key_count_sql,
     key_selection_sql,
+    page_keys,
+    positions,
     record_filter,
     record_source,
 )
@@ -88,6 +89,16 @@ _PROJECTION = """array_agg(DISTINCT contributor.name) AS sources,
         FILTER (WHERE c.kind IN ('pubmed', 'doi')) AS reference_pairs,
       min(r.interaction_id::text)::uuid AS interaction_id"""
 
+# The column names the projection above emits. A group key of the same name
+# has to be aliased apart from it, or the row carries one name twice and the
+# statement will not parse.
+_PROJECTED_NAMES: frozenset[str] = frozenset({
+    'sources', 'source_count', 'is_directed', 'is_stimulation',
+    'is_inhibition', 'sign_source_count', 'direction_source_count',
+    'affinity', 'pchembl', 'score', 'reference_pubmed_ids', 'reference_dois',
+    'curation_flags', 'reference_count', 'reference_pairs', 'interaction_id',
+})
+
 
 def fold_sql(
         query: InteractionQuery,
@@ -122,15 +133,25 @@ def fold_sql(
 
     predicate = record if record is not None else record_filter(query, resolved)
     keys_sql, keys_args = key_selection_sql(query, resolved, record = predicate)
-    group = COLLAPSE_KEYS.get(query.collapse, GROUP_KEYS)
-    join = ' AND '.join(f'r.{name} = k.{name}' for name in GROUP_KEYS)
-    # The extra columns of `assertion` and `none` are aliased, so a grouped
-    # flag and the `bool_or` of the same flag do not collide in the row.
+    page = page_keys(query)
+    group = group_keys(query)
+    join = ' AND '.join(f'r.{name} = k.{name}' for name in page)
+    # A group key whose name the projection also emits is aliased apart from
+    # it: the grouped `is_directed` of `assertion` and the `bool_or` of the
+    # same flag are two different answers, and at participant grain the key is
+    # the interaction the projection already names. The plain name always
+    # stays on the row and always carries the key's own value — over a group
+    # keyed on a column, an aggregate of that column is the key — so nothing
+    # downstream has to know which of the two shapes it is reading.
     selected = ', '.join(
-        f'k.{name}' if name in GROUP_KEYS else f'r.{name} AS {name}_group'
+        (
+            f'k.{name} AS {name}_group' if name in _PROJECTED_NAMES
+            else f'k.{name}'
+        )
+        if name in page else f'r.{name} AS {name}_group'
         for name in group
     )
-    grouped = ', '.join(str(index + 1) for index in range(len(group)))
+    grouped = positions(group)
 
     # Only the long tail reaches the document: a hot column is already on the
     # row the fold produces, and opening the document to fetch it again would
@@ -149,7 +170,7 @@ def fold_sql(
     {REFERENCE_LATERAL}
     {extraction}
     GROUP BY {grouped}
-    ORDER BY 1, 2, 3"""
+    ORDER BY {positions(page)}"""
 
     return sql, [*attribute_args, *keys_args, *predicate.args]
 

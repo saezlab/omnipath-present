@@ -59,6 +59,37 @@ GROUP_KEYS: tuple[str, ...] = (
     'interaction_class_id',
 )
 
+# One group is one interaction, whatever its arity. A reaction has no first
+# and second endpoint to be cut into, so grouping it on an ordered pair is not
+# a coarser answer but a wrong one; this key gives it back as the single row
+# it is.
+PARTICIPANT_KEYS: tuple[str, ...] = ('interaction_id',)
+
+# What the fold groups on, by grain. Every statement of this module reads its
+# key list from here rather than naming the three binary columns, because the
+# arity of the key is the one thing the grain changes.
+GRAIN_KEYS: dict[str, tuple[str, ...]] = {
+    'interaction': GROUP_KEYS,
+    'participant': PARTICIPANT_KEYS,
+}
+
+# The SQL type of every column a key may be built from. A cursor tuple, an
+# `unnest` of a page's keys and the coercion of a decoded cursor all need it,
+# and they must agree: a key column cast one way in the comparison and another
+# in the array would compare two different values under one name.
+KEY_CASTS: dict[str, str] = {
+    'subject_entity_id': 'uuid',
+    'object_entity_id': 'uuid',
+    'interaction_class_id': 'smallint',
+    'interaction_id': 'uuid',
+}
+
+# How a key value is read back into the type its column compares at. A uuid
+# travels as text and a class id as a number, and the same value has to land on
+# the same Python object whether it came off the record, off a rendered row or
+# out of a cursor — otherwise a lookup that should match silently misses.
+_KEY_READERS = {'uuid': str, 'smallint': int}
+
 # `collapse` is a flag on one builder rather than three statements: `none`
 # extends the key to the record's own grain and `assertion` to the resources
 # that agree on sign and direction, and both are the same fold with a longer
@@ -70,6 +101,101 @@ COLLAPSE_KEYS: dict[str, tuple[str, ...]] = {
         'source_id', 'is_directed', 'is_stimulation', 'is_inhibition',
     ),
 }
+
+
+def page_keys(query: InteractionQuery) -> tuple[str, ...]:
+    """
+    The columns one page is selected and paged by, for one request.
+
+    This is the key the page bound applies to and the cursor resumes on, so it
+    is also what one row of the page stands for: an ordered endpoint pair and
+    class, or one interaction whatever its arity.
+
+    Args:
+        query: The parsed request.
+
+    Returns:
+        The key column names, in key order.
+    """
+
+    return GRAIN_KEYS.get(query.grain, GROUP_KEYS)
+
+
+def group_keys(query: InteractionQuery) -> tuple[str, ...]:
+    """
+    The columns the fold groups on, for one request.
+
+    At `interaction` grain that is the collapse mode's key: `none` and
+    `assertion` lengthen the binary key rather than replacing it, which is
+    what lets one builder serve all three. At `participant` grain it is the
+    page key itself — each collapse mode describes a fold over an ordered
+    endpoint pair, a reaction is not one, and so nothing there reads
+    `collapse` and its value makes no claim.
+
+    Args:
+        query: The parsed request.
+
+    Returns:
+        The key column names, leading with `page_keys`.
+    """
+
+    if query.grain != 'interaction':
+
+        return page_keys(query)
+
+    return COLLAPSE_KEYS.get(query.collapse, GROUP_KEYS)
+
+
+def positions(keys: Sequence[str], suffix: str = '') -> str:
+    """
+    A positional `GROUP BY` or `ORDER BY` list over a key of any arity.
+
+    The positions are written out rather than the column names repeated,
+    because a key column may be selected under an alias and a name that no
+    longer matches the select list is a runtime error rather than a wrong
+    answer.
+
+    Args:
+        keys: The key columns, in key order.
+        suffix: `ASC`, `DESC`, or nothing.
+
+    Returns:
+        `1, 2, 3` — or `1 DESC, 2 DESC, 3 DESC`.
+    """
+
+    tail = f' {suffix}' if suffix else ''
+
+    return ', '.join(f'{index + 1}{tail}' for index in range(len(keys)))
+
+
+def key_tuple_sql(keys: Sequence[str]) -> str:
+    """
+    A parameter tuple typed to match one key, for the keyset comparison.
+
+    Args:
+        keys: The key columns, in key order.
+
+    Returns:
+        `(%s::uuid, %s::uuid, %s::smallint)`, or whatever the key is.
+    """
+
+    return '(' + ', '.join(f'%s::{KEY_CASTS[name]}' for name in keys) + ')'
+
+
+def key_value(name: str, value: Any) -> Any:
+    """
+    One key column's value, read at the type that column compares at.
+
+    Args:
+        name: The key column.
+        value: The value, however it arrived.
+
+    Returns:
+        The value as the key compares it.
+    """
+
+    return _KEY_READERS[KEY_CASTS[name]](value)
+
 
 # The folded values, as SQL over the record alias `r` and the reference lateral
 # alias `c`. One definition, used by the fold's projection and by the key
@@ -374,7 +500,9 @@ def key_probe_sql(
     """
 
     predicate = record if record is not None else record_filter(query, resolved)
-    distinct_on = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    keys = page_keys(query)
+    distinct_on = ', '.join(f'r.{name}' for name in keys)
+    ordering = positions(keys)
     having, having_args = having_sql(query)
     lateral = REFERENCE_LATERAL if 'c.value' in having else ''
 
@@ -384,9 +512,9 @@ def key_probe_sql(
       FROM {record_source()} r
       {lateral}
       WHERE {predicate.sql}
-      GROUP BY 1, 2, 3
+      GROUP BY {ordering}
       HAVING {having}
-      ORDER BY 1, 2, 3
+      ORDER BY {ordering}
       LIMIT %s"""
 
     else:
@@ -394,7 +522,7 @@ def key_probe_sql(
         inner = f"""SELECT DISTINCT ON ({distinct_on}) {distinct_on}
       FROM {record_source()} r
       WHERE {predicate.sql}
-      ORDER BY 1, 2, 3
+      ORDER BY {ordering}
       LIMIT %s"""
 
     sql = f'SELECT count(*)::bigint AS keys FROM (\n    {inner}\n    ) probe'
@@ -443,17 +571,24 @@ def key_selection_sql(
     """
     The page's group keys, in key order, with the page bound applied.
 
-    Three shapes, chosen by what the request asks for and not by which dataset
+    Four shapes, chosen by what the request asks for and not by which dataset
     it is:
 
-    * no post-fold predicate and the default order — `DISTINCT` over the
-      collapse index, `LIMIT`ed, so the scan stops at the page;
     * a post-fold predicate — `GROUP BY … HAVING`, streaming through
       `GroupAggregate` over the key index, so the outer `LIMIT` stops the scan
       at the last qualifying key rather than after the whole scope is folded;
     * an `ORDER BY` on a stored column — the record ordered by that column and
       the surviving keys deduplicated. Folded columns never reach here: `guard`
-      refuses them before the statement is built.
+      refuses them before the statement is built;
+    * a narrow scope — the keys found through the source index behind an
+      `OFFSET 0` fence and sorted afterwards, over the scope rather than the
+      record;
+    * anything else — `DISTINCT ON` over the collapse index, `LIMIT`ed, so the
+      scan stops at the page.
+
+    Which columns the key is built from comes from the request's grain and is
+    never assumed here, so a key of one column pages exactly as a key of three
+    does.
 
     Args:
         query: The parsed request.
@@ -468,23 +603,25 @@ def key_selection_sql(
     predicate = record if record is not None else record_filter(query, resolved)
     where = [predicate.sql]
     args: list[Any] = list(predicate.args)
+    key_names = page_keys(query)
 
-    if cursor := _cursor_key(query.cursor):
+    if cursor := _cursor_key(query.cursor, key_names):
 
         # Keyset paging. The fold key is the collapse index's leading column
         # set, so resuming after the last key returned is one index descent.
         where.append(
-            f'({", ".join(f"r.{name}" for name in GROUP_KEYS)}) '
-            '> (%s::uuid, %s::uuid, %s::smallint)',
+            f'({", ".join(f"r.{name}" for name in key_names)}) '
+            f'> {key_tuple_sql(key_names)}',
         )
         args.extend(cursor)
 
     where_sql = ' AND '.join(where)
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    keys = ', '.join(f'r.{name}' for name in key_names)
     having, having_args = having_sql(query)
     order = 'DESC' if query.order_descending else 'ASC'
-    ordering = ', '.join(f'{index + 1} {order}' for index in range(len(GROUP_KEYS)))
-    distinct_on = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    ordering = positions(key_names, order)
+    grouping = positions(key_names)
+    distinct_on = ', '.join(f'r.{name}' for name in key_names)
     column = query.order_column
 
     if having:
@@ -494,17 +631,17 @@ def key_selection_sql(
     FROM {record_source()} r
     {lateral}
     WHERE {where_sql}
-    GROUP BY 1, 2, 3
+    GROUP BY {grouping}
     HAVING {having}
     ORDER BY {ordering}
     LIMIT %s OFFSET %s"""
         args.extend([*having_args, query.limit, query.offset])
 
-    elif column and column not in GROUP_KEYS:
+    elif column and column not in key_names:
 
         # A sort on a stored column cannot come from the collapse index, so the
         # record is ordered first and the surviving keys deduplicated after.
-        sql = f"""SELECT k.{', k.'.join(GROUP_KEYS)}
+        sql = f"""SELECT k.{', k.'.join(key_names)}
     FROM (
       SELECT {keys}
       FROM {record_source()} r
@@ -512,8 +649,8 @@ def key_selection_sql(
       ORDER BY r.{column} {order} NULLS LAST
       LIMIT %s OFFSET %s
     ) k
-    GROUP BY 1, 2, 3
-    ORDER BY 1, 2, 3"""
+    GROUP BY {grouping}
+    ORDER BY {grouping}"""
         args.extend([query.limit, query.offset])
 
     elif resolved.record_share < NARROW_SHARE:
@@ -578,7 +715,7 @@ def key_estimate_sql(
     """
 
     predicate = record if record is not None else record_filter(query, resolved)
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    keys = ', '.join(f'r.{name}' for name in page_keys(query))
 
     sql = f"""SELECT DISTINCT {keys}
     FROM {record_source()} r
@@ -611,7 +748,8 @@ def key_count_sql(
     predicate = record if record is not None else record_filter(query, resolved)
     having, having_args = having_sql(query)
     lateral = REFERENCE_LATERAL if 'c.value' in having else ''
-    keys = ', '.join(f'r.{name}' for name in GROUP_KEYS)
+    key_names = page_keys(query)
+    keys = ', '.join(f'r.{name}' for name in key_names)
 
     sql = f"""SELECT count(*)::bigint AS keys
     FROM (
@@ -619,7 +757,7 @@ def key_count_sql(
       FROM {record_source()} r
       {lateral}
       WHERE {predicate.sql}
-      GROUP BY 1, 2, 3
+      GROUP BY {positions(key_names)}
       {f'HAVING {having}' if having else ''}
     ) folded"""
 
@@ -654,10 +792,10 @@ def _uuids(values: Sequence[str]) -> list[str]:
 
 def encode_cursor(key: Sequence[Any]) -> str:
     """
-    Encode one collapse key as the cursor that resumes after it.
+    Encode one page key as the cursor that resumes after it.
 
     Args:
-        key: `(subject, object, class)` of the last row of a page.
+        key: The key columns of the last row of a page, in key order.
 
     Returns:
         An opaque cursor string.
@@ -668,18 +806,27 @@ def encode_cursor(key: Sequence[Any]) -> str:
     return base64.urlsafe_b64encode(payload.encode('utf-8')).decode('ascii').rstrip('=')
 
 
-def decode_cursor(cursor: str | None) -> list[Any] | None:
+def decode_cursor(
+        cursor: str | None,
+        keys: Sequence[str] = GROUP_KEYS,
+) -> list[Any] | None:
     """
-    Decode a page cursor into the collapse key it resumes after.
+    Decode a page cursor into the page key it resumes after.
+
+    The key list is passed in rather than assumed, because the arity and the
+    column types of the key are the grain's to decide. A cursor minted at one
+    grain therefore fails its arity check at the other and is dropped, which is
+    the honest outcome: it names a key the new grain does not have.
 
     Args:
         cursor: The opaque cursor a previous page returned, or None.
+        keys: The key columns the cursor is read against, in key order.
 
     Returns:
-        `[subject, object, class]`, or None when there is no usable cursor. A
-        cursor that does not decode is ignored rather than refused: it can only
-        cost a caller the first page, and refusing turns a stale bookmark into
-        an error.
+        The key parts, coerced to the types their columns compare at, or None
+        when there is no usable cursor. A cursor that does not decode is
+        ignored rather than refused: it can only cost a caller the first page,
+        and refusing turns a stale bookmark into an error.
     """
 
     if not cursor:
@@ -695,11 +842,17 @@ def decode_cursor(cursor: str | None) -> list[Any] | None:
 
         return None
 
-    if not isinstance(parts, list) or len(parts) != len(GROUP_KEYS):
+    if not isinstance(parts, list) or len(parts) != len(keys):
 
         return None
 
-    return [str(parts[0]), str(parts[1]), int(parts[2])]
+    try:
+
+        return [key_value(name, part) for name, part in zip(keys, parts)]
+
+    except (KeyError, ValueError, TypeError):
+
+        return None
 
 
 _cursor_key = decode_cursor

@@ -49,10 +49,15 @@ from .project import long_tail
 from .scope import ResolvedScope, connection
 from .select import (
     RecordFilter,
+    group_keys,
     key_estimate_sql,
     key_probe_sql,
     record_scan_sql,
 )
+
+# The columns the widening parameter rewrites. A fold that groups on one of
+# them cannot have it rewritten afterwards.
+_SIGN_KEYS = frozenset({'is_directed', 'is_stimulation', 'is_inhibition'})
 
 _log = logging.getLogger(__name__)
 
@@ -415,14 +420,23 @@ def _refuse_widening_the_group_key(query: InteractionQuery) -> None:
     of what was asked for is the quiet wrongness this endpoint is built to
     avoid.
 
+    The key is asked for rather than the collapse mode read, and that matters:
+    a request grouping on the interaction itself does not key on the flags
+    whatever `collapse` says, and refusing it would refuse a request on the
+    strength of a parameter that makes no claim about it.
+
     Args:
         query: The parsed request.
 
     Raises:
-        GuardrailRefusal: For the two collapse modes that key on the flags.
+        GuardrailRefusal: Where the fold groups on the flags.
     """
 
-    if not query.include_outofscope_signdir or query.collapse == 'endpoints':
+    if not query.include_outofscope_signdir:
+
+        return
+
+    if not _SIGN_KEYS & set(group_keys(query)):
 
         return
 
@@ -777,6 +791,12 @@ def _computed_histogram_sql() -> str:
 
     from .select import record_source
 
+    # The three key columns are named here on purpose and do not follow the
+    # request's grain. This histogram describes the whole record once, and is
+    # cached once, so that a post-fold predicate can be priced before anything
+    # is folded; re-deriving it per grain would price a request from a
+    # distribution rebuilt for it, which is the cost the histogram exists to
+    # avoid.
     return f"""SELECT source_count, count(*)::bigint AS keys
     FROM (
       SELECT count(DISTINCT r.source_id)::int AS source_count

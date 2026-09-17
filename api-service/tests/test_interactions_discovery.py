@@ -502,3 +502,24 @@ def test_an_exact_scoped_total_is_an_explicit_request(client):
         f'{answer["total"]}; this resource folds nothing, so its key count '
         f'equals its record count'
     )
+
+
+def test_the_grain_is_listed_with_both_of_its_words(client):
+    """A caller has to be able to discover that a reaction can stay one row."""
+
+    params = _engine('params')
+    answer = client.get('/interactions/parameter-values').json()
+    entry = _values(answer, 'grain')
+    reported = {row['value'] for row in (entry.get('values') or [])}
+
+    assert reported == set(params.GRAINS), (
+        f'`grain` reports {sorted(reported)} against {sorted(params.GRAINS)}'
+    )
+    assert entry.get('default') == 'interaction', (
+        f'`grain` reports its default as {entry.get("default")!r}; an unstated '
+        f'grain groups on the endpoint pair'
+    )
+    assert entry.get('group') == 'shape', (
+        f'`grain` is reported under the {entry.get("group")!r} group; it says '
+        f'what one row stands for, which is what Shape is'
+    )

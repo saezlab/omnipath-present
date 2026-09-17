@@ -58,6 +58,9 @@ _SOURCE_FACET = 'source'
 # The preset registry, cached per schema: it changes only when the build does.
 _REGISTRY_CACHE: dict[str, list[dict[str, Any]]] = {}
 _SPECIFICATION_CACHE: dict[str, dict[str, Any]] = {}
+# Which optional columns the registry of this schema actually has, probed once
+# and remembered for as long as the other registry caches live.
+_COLUMN_CACHE: dict[tuple[str, str], bool] = {}
 
 
 @dataclass
@@ -91,6 +94,10 @@ class ResolvedScope:
     # collapse by default, and which attributes their rows are expected to
     # carry. The engine reads these; nothing in the fold depends on them.
     collapse_mode: str | None = None
+    # What the named presets fold on. None where no preset was named, where
+    # none of them declares one, or where the registry of this build predates
+    # the column — in each case the request's own default stands.
+    grain: str | None = None
     default_attributes: list[str] = field(default_factory = list)
     mandatory_attributes: list[str] = field(default_factory = list)
     # Fraction of the record the scope can reach, from the source facet. The
@@ -248,6 +255,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
             chemical_class_ids = _chemical_class_ids(live, filters.chemical_classes),
             organism = resolve_organisms(filters.organisms, conn = live),
             collapse_mode = _preset_collapse(presets),
+            grain = _preset_grain(presets),
             default_attributes = _preset_attributes(presets, 'default_attributes'),
             mandatory_attributes = _preset_attributes(presets, 'mandatory_attributes'),
         )
@@ -296,6 +304,55 @@ def _source_ids_by_name(conn) -> dict[str, int]:
     return {row['name']: int(row['source_id']) for row in rows}
 
 
+def _optional_column(conn, table: str, column: str, kind: str) -> str:
+    """
+    A select-list item for a column the registry may or may not carry yet.
+
+    The registry gains columns as the build learns to declare more about a
+    preset, and a serving copy is not rebuilt the moment one lands. Naming a
+    column the table does not have turns every preset-scoped request into an
+    error, so the column is probed once per schema and a build without it gets
+    a typed null under the same name — which the readers downstream already
+    treat as "this preset declares nothing here".
+
+    Args:
+        conn: An open connection.
+        table: The table the column would be on.
+        column: The column name.
+        kind: The SQL type to cast the substitute null to, so the row has the
+            same shape either way.
+
+    Returns:
+        The column name, or `NULL::kind AS column`.
+    """
+
+    known = _COLUMN_CACHE.get((SEARCH_SCHEMA, f'{table}.{column}'))
+
+    if known is None:
+
+        known = bool(
+            conn.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s
+                  AND column_name = %s
+                LIMIT 1
+                """,
+                [SEARCH_SCHEMA, table, column],
+            ).fetchone(),
+        )
+        _COLUMN_CACHE[(SEARCH_SCHEMA, f'{table}.{column}')] = known
+
+        if not known:
+
+            _log.info(
+                '%s.%s carries no %s column; no preset of this build declares '
+                'one', SEARCH_SCHEMA, table, column,
+            )
+
+    return column if known else f'NULL::{kind} AS {column}'
+
+
 def _presets(conn, names: list[str]) -> list[dict[str, Any]]:
     """
     The `network_registry` rows a request names, whole.
@@ -325,6 +382,7 @@ def _presets(conn, names: list[str]) -> list[dict[str, Any]]:
                included_sources,
                interaction_class_scope,
                collapse_mode,
+               {_optional_column(conn, 'network_registry', 'grain', 'text')},
                default_attributes,
                mandatory_attributes
         FROM {SEARCH_SCHEMA}.network_registry
@@ -391,6 +449,26 @@ def _class_scope(requested: list[str], presets: list[dict[str, Any]]) -> list[st
         return sorted(declared)
 
     return sorted(asked & declared)
+
+
+def _preset_grain(presets: list[dict[str, Any]]) -> str | None:
+    """
+    The grain the named presets agree on.
+
+    Args:
+        presets: The registry rows.
+
+    Returns:
+        The grain, or None when no preset was named, when none declares one,
+        or when two of them disagree — the same rule the collapse mode below
+        follows, and for the same reason. A registry without the column
+        reports None for every preset, so a build that predates it simply
+        declares no grain.
+    """
+
+    grains = {preset.get('grain') for preset in presets if preset.get('grain')}
+
+    return grains.pop() if len(grains) == 1 else None
 
 
 def _preset_collapse(presets: list[dict[str, Any]]) -> str | None:
@@ -805,6 +883,7 @@ def dataset_specifications(conn) -> dict[str, dict[str, Any]]:
         f"""
         SELECT name, kind, included_sources, interaction_class_scope,
                default_attributes, mandatory_attributes, collapse_mode,
+               {_optional_column(conn, 'network_registry', 'grain', 'text')},
                labels, curation, attribute_sources, composition
         FROM {SEARCH_SCHEMA}.network_registry
         """,
@@ -818,6 +897,7 @@ def dataset_specifications(conn) -> dict[str, dict[str, Any]]:
             'default_attributes': list(row['default_attributes'] or []),
             'mandatory_attributes': list(row['mandatory_attributes'] or []),
             'collapse_mode': row['collapse_mode'],
+            'grain': row['grain'],
             'labels': row['labels'],
             'curation': row['curation'],
             'attribute_sources': row['attribute_sources'],
@@ -888,6 +968,7 @@ def forget_registry() -> None:
 
     _REGISTRY_CACHE.clear()
     _SPECIFICATION_CACHE.clear()
+    _COLUMN_CACHE.clear()
 
 
 def dataset_tags(

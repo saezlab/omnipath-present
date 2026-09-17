@@ -1126,3 +1126,162 @@ def test_an_unknown_resource_named_for_the_breakdown_is_refused(client):
         f'breakdown reads as "this resource says nothing about these '
         f'interactions", which is a different claim'
     )
+
+
+# ── Grain: what one row of the page stands for ──────────────────────────────
+
+
+def test_the_default_grain_is_the_endpoint_pair(client):
+    """An unstated grain groups on the binary key, as every earlier page did."""
+
+    answer = client.get('/interactions', params = {'limit': 1}).json()
+
+    assert answer.get('grain') == 'interaction', (
+        f'a request that named no grain answered at {answer.get("grain")!r}; '
+        f'the default has to be the shape the surface already had'
+    )
+
+
+def test_the_answer_says_which_grain_it_answered_at(client):
+    """The unit of a row count is stated, never left for the caller to infer."""
+
+    answer = client.get(
+        '/interactions', params = {'grain': 'participant', 'limit': 1},
+    ).json()
+
+    assert answer.get('grain') == 'participant', (
+        f'the page was asked for at participant grain and reports '
+        f'{answer.get("grain")!r}'
+    )
+
+
+def test_an_unknown_grain_falls_back_rather_than_refusing(client):
+    """A typo in a Shape word costs the presentation, never the answer."""
+
+    response = client.get(
+        '/interactions', params = {'grain': ABSENT_NAME, 'limit': 1},
+    )
+
+    assert response.status_code == 200, (
+        f'an unreadable grain answered {response.status_code}; the Shape group '
+        f'says how to present the answer, so a bad word falls back'
+    )
+    assert response.json().get('grain') == 'interaction', (
+        f'an unreadable grain answered at {response.json().get("grain")!r} '
+        f'rather than falling back to the default'
+    )
+
+
+def test_a_registered_grain_is_a_default_the_caller_can_override():
+    """A preset's grain is what its own dataset folds on, until someone says."""
+
+    from api_service.interactions import engine, params, scope
+
+    for asked, expected in (({}, 'participant'), ({'grain': 'interaction'}, 'interaction')):
+
+        query = params.parse(asked)
+        engine._apply_preset(query, scope.ResolvedScope(grain = 'participant'))
+
+        assert query.grain == expected, (
+            f'a preset registered at participant grain answered a request '
+            f'{asked or "naming no grain"} at {query.grain!r}'
+        )
+
+
+def test_a_registry_without_the_grain_column_still_serves_its_presets(client, db):
+    """The serving copy gains the column when it is rebuilt, and not before."""
+
+    from api_service.interactions import scope
+
+    declared = db.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = 'network_registry'
+          AND column_name = 'grain'
+        LIMIT 1
+        """,
+        (SCHEMA,),
+    ).fetchone()
+
+    from api_service.interactions import params
+
+    query = params.parse({'filters': {'datasets': PRESET}})
+    resolved = scope.resolve(query, conn = db)
+
+    assert resolved.resources, (
+        f'the {PRESET} preset resolved to no resource at all; reading the '
+        f'registry must not depend on a column this build may not carry'
+    )
+
+    if declared is None:
+
+        assert resolved.grain is None, (
+            f'this registry carries no grain column, yet {PRESET} came back '
+            f'declaring {resolved.grain!r}'
+        )
+
+    assert client.get(
+        '/interactions', params = {'datasets': PRESET, 'limit': 1},
+    ).status_code == 200
+
+
+@pytest.mark.parametrize('collapse', ['none', 'assertion'])
+def test_the_grain_takes_precedence_over_the_collapse(client, collapse):
+    """A collapse mode folds an ordered pair, and a reaction is not one."""
+
+    request = {
+        'resources': CURATED_RESOURCE,
+        'collapse': collapse,
+        'include_outofscope_signdir': 'true',
+        'limit': 5,
+    }
+
+    assert client.get('/interactions', params = request).status_code == 400, (
+        f'collapse={collapse} at the default grain groups on the sign columns, '
+        f'so widening them is refused; that refusal is what the participant '
+        f'request below has to escape'
+    )
+
+    answer = client.get(
+        '/interactions', params = {**request, 'grain': 'participant'},
+    )
+
+    assert answer.status_code == 200, (
+        f'grain=participant with collapse={collapse} answered '
+        f'{answer.status_code}; at that grain the fold groups on the '
+        f'interaction and nothing reads the collapse mode, so it cannot be '
+        f'grouping on the sign columns: {answer.text[:300]}'
+    )
+
+    rows = answer.json()['interactions']
+    interactions = [row['interaction_id'] for row in rows]
+
+    assert len(set(interactions)) == len(interactions), (
+        f'grain=participant with collapse={collapse} returned '
+        f'{len(interactions)} rows over {len(set(interactions))} interactions; '
+        f'the collapse mode must not lengthen a key it says nothing about'
+    )
+
+
+def test_a_participant_page_breaks_out_by_resource_on_its_own_key(client):
+    """The per-resource read follows the page's key, whatever that key is."""
+
+    rows = client.get(
+        '/interactions',
+        params = {
+            'resources': CURATED_RESOURCE,
+            'grain': 'participant',
+            'by_resource': 'true',
+            'limit': 5,
+        },
+    ).json()['interactions']
+
+    assert rows, 'the participant page came back empty; nothing to assert on'
+
+    for row in rows:
+
+        assert list(row['by_resource']) == list(row['sources']), (
+            f'a row sourced from {row["sources"]} carries a breakdown of '
+            f'{list(row["by_resource"])}; the breakdown is read for the page '
+            f'key the row was folded under'
+        )

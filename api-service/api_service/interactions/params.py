@@ -51,7 +51,7 @@ PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
         'sign_source_count',
         'direction_source_count',
     ),
-    'shape': ('collapse', 'by_resource', 'include_outofscope_signdir'),
+    'shape': ('collapse', 'grain', 'by_resource', 'include_outofscope_signdir'),
     'projection': ('attributes', 'view', 'annotation_layer'),
     'paging': ('limit', 'offset', 'cursor', 'order_by'),
 }
@@ -96,6 +96,18 @@ SORTABLE_COLUMNS: frozenset[str] = frozenset({
 LONG_TAIL_PARAMETERS: tuple[str, ...] = ('attribute_filters',)
 
 COLLAPSE_MODES = ('none', 'assertion', 'endpoints')
+
+# What the fold groups on. `interaction` groups on the ordered endpoint pair
+# and the class, which is the binary shape every collapse mode describes;
+# `participant` groups on the interaction itself, so one group is one
+# interaction whatever its arity and a reaction stays one row instead of being
+# cut into endpoint pairs.
+#
+# `grain` wins over `collapse`, and that is not a tie-break but the only
+# coherent reading: each collapse mode says how far to fold **an ordered
+# endpoint pair**, and a reaction is not one. At `participant` grain nothing
+# reads `collapse` and its value makes no claim.
+GRAINS = ('interaction', 'participant')
 
 # The paging bounds. `MAX_LIMIT` matches `graph._limit`'s existing cap so the
 # two surfaces do not disagree; `MAX_OFFSET` is the depth past which keyset
@@ -364,6 +376,16 @@ class InteractionQuery:
     # collapse mode and it is the default for its own dataset, so the engine
     # has to tell "the caller asked for endpoints" from "nobody asked".
     collapse_requested: bool = False
+    # What the fold groups on: the binary endpoint pair and class, or the
+    # interaction itself. It takes precedence over `collapse`, because a
+    # collapse mode is a statement about an ordered pair and a reaction has
+    # none.
+    grain: str = 'interaction'
+    # Whether the caller named a grain of their own, read the same way and for
+    # the same reason as the collapse companion above: a preset carries a
+    # grain and it is the default for its own dataset, so the engine has to
+    # tell "the caller asked for interaction" from "nobody asked".
+    grain_requested: bool = False
     by_resource: bool = False
     # The resources the per-resource breakdown covers. Empty means every
     # resource the scope kept: `by_resource=true` asks for the breakdown, and
@@ -479,6 +501,8 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
     )
     requested_collapse = payload.get('collapse')
     collapse = str(requested_collapse or 'endpoints').strip().lower()
+    requested_grain = payload.get('grain')
+    grain = str(requested_grain or 'interaction').strip().lower()
     order_by = payload.get('order_by') or payload.get('orderBy')
     cursor = payload.get('cursor')
 
@@ -486,6 +510,12 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         filters = parsed,
         collapse = collapse if collapse in COLLAPSE_MODES else 'endpoints',
         collapse_requested = collapse in COLLAPSE_MODES and bool(requested_collapse),
+        # A word outside the vocabulary falls back to the default rather than
+        # being refused. That is this group's convention throughout: a Shape
+        # parameter says how to present the answer, so a typo in one costs the
+        # caller the presentation they wanted and never the answer itself.
+        grain = grain if grain in GRAINS else 'interaction',
+        grain_requested = grain in GRAINS and bool(requested_grain),
         by_resource = requested_resource_detail[0],
         by_resource_names = requested_resource_detail[1],
         include_outofscope_signdir = bool(
