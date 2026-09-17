@@ -89,6 +89,10 @@ def _naming(token: str) -> list[str]:
     ]
 
 
+def _outside_the_engine(names: list[str]) -> list[str]:
+    return [name for name in names if not name.startswith('interactions/')]
+
+
 def _require_engine_package() -> None:
     missing = [
         name for name in ENGINE_MODULES
@@ -133,7 +137,7 @@ def test_the_engine_is_a_package_with_the_stages_of_the_contract():
 
 
 def test_exactly_one_module_names_the_record_table():
-    """One reader of the interaction tables, not one per dataset."""
+    """One reader of the record table, not one per dataset; only that table."""
 
     naming = _naming(RECORD_TABLE)
 
@@ -157,16 +161,51 @@ def test_the_removed_table_is_named_nowhere():
     )
 
 
+# A note to whoever reads the next two tests together, because the pair has
+# been misread once already. They are not the same rule at two strengths. The
+# record table is the narrow one: a single module, anywhere in the service, may
+# name it. The detail tables are the wide and weaker one: everything outside
+# `interactions/` is barred, and the scoping to files outside the package is
+# deliberate, because inside it a join on a participant table is the engine
+# doing its job. Reading the narrow rule into the wide one produces a blocker
+# that does not exist: nothing here stops an engine module from joining
+# `interaction_party`, and the test below it says so out loud.
+
+
 @pytest.mark.parametrize('table', OTHER_INTERACTION_TABLES)
-def test_no_route_module_names_an_interaction_table(table):
-    """The detail tables are the engine's business too."""
+def test_only_the_engine_package_names_a_detail_table(table):
+    """Everything outside the engine is barred; inside it, a join is the point."""
 
     _require_engine_package()
 
-    outside = [name for name in _naming(table) if not name.startswith('interactions/')]
+    outside = _outside_the_engine(_naming(table))
 
     assert outside == [], (
         f'{table} is named outside the engine package by {outside}'
+    )
+
+
+@pytest.mark.parametrize('table', OTHER_INTERACTION_TABLES)
+def test_the_engine_may_join_a_detail_table(table):
+    """A detail table named from inside the engine is permitted, not an offence."""
+
+    _require_engine_package()
+
+    # Every stage of the engine, the module that reads the record table, and
+    # whichever engine module already names this detail table. None of them may
+    # ever be reported as an offender: tightening the rule to bar engine reads
+    # fails here first.
+    entitled = [
+        *(f'interactions/{name}.py' for name in ENGINE_MODULES),
+        *_naming(RECORD_TABLE),
+        *(name for name in _naming(table) if name.startswith('interactions/')),
+    ]
+    refused = _outside_the_engine(entitled)
+
+    assert refused == [], (
+        f'{refused} sit inside the engine package and are refused {table}; the '
+        f'boundary restricts the rest of the service, it does not restrict the '
+        f'engine from joining a participant table'
     )
 
 
