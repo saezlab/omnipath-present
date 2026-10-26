@@ -350,9 +350,20 @@ def test_an_interaction_class_filter_admits_that_class_and_no_other(client):
 
 
 def test_the_class_label_is_output_side_and_never_a_query_value(client):
-    """The display label rides on the response and does not select rows."""
+    """The display label rides on the response and does not select rows.
 
-    row = _page(client, interaction_classes = CLASS_SLUG, limit = 1)[0]
+    It is named in `attributes`, because it is one vocabulary lookup off the
+    slug and left the default row for that reason. What this test holds is the
+    asymmetry: the label is a value a response may carry and never a value a
+    filter may take.
+    """
+
+    row = _page(
+        client,
+        interaction_classes = CLASS_SLUG,
+        attributes = 'interaction_type_label',
+        limit = 1,
+    )[0]
 
     assert row['interaction_type_label'] == CLASS_LABEL, (
         f'the class label is missing from the response: {row.get("interaction_type_label")!r}'

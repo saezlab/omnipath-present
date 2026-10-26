@@ -31,7 +31,8 @@ Expected of the service:
     GET /interactions/parameter-values -> {"parameters": {name: {...}}, ...}
     GET /interactions/stats            -> {"total": …, "by_resource": [...], …}
     api_service.interactions.params.PARAMETER_GROUPS
-    api_service.interactions.annotate.categories() -> list[str]
+    api_service.interactions.annotate.categories(conn) -> list[str]
+    api_service.interactions.annotate.open_vocabularies(conn) -> list[dict]
 
     DATABASE_URL=... pytest tests/test_interactions_discovery.py -v
 """
@@ -333,10 +334,104 @@ def test_the_annotation_categories_are_listed(client):
     )
     reported = {row['value'] for row in (entry.get('values') or [])}
 
+    assert reported, 'the facet lists no category at all'
+    # `categories()` is read without a connection here deliberately: the
+    # request above built the vocabulary in this same process, so what the
+    # accessor reports and what the endpoint emitted have to be the one set.
+    # A category the vocabulary cannot populate is in neither, which is the
+    # property that made the dead five-term vocabulary invisible.
     assert reported == set(annotate.categories()), (
-        f'the endpoint lists {sorted(reported)} against the registered '
-        f'{annotate.categories()}'
+        f'the endpoint lists {len(reported)} categories against the '
+        f'registered {len(annotate.categories())}; the difference is '
+        f'{sorted(reported ^ set(annotate.categories()))[:10]}'
     )
+
+
+def test_the_on_request_layer_is_named_and_never_enumerated(client):
+    """A large vocabulary is reported by name and term count, never by term."""
+
+    annotate = _engine('annotate')
+    entry = _values(
+        client.get('/interactions/parameter-values').json(),
+        'entity_annotations',
+    )
+    open_layers = entry.get('on_request_only') or []
+    reported = {row['value'] for row in (entry.get('values') or [])}
+
+    assert open_layers, (
+        'the facet names no on-request vocabulary, so a caller cannot '
+        'discover the function layer at all'
+    )
+    assert {item['vocabulary'] for item in open_layers} == {
+        item.namespace
+        for item in annotate.LAYERS[annotate.FUNCTION_LAYER].vocabularies
+    }
+
+    for item in open_layers:
+
+        assert item['terms'] > 0, (
+            f'{item["vocabulary"]} is named with no term count, and the count '
+            f'is the whole of what may be said about an open vocabulary'
+        )
+
+    # The term counts say how many values are deliberately absent. If the
+    # facet's value list were anywhere near that size the layer would have been
+    # enumerated after all, which is the cost T100 refuses to pay.
+    assert len(reported) < sum(item['terms'] for item in open_layers), (
+        f'the facet lists {len(reported)} values against '
+        f'{sum(item["terms"] for item in open_layers)} on-request terms; the '
+        f'open layer looks enumerated'
+    )
+
+
+def test_the_identifier_namespaces_are_listed_per_entity_kind_with_coverage(client):
+    """A namespace is worth asking for or it is not, and only coverage says so.
+
+    A term count would say "ChEBI holds 200,000 accessions", which tells a
+    caller nothing about this build. What they need before they write a
+    request is whether the column will be empty, and the metabolomics
+    namespaces are thin enough that it usually will be. So the entry carries
+    the entity count each namespace reaches, its fraction, and the denominator
+    those hold against.
+    """
+
+    nodes = _engine('nodes')
+    entry = _values(
+        client.get('/interactions/parameter-values').json(), 'identifiers',
+    )
+    reported = {row['value'] for row in (entry.get('values') or [])}
+    kinds = entry.get('by_entity_kind') or {}
+
+    assert reported == set(nodes.IDENTIFIER_NAMESPACES), (
+        f'the facet lists {len(reported)} namespaces against the registered '
+        f'{len(nodes.IDENTIFIER_NAMESPACES)}; the whole vocabulary is small '
+        f'enough to register, and a namespace costs a column only on the '
+        f'request that names it'
+    )
+    assert set(kinds) == set(nodes.ENTITY_KINDS), (
+        f'the facet is keyed on {sorted(kinds)} against the kinds '
+        f'{sorted(nodes.ENTITY_KINDS)} the selector accepts'
+    )
+
+    for kind, block in kinds.items():
+
+        assert block['entities'] > 0, (
+            f'{kind} reports no denominator, so its coverage fractions say '
+            f'nothing'
+        )
+        assert block['values'], f'{kind} reports no namespace coverage at all'
+
+        for value in block['values']:
+
+            assert value['value'] in nodes.IDENTIFIER_NAMESPACES
+            assert value['column'] == (
+                nodes.IDENTIFIER_NAMESPACES[value['value']][1]
+            ), (
+                'the facet names a column the renderer does not emit, so a '
+                'caller reading it would look for the wrong key'
+            )
+            assert 0 < value['entities'] <= block['entities']
+            assert 0 < value['coverage'] <= 1
 
 
 def test_a_closed_vocabulary_parameter_lists_its_words(client):

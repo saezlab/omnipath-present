@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import annotate
+from . import annotate, nodes
 
 # The contract's seven groups. Kept as one mapping so nothing downstream
 # has to re-derive which stage owns a parameter.
@@ -52,7 +52,19 @@ PARAMETER_GROUPS: dict[str, tuple[str, ...]] = {
         'direction_source_count',
     ),
     'shape': ('collapse', 'grain', 'by_resource', 'include_outofscope_signdir'),
-    'projection': ('attributes', 'view', 'annotation_layer'),
+    'projection': (
+        'attributes',
+        'view',
+        'annotation_layer',
+        # A namespace to name each endpoint in beside its canonical
+        # identifier. It is a Projection parameter of its own rather than a
+        # name in `attributes`, because a namespace is a join resolved once
+        # and applied per page rather than a column of the record or a key of
+        # its attribute document, and because `attributes` already has two
+        # claimants and a bound that would start counting namespaces against
+        # document keys.
+        'identifiers',
+    ),
     'paging': ('limit', 'offset', 'cursor', 'order_by'),
 }
 
@@ -281,6 +293,65 @@ def _attribute_filters(value: Any) -> dict[str, Any]:
     return out
 
 
+def _identifiers(value: Any) -> dict[str, list[str]]:
+    """
+    Normalize the namespaces a request wants each endpoint named in.
+
+    Two spellings reach the same object, because a query string cannot carry a
+    mapping: `{"protein": ["uniprot", "entrez"]}` from a body, and
+    `protein:uniprot,protein:entrez,chemical:chebi` from a query parameter.
+    That is the spelling `attribute_filters` and the annotation booleans
+    already use, and `_strings` already splits it.
+
+    A term with no kind — `identifiers=uniprot` — asks for the namespace
+    whatever the endpoint is, which keeps the short form usable and is the only
+    form that reaches an endpoint of neither kind.
+
+    Args:
+        value: The parameter as written — a mapping of kind to slugs, a
+            `kind:slug` string, or a list of such strings.
+
+    Returns:
+        `{kind: [slug, …]}`, empty when the parameter is absent. The slugs
+        come back lowercased. Which of them name a namespace is `nodes`'
+        business, and one that names none is dropped there rather than refused
+        here.
+    """
+
+    if value is None:
+
+        return {}
+
+    out: dict[str, list[str]] = {}
+
+    if isinstance(value, dict):
+
+        for kind, slugs in value.items():
+
+            for slug in _strings(slugs):
+
+                out.setdefault(str(kind).strip().lower(), []).append(slug.lower())
+
+        return {kind: list(dict.fromkeys(slugs)) for kind, slugs in out.items()}
+
+    for term in _strings(value):
+
+        kind, separator, slug = term.partition(':')
+
+        if not separator:
+
+            kind, slug = nodes.ANY_KIND, kind
+
+        kind = kind.strip().lower() or nodes.ANY_KIND
+        slug = slug.strip().lower()
+
+        if slug and slug not in out.setdefault(kind, []):
+
+            out[kind].append(slug)
+
+    return {kind: slugs for kind, slugs in out.items() if slugs}
+
+
 def _flag(value: Any) -> bool | None:
     """
     Normalize a tri-state flag: True, False, or None for "not asked".
@@ -421,6 +492,11 @@ class InteractionQuery:
     attributes: list[str] = field(default_factory = list)
     view: str = 'gene'
     annotation_layer: str | None = None
+    # The namespaces each endpoint is named in beside its canonical
+    # identifier, `{kind: [slug, …]}`. Every one of them renders as an array
+    # on every node of every row, because UniProt averages 2.78 values per
+    # endpoint and no stored consensus exists to collapse them to.
+    identifiers: dict[str, list[str]] = field(default_factory = dict)
     # Which per-node annotation layers the attribute list asked for. Split out
     # of `attributes` once the presets have had their say, because a preset may
     # declare one and the split has to see the final list.
@@ -549,6 +625,9 @@ def parse(payload: dict[str, Any]) -> InteractionQuery:
         attributes = _strings(payload.get('attributes')),
         view = str(payload.get('view') or 'gene').strip().lower(),
         annotation_layer = payload.get('annotation_layer') or payload.get('annotationLayer'),
+        identifiers = _identifiers(
+            payload.get('identifiers') or payload.get('identifierNamespaces'),
+        ),
         # The bound is applied here rather than clamped later, because the
         # guardrail prices the request from the limit it will actually run.
         limit = _limit(payload.get('limit')),

@@ -258,6 +258,11 @@ def test_every_enumerated_dataset_answers(client, enumerated):
         )
 
 
+#: The dataset the deprecated-alias test reads. It is the one whose registry
+#: row declares a mandatory node annotation, which is also the row that still
+#: spells it `intercell` until the `network_views` product is re-registered.
+DATASET_FOR_ALIAS = 'metalinksdb'
+
 #: How a node-level attribute reaches the row. The classification belongs to
 #: an endpoint rather than to the interaction, so it arrives once per side
 #: under a prefixed name rather than once under the name that was requested.
@@ -277,27 +282,111 @@ def _fields(rows: list[dict[str, Any]]) -> set[str]:
     return {key for row in rows for key in row}
 
 
-def _served(name: str, fields: set[str]) -> bool:
-    """Whether a requested attribute reached the row under any of its names.
+def _spellings(name: str) -> tuple[str, ...]:
+    """Every name one declared attribute may reach the row under.
+
+    **One attribute has two spellings, for one build.** T100 renamed the node
+    annotation layer from `intercell` to `annotation`, and the registry is
+    written by another repository in another process: a build registered before
+    the rename declares the old word while the response carries the new column
+    names. The service accepts the old spelling as a deprecated alias and emits
+    only the new one, which is the right direction — the alternative was
+    serving GO cellular components and UniProt keywords under a word that names
+    a role classification, which FR-046 forbids.
+
+    So this maps the declaration onto what the service answers with, and it
+    reads the pair off the service rather than writing it down, so
+    re-registering the product retires the alias here too.
 
     Args:
         name: The attribute as the dataset declares it.
-        fields: The field names the page carries.
 
     Returns:
-        True when the attribute is on the row directly, or on either endpoint
-        under a side prefix, or as a further layer named after it.
+        The names to look for, the declared one first.
+    """
+
+    from api_service.interactions import annotate
+
+    if name.lower() == annotate.DEPRECATED_LAYER:
+
+        return (name, annotate.LAYER)
+
+    return (name, )
+
+
+def _matches(field: str, name: str) -> bool:
+    """Whether one field name carries one declared attribute.
+
+    Args:
+        field: A field name from the page.
+        name: The attribute as the dataset declares it.
+
+    Returns:
+        True when the field is the attribute itself, or the attribute on an
+        endpoint under a side prefix, or a further layer named after it.
     """
 
     return any(
-        field == name
-        or field.startswith(f'{name}_')
+        field == spelling
+        or field.startswith(f'{spelling}_')
         or any(
-            field == f'{prefix}{name}' or field.startswith(f'{prefix}{name}_')
+            field == f'{prefix}{spelling}'
+            or field.startswith(f'{prefix}{spelling}_')
             for prefix in SIDE_PREFIXES
         )
-        for field in fields
+        for spelling in _spellings(name)
     )
+
+
+def _served(name: str, rows: list[dict[str, Any]]) -> bool:
+    """Whether a promised attribute reached the row **with a value in it**.
+
+    **The value is checked, and that is the whole repair.** This used to match
+    on the field name alone, and T047 passed for months against an annotation
+    layer keyed on five terms nothing writes: `source_intercell_class` was
+    present on every row and `[]` on every row, so the dataset promised a
+    classification, served a column, and said nothing. A promise satisfied by
+    a column name is not a promise.
+
+    So a mandatory attribute has to be *populated* on at least one row of the
+    page. One row and not all of them: a location annotation is a statement
+    about an entity and plenty of entities carry none, so a column that is
+    empty on some rows is honest while a column that is empty on every row of
+    a two-hundred-row page is the defect above.
+
+    Args:
+        name: The attribute as the dataset declares it.
+        rows: One page of interactions.
+
+    Returns:
+        True when some row carries a non-empty value under the attribute.
+    """
+
+    return any(
+        _matches(field, name) and _populated(value)
+        for row in rows for field, value in row.items()
+    )
+
+
+def _populated(value: Any) -> bool:
+    """Whether one rendered value says anything.
+
+    `False` counts as populated and `[]` does not. A boolean layer renders a
+    real answer either way — a protein outside a compartment is false, and
+    that is a statement — whereas an empty array is the absence of one.
+
+    Args:
+        value: A rendered field value.
+
+    Returns:
+        Whether the value carries information.
+    """
+
+    if isinstance(value, bool):
+
+        return True
+
+    return bool(value)
 
 
 @pytest.fixture(scope = 'module')
@@ -332,13 +421,13 @@ def test_a_mandatory_attribute_appears_unrequested(
 
     assert rows, f'{with_mandatory} returns no row to check'
 
-    served = _fields(rows)
     promised = registered[with_mandatory]['mandatory_attributes']
-
-    missing = [name for name in promised if not _served(name, served)]
+    missing = [name for name in promised if not _served(name, rows)]
 
     assert not missing, (
-        f'{with_mandatory} promises {promised} and serves {missing} nowhere'
+        f'{with_mandatory} promises {promised} and serves {missing} nowhere, '
+        f'or serves it as a column that is empty on every one of {len(rows)} '
+        f'rows; the field names on the page were {sorted(_fields(rows))}'
     )
 
 
@@ -364,13 +453,64 @@ def test_a_mandatory_attribute_survives_a_narrower_request(
 
     assert rows, f'{with_mandatory} returns no row to check'
 
-    served = _fields(rows)
     promised = registered[with_mandatory]['mandatory_attributes']
-
-    missing = [name for name in promised if not _served(name, served)]
+    missing = [name for name in promised if not _served(name, rows)]
 
     assert not missing, (
         f'{with_mandatory} dropped its mandatory {missing} because the caller '
         f'named another attribute; a mandatory attribute that a request can '
         f'displace is a default under the wrong name'
     )
+
+
+def test_the_retired_layer_name_still_resolves_to_the_layer(client, registered):
+    """A registry row that predates the rename keeps its mandatory attribute.
+
+    T100 renamed the node annotation layer from `intercell` to `annotation`,
+    because the layer serves GO cellular components and UniProt keywords and
+    `intercell` names a role classification none of them states. The registry
+    is in another repository and another process: dev5's `network_registry`
+    still declares `mandatory_attributes = {intercell}` until the
+    `network_views` product is re-registered.
+
+    **The failure that would cause is silent.** An attribute name this module
+    does not claim falls through to the long-tail projection, which reads it
+    from the record's attribute document, finds no key under it and renders
+    `attributes: {"intercell": null}` — a dataset reporting that the build
+    carries no annotation at all, with a 200 and no warning. So the old
+    spelling is accepted as a deprecated alias.
+
+    What it must *not* do is emit the old column names, because then the rename
+    would be cosmetic and two spellings would be in the field at once.
+    """
+
+    response = client.get(
+        f'/interactions/{DATASET_FOR_ALIAS}',
+        params = {'limit': 20, 'attributes': 'intercell'},
+    )
+
+    assert response.status_code == 200, response.text[:300]
+
+    rows = response.json()['interactions']
+
+    assert rows, f'{DATASET_FOR_ALIAS} returns no row to classify'
+
+    served = _fields(rows)
+
+    assert any(name.endswith('_annotation_class') for name in served), (
+        f'the retired spelling reached no annotation column; the page carries '
+        f'{sorted(served)}'
+    )
+    assert not [name for name in served if 'intercell' in name], (
+        f'{[name for name in served if "intercell" in name]} came back; the '
+        f'alias is accepted on input and never emitted, or the rename is '
+        f'cosmetic and both spellings are in the field'
+    )
+
+    for row in rows:
+
+        assert 'intercell' not in (row.get('attributes') or {}), (
+            'the retired spelling reached the long-tail attribute projection '
+            'and came back null, which reads as a build carrying no '
+            'annotation at all'
+        )

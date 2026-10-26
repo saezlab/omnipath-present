@@ -80,10 +80,12 @@ SIDES: dict[str, tuple[str, ...]] = {
     'receptor': ('target', 'object'),
 }
 
-#: Field names that would carry a node's partner role.
+#: Field names that would carry a node's partner role. `annotation_class` is
+#: the node annotation layer's own default column after T100's rename; `role`
+#: is the endpoint role the interaction class names, which is where the partner
+#: role actually comes from today.
 ROLE_SUFFIXES = (
-    'intercell_class',
-    'intercell_classes',
+    'annotation_class',
     'roles',
     'role',
 )
@@ -412,12 +414,46 @@ def test_both_evidence_types_are_represented(page):
     )
 
 
-def test_the_partner_roles_are_reachable(page):
+def test_the_partner_role_field_is_present(page):
     """Which end is the ligand and which the receptor, said rather than implied.
 
     Column order is not an answer: a consumer joining these rows to expression
-    data has to know which protein it should look for in the sending cell. The
-    resource annotates both partners, so the response can carry it.
+    data has to know which protein it should look for in the sending cell.
+
+    **This asserts the field and not the word**, because T100 split the two.
+    The node annotation layer serves locations and chemical classes, and
+    `ligand` and `receptor` are explicitly out of its scope: the model states a
+    role per assertion, so an entity-level role flag needs the cross-resource
+    consensus Phase 9 owns. What the response carries today is `source_role`
+    and `target_role`, read off the interaction class — which does name the two
+    ends — and the half that needs the rebuild is pinned by the skipped test
+    below.
+    """
+
+    rows = page['interactions']
+
+    ligand_key, _ = _field(rows[0], 'ligand', ROLE_SUFFIXES)
+    receptor_key, _ = _field(rows[0], 'receptor', ROLE_SUFFIXES)
+
+    assert ligand_key and receptor_key, (
+        f'the rows carry no partner-role field (looked for '
+        f'{list(ROLE_SUFFIXES)} on both sides); row keys were {sorted(rows[0])}'
+    )
+
+
+@pytest.mark.skip(
+    reason = (
+        'Phase 9 owns this. T100 puts `ligand` and `receptor` explicitly out '
+        'of scope: the model states a role per assertion, so an entity-level '
+        'flag needs the cross-resource consensus the Intercell rebuild '
+        '(FR-029, US6) produces. The interim annotation layer serves GO '
+        'cellular components, UniProt keywords and chemical classes, and '
+        'naming a protein a ligand from those would publish a consensus '
+        'nothing computed. Re-enable this when the rebuild lands.'
+    ),
+)
+def test_the_partner_roles_are_named_as_roles(page):
+    """The partner role said in the annotation layer, not inferred from a class.
     """
 
     rows = page['interactions']

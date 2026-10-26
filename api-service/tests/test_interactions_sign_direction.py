@@ -57,6 +57,12 @@ COUNTS = ('sign_source_count', 'direction_source_count')
 #: The delimiter the joined provenance columns use.
 DELIMITER = ';'
 
+#: The joined provenance columns, which every request below names. They are
+#: rebuildable from the `sources` and `reference_pairs` arrays the row already
+#: carries, so they left the default row and are selected by name — and this
+#: file is about what the provenance says, so it asks for it.
+PROVENANCE = ('resources', 'references')
+
 #: A page wide enough that "no flag is ever False" is a claim about data rather
 #: than about three rows.
 PAGE = 500
@@ -85,6 +91,9 @@ def db():
 def _run(db, payload: dict[str, Any]) -> dict[str, Any]:
     """Answer one request through the engine, on the test's own connection.
 
+    The joined provenance columns are named for every request, unless the
+    request named attributes of its own.
+
     Args:
         db: An open connection.
         payload: The request.
@@ -95,7 +104,7 @@ def _run(db, payload: dict[str, Any]) -> dict[str, Any]:
 
     from api_service.interactions import engine
 
-    return engine.run(payload, conn = db)
+    return engine.run({'attributes': list(PROVENANCE), **payload}, conn = db)
 
 
 def _record(db, sql: str, args: tuple = ()) -> list[dict[str, Any]]:

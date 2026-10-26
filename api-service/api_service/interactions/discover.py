@@ -54,7 +54,7 @@ from dataclasses import replace
 from typing import Any
 
 from ..graph import SEARCH_SCHEMA
-from . import annotate, fold, params, project, scope as _scope
+from . import annotate, fold, nodes, params, project, scope as _scope
 from .guard import Estimate, histogram
 from .params import InteractionQuery
 from .scope import LICENSE_LEVELS, ResolvedScope
@@ -95,6 +95,11 @@ MAX_TAXONOMY_CANDIDATES = 200
 # and changes only when the build does, which is the same reason the class
 # vocabulary, the native taxon set and the annotation index are cached.
 _PROFILE_CACHE: dict[str, dict[str, Any]] = {}
+
+# `{schema: {kind: coverage}}`. How far each identifier namespace reaches,
+# cached for the same reason and on the same grain: it is a property of the
+# build and moves only when the build does.
+_COVERAGE_CACHE: dict[str, dict[str, Any]] = {}
 
 
 # ── The reachable values ────────────────────────────────────────────────────
@@ -949,26 +954,37 @@ def _chemical_class_values(query, resolved, conn, facets, profile):
 
 def _annotation_values(query, resolved, conn, facets, profile):
 
-    index = annotate.index(conn)
-    counts = {category: 0 for category in annotate.categories()}
-
-    for entry in index.values():
-
-        for category in entry:
-
-            counts[category] = counts.get(category, 0) + 1
+    # The counts come from the vocabulary's own bounded aggregate, not from a
+    # pass over the annotated entities. This used to iterate the whole eager
+    # index on every call — invisible at 33,091 entities, and a Python loop
+    # over 531,155 links once the vocabulary was real. The aggregate groups
+    # 3,977 closed-layer rows in the database and reads them once per process.
+    # **Measured on dev5, 2026-10-23**: this endpoint answers in 9.1 s on the
+    # first call, which builds the whole vocabulary, and 0.58 to 0.76 s on
+    # every call after it.
+    known = annotate.vocabulary(conn)
 
     return {
         'kind': 'values',
         'values': [
-            {'value': category, 'count': counts.get(category, 0)}
-            for category in annotate.categories()
+            {'value': category, 'count': known.counts[category]}
+            for category in sorted(known.counts)
         ],
-        'source': 'the per-entity annotation index',
+        # The layers served on request alone, by name and term count. Their
+        # terms are deliberately absent: 41,399 value rows is not an answer,
+        # and the whole reason they are not registered as categories is that
+        # registering one costs a row here, an attribute name beside it and a
+        # line in every refusal.
+        'on_request_only': annotate.open_vocabularies(conn),
+        'source': 'the per-entity annotation vocabulary over omnipath.relation',
         'unit': 'entities',
         'note': (
-            'adding a category reaches the summary array, the by-resource '
-            'object and the requestable boolean, and moves no default column'
+            'adding a category to a closed layer reaches the summary array, '
+            'the by-resource object and the requestable boolean, and moves no '
+            'default column; the on-request layer reaches none of the three '
+            'and is named here rather than enumerated. A count is the widest '
+            'contributing term\'s, so it is a floor where two vocabularies '
+            'name one category'
         ),
     }
 
@@ -1081,7 +1097,9 @@ def _by_resource_values(query, resolved, conn, facets, profile):
 def _attribute_values(query, resolved, conn, facets, profile):
 
     return _words(
-        sorted(project.HOT_COLUMNS) + sorted(annotate.FULL_NAMES),
+        sorted(project.HOT_COLUMNS)
+        + sorted(annotate.PUBLISHED_FULL_NAMES)
+        + [annotate.FUNCTION_NAME],
         note = (
             'these are the names that are already on the row or that name an '
             'annotation layer; any other name is read from the record '
@@ -1104,17 +1122,188 @@ def _view_values(query, resolved, conn, facets, profile):
     )
 
 
+def _identifier_coverage(conn) -> dict[str, dict[str, Any]]:
+    """
+    How far each identifier namespace reaches, per entity kind, read once.
+
+    **Coverage counts, never term counts.** "ChEBI holds 200,000 accessions"
+    tells a caller nothing about this build; what they need before they write
+    a request is whether the namespace will answer for their endpoints, and
+    the metabolomics namespaces are thin — ChEBI reaches 222,767 of 3,564,602
+    chemical entities. That thinness is the undiscoverable half of this
+    projection, so publishing it is what turns `[]` on most rows from a
+    surprise into a documented property.
+
+    **Measured on dev5, 2026-10-25: 18.0 s**, once per process, lazily, and
+    only for a caller who asks the discovery endpoint. The count is a grouped
+    `count(DISTINCT entity_id)` over `entity_identifier_lookup` restricted to
+    the sixteen registered namespaces, which is 34 million rows narrowed by
+    the type predicate. It is the same bargain the annotation vocabulary
+    strikes at 9.1 s, and it is a cost worth flagging: recording it in the
+    build would make the discovery answer free.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        `{kind: {'entities': total, 'namespaces': {slug: entities}}}`, over
+        the whole build rather than over one scope. The denominator is said
+        out loud in the entry below, because a coverage fraction whose
+        population is unstated is the quietly wrong kind of number.
+    """
+
+    if SEARCH_SCHEMA in _COVERAGE_CACHE:
+
+        return _COVERAGE_CACHE[SEARCH_SCHEMA]
+
+    vocabulary = nodes.identifier_types(conn)
+    slugs = {
+        vocabulary[stored]: slug
+        for slug, (stored, _) in nodes.IDENTIFIER_NAMESPACES.items()
+        if stored in vocabulary
+    }
+    kinds = {
+        name: kind
+        for kind, names in nodes.ENTITY_KINDS.items()
+        for name in names
+    }
+    out: dict[str, dict[str, Any]] = {
+        kind: {'entities': 0, 'namespaces': {}}
+        for kind in nodes.ENTITY_KINDS
+    }
+    totals = conn.execute(
+        f"""
+        SELECT et.name AS entity_type, count(*)::bigint AS entities
+        FROM {SEARCH_SCHEMA}.entity e
+        JOIN {SEARCH_SCHEMA}.vocab_entity_type et
+          ON et.entity_type_id = e.entity_type_id
+        WHERE et.name = ANY(%s::text[])
+        GROUP BY 1
+        """,
+        (list(kinds),),
+    ).fetchall()
+
+    for row in totals:
+
+        out[kinds[row['entity_type']]]['entities'] += int(row['entities'])
+
+    reached = conn.execute(
+        f"""
+        SELECT et.name AS entity_type,
+               ie.identifier_type_id,
+               count(DISTINCT l.entity_id)::bigint AS entities
+        FROM {SEARCH_SCHEMA}.entity_identifier_lookup l
+        JOIN {SEARCH_SCHEMA}.identifier_evidence ie
+          ON ie.identifier_id = l.identifier_id
+        JOIN {SEARCH_SCHEMA}.entity e
+          ON e.entity_id = l.entity_id
+        JOIN {SEARCH_SCHEMA}.vocab_entity_type et
+          ON et.entity_type_id = e.entity_type_id
+        WHERE ie.identifier_type_id = ANY(%s::bigint[])
+          AND et.name = ANY(%s::text[])
+        GROUP BY 1, 2
+        """,
+        (list(slugs), list(kinds)),
+    ).fetchall()
+
+    for row in reached:
+
+        namespaces = out[kinds[row['entity_type']]]['namespaces']
+        slug = slugs[int(row['identifier_type_id'])]
+        namespaces[slug] = namespaces.get(slug, 0) + int(row['entities'])
+
+    _COVERAGE_CACHE[SEARCH_SCHEMA] = out
+
+    return out
+
+
+def _identifier_values(query, resolved, conn, facets, profile):
+
+    coverage = _identifier_coverage(conn)
+
+    # The whole vocabulary, sixteen namespaces of it, rather than the handful
+    # a page is likely to use. **T100's registration cost does not carry over
+    # here**, and the difference is worth stating so nobody applies its
+    # caution by analogy: a registered annotation category reaches an
+    # unconditional column on every row, while a namespace reaches a column
+    # only on the request that names it. So what registering one costs is this
+    # value row and nothing per row, nothing in a refusal body, and nothing
+    # for a caller who never asks.
+    return {
+        'kind': 'values',
+        'values': [
+            {'value': slug, 'column': column}
+            for slug, (_, column) in nodes.IDENTIFIER_NAMESPACES.items()
+        ],
+        'by_entity_kind': {
+            kind: {
+                'entity_types': sorted(nodes.ENTITY_KINDS[kind]),
+                'entities': counts['entities'],
+                'values': [
+                    {
+                        'value': slug,
+                        'column': nodes.IDENTIFIER_NAMESPACES[slug][1],
+                        'entities': reached,
+                        # Six places rather than four, because a namespace
+                        # reaching 15 of 957,206 protein entities is a real
+                        # answer and `0.0` is not one.
+                        'coverage': (
+                            round(reached / counts['entities'], 6)
+                            if counts['entities'] else None
+                        ),
+                    }
+                    for slug, reached in sorted(
+                        counts['namespaces'].items(),
+                        key = lambda pair: (-pair[1], pair[0]),
+                    )
+                ],
+            }
+            for kind, counts in coverage.items()
+        },
+        'also_accepts': (
+            f'{nodes.ANY_KIND} as the kind, or a slug written on its own, for '
+            f'the namespace whatever the endpoint is'
+        ),
+        'source': (
+            'omnipath.entity_identifier_lookup joined to '
+            'omnipath.identifier_evidence'
+        ),
+        'unit': 'entities',
+        'note': (
+            'a namespace read per endpoint and rendered beside the canonical '
+            'identifier as an array, written `kind:slug`; every namespace '
+            'named reaches every node of every row, and one with no mapping '
+            'for an endpoint renders [] rather than being left out. The '
+            'coverage is over every entity of that kind in the build, not '
+            'over the queried scope, and it is a floor on what a scope will '
+            'carry rather than a promise'
+        ),
+    }
+
+
 def _annotation_layer_values(query, resolved, conn, facets, profile):
 
+    # The layer spellings, and the boolean form as a pattern rather than as
+    # 3,361 strings. T100 counts "an attribute name per registered category" as
+    # one of the three costs of registering a category, and it is a cost worth
+    # paying once: the `entity_annotations` facet already enumerates every
+    # category, with the entity count beside each, so spelling them out a
+    # second time here would double a 100 kB answer and teach a caller nothing
+    # the pattern does not. The function layer appears once by name — its
+    # 41,399 terms are not 41,399 attribute names.
     return _words(
-        sorted(annotate.FULL_NAMES)
-        + [
-            f'{annotate.LAYER}:{annotate.BOOLEAN_PREFIX}{category}'
-            for category in annotate.categories()
-        ],
+        sorted(annotate.PUBLISHED_FULL_NAMES) + [annotate.FUNCTION_NAME],
         note = (
-            'the default is a compact per-node summary array; these add the '
-            'by-resource object or the named booleans'
+            'the default is a compact per-node summary array beside the '
+            'coarse metabolic domain; these add the by-resource object or the '
+            'on-request function array'
+        ),
+        also_accepts = (
+            f'{annotate.LAYER}:{annotate.BOOLEAN_PREFIX}<category>, for any '
+            f'category the entity_annotations facet lists '
+            f'({len(annotate.categories(conn))} of them), and '
+            f'{annotate.FUNCTION_NAME}:<vocabulary> for a subset of the '
+            f'on-request layer'
         ),
     )
 
@@ -1195,6 +1384,7 @@ _ENTRIES = {
     ),
     'attributes': _attribute_values,
     'view': _view_values,
+    'identifiers': _identifier_values,
     'annotation_layer': _annotation_layer_values,
     'limit': _limit_values,
     'offset': _offset_values,
@@ -1212,3 +1402,4 @@ def forget() -> None:
     """
 
     _PROFILE_CACHE.clear()
+    _COVERAGE_CACHE.clear()

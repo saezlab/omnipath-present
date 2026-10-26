@@ -17,13 +17,16 @@ receptor, and a caller should not have to infer that from column order. A class
 names the two ends of a pair and nothing else, so where the row is an
 interaction rather than a pair the role is the graph's own, per participant.
 
-The lookup is one indexed statement over the page's entities. It deliberately
-does **not** go through the full identifier lookup: that table carries about
-nineteen identifiers per entity across every namespace, and reading it for a
-five-hundred-row page costs more than the fold it decorates. The canonical
-identifier and the representative-protein table answer the two views between
-them, and a request for a further namespace is an attribute request, priced
-like any other.
+The lookup is one indexed statement over the page's entities, and the
+identifier read beside it is a second. The canonical identifier answers one
+namespace per endpoint and the caller cannot choose which, so a request may
+name further namespaces and get an array per namespace per node. **It is read
+per page and never per namespace**: `entity_identifier_lookup` is keyed on
+`(entity_id, identifier_id)`, so the page's own endpoints are an index-only
+scan, which is what makes a read of the full identifier lookup affordable
+here when it is not affordable over a scope. The two view arrays come from
+that same read, because the table they used to come from —
+`gene_protein_representative` — holds no rows.
 
 **A row is not always a pair, and this module is where that stops being an
 assumption.** Where the page is keyed on an ordered pair, the two ends are the
@@ -114,6 +117,253 @@ STANDARD_BLOCKS: frozenset[str] = frozenset({
     'sources',
 })
 
+
+# ── A second identifier per endpoint ────────────────────────────────────────
+
+# The namespaces a request may ask an endpoint to be named in, by the slug a
+# caller writes.
+#
+# **A slug, and never the stored spelling.** `vocab_identifier_type.name` is a
+# mixed-case, colon-bearing CURIE — `Uniprot:MI:1097` — and the colon in it
+# collides with the `kind:slug` separator that `attribute_filters` and the
+# annotation booleans already spell their terms with. So the stored name stays
+# inside this module and the caller writes `uniprot`. The slugs are the
+# vocabulary's own `normalization_rule` where it carries one, which is every
+# metabolite namespace, and follow the same shape where it does not.
+#
+# **The two view arrays are in this map rather than beside it.** `uniprot` and
+# `entrez` render into `<side>_uniprots` and `<side>_gene_ids`, which the
+# contract already declares and `VIEW_ARRAYS` already names, so a request
+# naming either namespace and the standard columns cannot come to disagree
+# about one column. Those two columns read `gene_protein_representative`
+# before this read existed, and that table holds no rows, so they were `[]` on
+# every row of every response.
+IDENTIFIER_NAMESPACES: dict[str, tuple[str, str]] = {
+    'uniprot': (PROTEIN_IDENTIFIER_TYPE, 'uniprots'),
+    'entrez': (GENE_IDENTIFIER_TYPE, 'gene_ids'),
+    'ensembl': ('Ensembl:MI:0476', 'ensembl_ids'),
+    'hgnc': ('Hgnc:MI:1095', 'hgnc_ids'),
+    'genesymbol': ('Gene Name Primary:OM:0200', 'genesymbols'),
+    'inchikey': ('Standard Inchi Key:MI:1101', 'inchikeys'),
+    'pubchem': ('Pubchem Compound:OM:0002', 'pubchem_ids'),
+    'chembl': ('Chembl Compound:MI:0967', 'chembl_ids'),
+    'chebi': ('Chebi:MI:0474', 'chebis'),
+    'hmdb': ('Hmdb:OM:0004', 'hmdbs'),
+    'kegg': ('Kegg Compound:MI:2012', 'kegg_ids'),
+    'lipidmaps': ('Lipidmaps:OM:0003', 'lipidmaps_ids'),
+    'swisslipids': ('Swisslipids:OM:0009', 'swisslipids_ids'),
+    'refmet': ('Refmet:OM:0137', 'refmet_ids'),
+    'cas': ('Cas:MI:2011', 'cas_numbers'),
+    'smiles': ('Smiles:MI:0239', 'smiles'),
+}
+
+# The namespaces the two views are named for. They are read for every page
+# whether or not a request named them, because they are standard columns of
+# the contract and this read is the only thing that fills them.
+VIEW_NAMESPACES: tuple[str, ...] = ('uniprot', 'entrez')
+
+# Which entity types a selector key covers. The kind a caller writes says
+# which namespaces are worth asking for on which end — ChEBI means something
+# on a metabolite and nothing on a kinase — and the discovery answer publishes
+# the map so that intent can be read before a request is written.
+#
+# **The kind narrows what is worth asking for, and never which columns come
+# back.** Every namespace the selector names anywhere renders on every node of
+# every row, because T098's rule is one spelling for absence and a column that
+# appeared on the chemical rows alone is a column a frame consumer cannot
+# read. The join is what decides whether a value exists, and it is right that
+# it does: the sides leak, and 537 protein-side endpoints carry an InChIKey
+# from Guide to Pharmacology's peptide ligands. A namespace asked for on the
+# wrong side therefore renders `[]` rather than vanishing.
+ENTITY_KINDS: dict[str, frozenset[str]] = {
+    'protein': frozenset({
+        'protein',
+        'gene',
+        'polypeptide',
+        'protein_family',
+        'macromolecular_complex',
+    }),
+    'chemical': frozenset({'chemical_entity'}),
+}
+
+# The selector key a term carrying no kind takes. `identifiers=uniprot` reads
+# as "this namespace whatever the endpoint is", which keeps the short spelling
+# usable and is the honest one to write for a page whose endpoints are of no
+# one kind — `named_thing`, `ontology_class` and the rest.
+ANY_KIND = '*'
+
+_IDENTIFIER_TYPES: dict[str, dict[str, int]] = {}
+
+
+def identifier_types(conn) -> dict[str, int]:
+    """
+    The identifier-type vocabulary, read once per process.
+
+    Sixteen slugs resolve to sixteen type ids against a 256-row table, and the
+    ids are what the page read filters on. Caching them is what makes that
+    possible: the vocabulary of namespaces is the only thing here small enough
+    to hold, and holding anything per entity is the mistake F14 measured.
+
+    Args:
+        conn: An open connection.
+
+    Returns:
+        `{vocab_identifier_type.name: identifier_type_id}` for this schema.
+    """
+
+    if SEARCH_SCHEMA not in _IDENTIFIER_TYPES:
+
+        rows = conn.execute(
+            f"""
+            SELECT identifier_type_id, name
+            FROM {SEARCH_SCHEMA}.vocab_identifier_type
+            """,
+        ).fetchall()
+        _IDENTIFIER_TYPES[SEARCH_SCHEMA] = {
+            row['name']: int(row['identifier_type_id']) for row in rows
+        }
+
+    return _IDENTIFIER_TYPES[SEARCH_SCHEMA]
+
+
+def namespaces(selector: Mapping[str, Sequence[str]] | None) -> list[str]:
+    """
+    The namespaces one selector names, as one list over every kind in it.
+
+    Args:
+        selector: `{kind: [slug, …]}` as the request wrote it, or None.
+
+    Returns:
+        The known slugs, in the order the selector names them, without
+        duplicates. An unknown slug is dropped here rather than refused:
+        FR-045 makes an unknown projection target empty and never a 4xx, and
+        this is a projection.
+    """
+
+    out: list[str] = []
+
+    for slugs in (selector or {}).values():
+
+        for slug in slugs:
+
+            if slug in IDENTIFIER_NAMESPACES and slug not in out:
+
+                out.append(slug)
+
+    return out
+
+
+def unknown_namespaces(selector: Mapping[str, Sequence[str]] | None) -> list[str]:
+    """
+    The slugs of one selector that name no namespace.
+
+    Args:
+        selector: `{kind: [slug, …]}` as the request wrote it, or None.
+
+    Returns:
+        The unrecognised slugs, for the log line that says a projection asked
+        for something this build cannot name.
+    """
+
+    return sorted({
+        slug
+        for slugs in (selector or {}).values()
+        for slug in slugs
+        if slug not in IDENTIFIER_NAMESPACES
+    })
+
+
+def identifiers(
+        entities: Sequence[str],
+        selector: Mapping[str, Sequence[str]] | None = None,
+        *,
+        conn,
+) -> dict[str, dict[str, list[str]]]:
+    """
+    Read the requested namespaces of every entity on one page, in one statement.
+
+    **The page, not the namespace.** `entity_identifier_lookup` is a plain
+    table with a primary key on `(entity_id, identifier_id)`, so a read
+    filtered on the page's own endpoints is an index-only scan plus one
+    primary-key probe into `identifier_evidence` for each identifier an
+    endpoint carries. That is the same bargain `lookup` and `shape` already
+    strike with a page the key selection has bounded, and it is what separates
+    this from F14: the annotation store LIST-partitions on `source_id` and
+    walks every partition.
+
+    **The type id is the predicate, and the vocabulary never enters the
+    statement.** Filtering on `vocab_identifier_type.name` instead measured
+    48.0 ms against 22.7 ms for the same answer on the same page, because the
+    name is a column of a table the row does not carry and the type id is a
+    column it does. The slug each id belongs to is put back on in Python from
+    the cached vocabulary, so the join is not needed for the output either.
+
+    **Measured on dev5, 2026-10-25**, 400 sampled endpoints: 1,290 rows for
+    the two view namespaces in **30 ms** steady state and **207 ms** on the
+    first call of a fresh process, against 987 ms measured on 2026-10-23 with
+    a cold Postgres buffer cache. **The first read is accepted as a
+    first-request cost rather than warmed up**, and that is a decision. What
+    is slow cold is the buffer cache over `identifier_evidence`'s
+    30-million-row primary key, and which of its pages a request needs depends
+    on the entity ids the page selected, so a warm-up at startup would have to
+    read enough of a 30-million-row index to be worth it — which is the eager
+    index this service has just finished removing. The one thing small enough
+    to hold is the type vocabulary, and `identifier_types` holds it.
+
+    Args:
+        entities: The entity ids the page reaches.
+        selector: The namespaces the request asked for, `{kind: [slug, …]}`.
+        conn: An open connection.
+
+    Returns:
+        `{entity_id: {slug: [value, …]}}`, carrying an entry only where a
+        value was found. Rendering the absent case is `columns`' business,
+        because the empty value of a column is a rendering decision and not a
+        fact about the entity.
+    """
+
+    wanted = list(dict.fromkeys(str(value) for value in entities if value))
+    slugs = list(dict.fromkeys([*VIEW_NAMESPACES, *namespaces(selector)]))
+    vocabulary = identifier_types(conn)
+    types: dict[int, str] = {}
+
+    for slug in slugs:
+
+        if (type_id := vocabulary.get(IDENTIFIER_NAMESPACES[slug][0])) is not None:
+
+            types[type_id] = slug
+
+    if not wanted or not types:
+
+        return {}
+
+    rows = conn.execute(
+        f"""
+        SELECT l.entity_id,
+               ie.identifier_type_id,
+               ie.value
+        FROM {SEARCH_SCHEMA}.entity_identifier_lookup l
+        JOIN {SEARCH_SCHEMA}.identifier_evidence ie
+          ON ie.identifier_id = l.identifier_id
+        WHERE l.entity_id = ANY(%s::uuid[])
+          AND ie.identifier_type_id = ANY(%s::bigint[])
+        ORDER BY l.entity_id, ie.identifier_type_id, ie.value
+        """,
+        (wanted, list(types)),
+    ).fetchall()
+    out: dict[str, dict[str, list[str]]] = {}
+
+    # Sorted in the statement rather than here, because the arrays have to be
+    # stable across two reads of the same page or a consumer diffing one
+    # response against the next sees churn that no build produced.
+    for row in rows:
+
+        found = out.setdefault(str(row['entity_id']), {})
+        found.setdefault(types[int(row['identifier_type_id'])], []).append(
+            row['value'],
+        )
+
+    return out
 
 @dataclass
 class Node:
@@ -339,57 +589,85 @@ def lookup(entities: Sequence[str], *, conn) -> dict[str, dict[str, Any]]:
     return {str(row['entity_id']): dict(row) for row in rows}
 
 
-def _proteins(record: dict[str, Any]) -> list[str]:
+def _proteins(
+        record: dict[str, Any],
+        found: Mapping[str, Sequence[str]] | None = None,
+) -> list[str]:
     """
-    Every protein accession known for one entity, widest first.
+    Every protein accession known for one entity, its own first.
+
+    **The order is what `view=protein` leads with, so it is a decision.** The
+    entity's own canonical identifier comes first where that identifier is an
+    accession, because it is the one the build settled on and it does not move
+    between pages. The identifier lookup's values follow, sorted, and they are
+    an arbitrary pick among equals wherever there is no canonical accession to
+    lead — SSTR2 carries seven and one UniProt endpoint carries 275. There is
+    no stored consensus to prefer instead: `gene_protein_representative`, the
+    only table that ever held one, has no rows.
 
     Args:
         record: One row of `lookup`.
+        found: This entity's answer from `identifiers`, if the page read one.
 
     Returns:
         The accessions, without duplicates and without empty values.
     """
 
     candidates = [
-        *(record.get('uniprot_all') or []),
+        record.get('canonical_identifier')
+        if record.get('canonical_type') == PROTEIN_IDENTIFIER_TYPE else None,
         record.get('representative_uniprot'),
+        *((found or {}).get('uniprot') or ()),
+        *(record.get('uniprot_all') or []),
     ]
-
-    if record.get('canonical_type') == PROTEIN_IDENTIFIER_TYPE:
-
-        candidates.append(record.get('canonical_identifier'))
 
     return list(dict.fromkeys(value for value in candidates if value))
 
 
-def _genes(record: dict[str, Any]) -> list[str]:
+def _genes(
+        record: dict[str, Any],
+        found: Mapping[str, Sequence[str]] | None = None,
+) -> list[str]:
     """
-    Every gene identifier known for one entity.
+    Every gene identifier known for one entity, its own first.
+
+    A protein entity's genes used to be an attribute request rather than a
+    standard column, on the reading that the identifier lookup was too wide to
+    read per page. The page-scoped read settles that: the lookup answers for
+    the page's endpoints in one indexed statement, so a gene-canonical entity
+    reports its own identifier and a UniProt-canonical one reports the gene
+    ids the build holds for it, which is what the protein view's array
+    promises.
 
     Args:
         record: One row of `lookup`.
+        found: This entity's answer from `identifiers`, if the page read one.
 
     Returns:
-        The NCBI Gene ids, which for a gene-canonical entity is its own
-        identifier and for anything else is empty. A protein entity's genes
-        live in the identifier lookup and are an attribute request, not a
-        standard column.
+        The NCBI Gene ids, without duplicates.
     """
 
-    if record.get('canonical_type') == GENE_IDENTIFIER_TYPE:
+    candidates = [
+        record.get('canonical_identifier')
+        if record.get('canonical_type') == GENE_IDENTIFIER_TYPE else None,
+        *((found or {}).get('entrez') or ()),
+    ]
 
-        return [record['canonical_identifier']]
-
-    return []
+    return list(dict.fromkeys(value for value in candidates if value))
 
 
-def _identifier(record: dict[str, Any], view: str) -> str | None:
+def _identifier(
+        record: dict[str, Any],
+        view: str,
+        found: Mapping[str, Sequence[str]] | None = None,
+) -> str | None:
     """
     The one identifier the requested view leads with.
 
     Args:
         record: One row of `lookup`.
         view: `gene` or `protein`.
+        found: This entity's answer from `identifiers`, if the page read one.
 
     Returns:
         A single best identifier. The fallback in both views is the entity's
@@ -400,11 +678,11 @@ def _identifier(record: dict[str, Any], view: str) -> str | None:
 
     if view == 'protein':
 
-        proteins = _proteins(record)
+        proteins = _proteins(record, found)
 
         return proteins[0] if proteins else record.get('canonical_identifier')
 
-    genes = _genes(record)
+    genes = _genes(record, found)
 
     return genes[0] if genes else record.get('canonical_identifier')
 
@@ -414,6 +692,8 @@ def columns(
         side: str,
         view: str,
         role: str | None,
+        found: Mapping[str, Sequence[str]] | None = None,
+        selector: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """
     One node's standard columns, named for whatever it is named for.
@@ -421,7 +701,9 @@ def columns(
     Every key is present whether or not a value was found. A caller reading a
     frame column by column cannot handle a key that appears on some rows and
     not on others, and an absent key is indistinguishable from an entity the
-    lookup missed.
+    lookup missed. A namespace the selector names therefore reaches every node
+    of every row of the page, at T098's spelling for absence: an array of
+    identifiers is empty when the build holds none, never null and never gone.
 
     Args:
         record: The entity's row of `lookup`, or None when the page reached an
@@ -432,23 +714,52 @@ def columns(
         view: `gene` or `protein`.
         role: The role this node plays — the class's for an end of a pair, the
             graph's own for a participant — or None.
+        found: This entity's answer from `identifiers`, `{slug: [value, …]}`.
+        selector: The namespaces the request asked for, which decide the
+            further `<side>_*` arrays beside the view's own.
 
     Returns:
-        The `<side>_*` columns of the contract's standard output.
+        The `<side>_*` columns of the contract's standard output, and one
+        array per namespace the request named.
     """
 
     record = record or {}
     array = VIEW_ARRAYS.get(view, VIEW_ARRAYS[DEFAULT_VIEW])
-    values = _genes(record) if array == 'gene_ids' else _proteins(record)
-
-    return {
-        side: _identifier(record, view) if record else None,
+    # The two view arrays are built whichever view is leading, and named once
+    # each. They are one column apiece — the contract's `<side>_uniprots` and
+    # `<side>_gene_ids` — so a caller who names `uniprot` beside `view=gene`
+    # has to get the column the view already fills rather than a second
+    # answer under the same key. They are also the only two arrays that carry
+    # the entity's own canonical identifier as well as the lookup's values,
+    # which is what keeps a gene-canonical endpoint reporting its gene id.
+    arrays = {
+        VIEW_ARRAYS['gene']: _proteins(record, found),
+        VIEW_ARRAYS['protein']: _genes(record, found),
+    }
+    out = {
+        side: _identifier(record, view, found) if record else None,
         f'{side}_label': record.get('label'),
-        f'{side}_{array}': values,
+        f'{side}_{array}': arrays[array],
         f'{side}_organism': record.get('taxonomy_id'),
         f'{side}_entity_type': record.get('entity_type'),
         f'{side}_role': role,
     }
+
+    # A namespace costs a column only on the request that names it, which is
+    # why the whole vocabulary is registered in discovery rather than a tenth
+    # of it. The caution T100 argues for registering an annotation category
+    # does not carry over by analogy: a category there reaches an
+    # unconditional column on every row, and a namespace here reaches none
+    # until it is asked for.
+    for slug in namespaces(selector):
+
+        suffix = IDENTIFIER_NAMESPACES[slug][1]
+        out[f'{side}_{suffix}'] = (
+            arrays[suffix] if suffix in arrays
+            else list((found or {}).get(slug) or ())
+        )
+
+    return out
 
 
 def binary_nodes(
@@ -456,6 +767,8 @@ def binary_nodes(
         index: dict[str, dict[str, Any]],
         view: str,
         class_slug: str | None,
+        found: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+        selector: Mapping[str, Sequence[str]] | None = None,
 ) -> list[Node]:
     """
     The two ends of a row that is an ordered pair, in the order it names them.
@@ -466,6 +779,8 @@ def binary_nodes(
         index: The lookup's result for this page.
         view: `gene` or `protein`.
         class_slug: The row's interaction class, which names the roles.
+        found: `identifiers`' result for this page, keyed by entity id.
+        selector: The namespaces the request asked for.
 
     Returns:
         One node per side, its columns named for the side, and both flat —
@@ -489,6 +804,8 @@ def binary_nodes(
                     output_side,
                     view,
                     roles[record_side],
+                    (found or {}).get(entity) if entity is not None else None,
+                    selector,
                 ),
                 flat = True,
             ),
@@ -501,6 +818,8 @@ def member_nodes(
         members: Sequence[dict[str, Any]],
         index: dict[str, dict[str, Any]],
         view: str,
+        found: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+        selector: Mapping[str, Sequence[str]] | None = None,
 ) -> list[Node]:
     """
     One node per participant of an interaction, as the graph holds them.
@@ -518,6 +837,8 @@ def member_nodes(
         members: One interaction's participant rows, from `party_detail`.
         index: The lookup's result for this page.
         view: `gene` or `protein`.
+        found: `identifiers`' result for this page, keyed by entity id.
+        selector: The namespaces the request asked for.
 
     Returns:
         One node per member, in the order the graph holds them.
@@ -532,6 +853,8 @@ def member_nodes(
                 PARTICIPANT_PREFIX,
                 view,
                 member['role'],
+                (found or {}).get(member['entity_id']),
+                selector,
             ),
             detail = {name: member[name] for name in PARTICIPANT_DETAIL},
         )
@@ -544,6 +867,8 @@ def project(
         index: dict[str, dict[str, Any]],
         view: str,
         class_slug: str | None,
+        found: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+        selector: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """
     The standard per-node columns of one folded row, for both of its ends.
@@ -554,6 +879,8 @@ def project(
         index: The lookup's result for this page.
         view: `gene` or `protein`.
         class_slug: The row's interaction class, which names the roles.
+        found: `identifiers`' result for this page, keyed by entity id.
+        selector: The namespaces the request asked for.
 
     Returns:
         Every `source_*` and `target_*` column of the row.
@@ -561,7 +888,7 @@ def project(
 
     out: dict[str, Any] = {}
 
-    for node in binary_nodes(row, index, view, class_slug):
+    for node in binary_nodes(row, index, view, class_slug, found, selector):
 
         out.update(node.columns)
 

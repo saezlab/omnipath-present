@@ -667,15 +667,23 @@ def _planner_is_blind(resolved: ResolvedScope, record: RecordFilter | None) -> b
     """
     Whether this request's predicate is one the planner cannot price.
 
-    An entity-set predicate is an `OR` of two large uuid arrays, and the
-    planner has no statistic that describes it. **Measured on dev4 2026-08-24**
-    against the fold: 8,428,823 keys estimated for a `ligand` annotation filter
-    against 729,900 true, and 7,483,451 against 1,273,762 for `receptor` —
-    11.5x and 5.9x over. The flat record count is mispriced the same way
-    (8,531,569 against 794,518), so it is the predicate rather than the
-    `DISTINCT` that defeats it. With a class filter added it undershoots
-    instead, 42,656 against 59,328. An error of that size in either direction
-    is not an estimate, so this request is counted rather than planned.
+    An annotation predicate is a semi-join into `relation` over a term list,
+    and the planner has no statistic that describes how many endpoints a term
+    reaches. **Measured on dev4 2026-08-24**, when the same filter was an `OR`
+    of two large uuid arrays: 8,428,823 keys estimated for a `ligand`
+    annotation filter against 729,900 true, and 7,483,451 against 1,273,762 for
+    `receptor` — 11.5x and 5.9x over. The flat record count was mispriced the
+    same way (8,531,569 against 794,518), so it was the predicate rather than
+    the `DISTINCT` that defeated it, and with a class filter added it
+    undershot instead, 42,656 against 59,328.
+
+    **T100 changed the predicate's shape and not its pricing.** It is an
+    `EXISTS` now rather than two spliced arrays, which made the bounded count
+    eight times cheaper — 1,400 ms against 11,525 ms for `cytoplasm` on dev5,
+    2026-10-23 — and left the planner just as blind, because the selectivity of
+    `object_entity_id = ANY(…)` over a 29-million-row table is the same unknown
+    it was. An error of that size in either direction is not an estimate, so
+    this request is counted rather than planned.
 
     Everything else is planned, because there the planner is good: 14,221,675
     against 14,291,204 unscoped, and 42,096 against 44,455 for one resource.
@@ -688,7 +696,7 @@ def _planner_is_blind(resolved: ResolvedScope, record: RecordFilter | None) -> b
         Whether to count instead of plan.
     """
 
-    return record is None and resolved.annotated_entity_ids is not None
+    return record is None and resolved.annotation is not None
 
 
 def _probe(

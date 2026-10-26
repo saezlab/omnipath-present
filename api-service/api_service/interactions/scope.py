@@ -77,11 +77,13 @@ class ResolvedScope:
     # One of them makes the query preset-scoped, which is what lets the legacy
     # `interaction_dataset` scalar mean "the dataset you asked for".
     preset_names: list[str] = field(default_factory = list)
-    # The entities an `entity_annotations` filter admits, or None for no such
-    # filter. Resolved here with the rest of the scope, so the record predicate
-    # is written against ids rather than against a join into the annotation
-    # tables for every candidate row.
-    annotated_entity_ids: list[str] | None = None
+    # The `entity_annotations` filter, resolved to the annotation **terms** a
+    # record predicate can be written against, or None for no such filter.
+    # Resolved here with the rest of the scope, so the predicate is a semi-join
+    # on a handful of term ids rather than an `OR` of two uuid arrays holding
+    # every entity the category reaches — `cytoplasm` reaches 67,469 of them
+    # and that form costs 11.5 s against the semi-join's 1.4 s.
+    annotation: annotate.Filter | None = None
     interaction_class_ids: list[int] = field(default_factory = list)
     entity_type_ids: list[int] = field(default_factory = list)
     # The chemical classes an endpoint may carry. Ids rather than entities:
@@ -247,7 +249,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
                 dict.fromkeys(value.lower() for value in filters.datasets)
                 if name in registered
             ],
-            annotated_entity_ids = _annotated_entities(
+            annotation = _annotated_entities(
                 filters.entity_annotations, live,
             ),
             interaction_class_ids = _class_ids(live, classes),
@@ -261,10 +263,7 @@ def resolve(query: InteractionQuery, *, conn = None) -> ResolvedScope:
         )
         scope.empty = (
             (scope.source_ids is not None and not scope.source_ids)
-            or (
-                scope.annotated_entity_ids is not None
-                and not scope.annotated_entity_ids
-            )
+            or (scope.annotation is not None and scope.annotation.empty)
             or (bool(classes) and not scope.interaction_class_ids)
             # A chemical class the vocabulary does not carry admits no entity,
             # which is an empty answer. Reading it as no restriction would hand
@@ -814,16 +813,16 @@ def _record_share(conn, scope: ResolvedScope, by_name: dict[str, int]) -> float:
     return max(share, 1.0 / whole)
 
 
-def _annotated_entities(values: list[str], conn) -> list[str] | None:
+def _annotated_entities(values: list[str], conn) -> annotate.Filter | None:
     """
-    The entities an annotation filter admits, resolved before the query runs.
+    The terms an annotation filter admits, resolved before the query runs.
 
     Args:
         values: The requested category names.
         conn: An open connection.
 
     Returns:
-        The entity ids, or None when no annotation filter was asked for.
+        The resolved filter, or None when no annotation filter was asked for.
 
     Raises:
         GuardrailRefusal: For a category nothing is registered under. An
@@ -838,24 +837,36 @@ def _annotated_entities(values: list[str], conn) -> list[str] | None:
 
     from .guard import GuardrailRefusal
 
-    if unknown := annotate.unknown_categories(values):
+    if unknown := annotate.unknown_categories(values, conn):
 
+        known = annotate.categories(conn)
+        # The closed layers are enumerated and the open one is named. A
+        # function term is a real annotation that this filter cannot reach, so
+        # the refusal has to say which vocabularies hold it and how large they
+        # are — listing their 41,399 terms in a 400 body would be the cost
+        # registering them was refused for in the first place.
         raise GuardrailRefusal(
             f'no node annotation category is registered under {unknown}. '
-            f'Known categories: {annotate.categories()}.',
+            f'{len(known)} categories are registered, and the layers served '
+            f'on request alone are '
+            f'{[(item["vocabulary"], item["terms"]) for item in annotate.open_vocabularies(conn)]}, '
+            f'whose terms are reachable through '
+            f'attributes={annotate.FUNCTION_NAME} and not through this filter.',
             status_code = 400,
             parameter = 'entity_annotations',
             value = unknown,
-            known = annotate.categories(),
+            known = known,
+            on_request_only = annotate.open_vocabularies(conn),
         )
 
-    entities = annotate.entities_with(values, conn = conn)
+    resolved = annotate.resolve_filter(values, conn = conn)
 
     _log.info(
-        'the annotation filter %s admits %d entities', values, len(entities),
+        'the annotation filter %s admits %d terms and %d metabolic domains',
+        values, len(resolved.term_pairs), len(resolved.domain_ids),
     )
 
-    return entities
+    return resolved
 
 
 def dataset_specifications(conn) -> dict[str, dict[str, Any]]:

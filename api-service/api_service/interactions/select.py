@@ -362,20 +362,65 @@ def record_filter(
         )
         args.extend([list(taxa), list(taxa)])
 
-    if resolved.annotated_entity_ids is not None:
+    if (annotation := resolved.annotation) is not None:
 
-        # Resolved to ids before the query ran, so the annotation tables are
-        # never joined per candidate row: they are partitioned forty-five ways
-        # and a join there would price the filter by the scope rather than by
-        # the page.
-        clauses.append(
-            '(r.subject_entity_id = ANY(%s::uuid[]) '
-            'OR r.object_entity_id = ANY(%s::uuid[]))',
-        )
-        args.extend([
-            list(resolved.annotated_entity_ids),
-            list(resolved.annotated_entity_ids),
-        ])
+        # A semi-join on the annotation **term**, not an `OR` of two arrays
+        # holding every entity the category reaches. `scope.resolve` has
+        # already turned the category into its terms and refused anything the
+        # vocabulary does not register, so nothing here can quietly become no
+        # filter at all. **Measured on dev5 2026-10-23**: the bounded key count
+        # for `cytoplasm` — 67,469 entities, and `extracellular region` is
+        # 76,529 — costs 11,525 ms with the entity list spliced in and
+        # 1,400 ms as this `EXISTS`, which also ships one term pair instead of
+        # 134,938 uuids. `relation` is not partitioned and
+        # `canonical_relation_subject_entity_idx` serves the probe.
+        branches: list[str] = []
+
+        if annotation.term_pairs:
+
+            # **The predicate is half the key.** GO:0005886 `plasma membrane`
+            # is a location under `located_in` and a function annotation under
+            # `associated_with`, so a filter on the object alone admitted rows
+            # whose rendered array does not carry the category asked for — the
+            # filter quietly answering about the layer it does not serve.
+            #
+            # It is written as one disjunct per predicate rather than as a
+            # row-constructor over `unnest`, which is the same answer and a
+            # different plan: the `unnest` form did not finish inside two
+            # minutes, while this one runs the bounded key count in 1,400 ms.
+            # There are two predicates in the whole allow-list, so the
+            # disjunction is two terms long.
+            pairs = ' OR '.join(
+                'ar.predicate_id = %s AND ar.object_entity_id = ANY(%s::uuid[])'
+                for _ in annotation.by_predicate
+            )
+            branches.append(
+                f"""EXISTS (
+              SELECT 1 FROM {SEARCH_SCHEMA}.relation ar
+              WHERE ar.subject_entity_id
+                    IN (r.subject_entity_id, r.object_entity_id)
+                AND ({pairs})
+            )""",
+            )
+
+            for predicate, entities in annotation.by_predicate:
+
+                args.extend([predicate, entities])
+
+        if annotation.domain_ids:
+
+            # The coarse metabolic domain is a column of `entity` and not an
+            # asserted fact, so it is a different branch rather than a term.
+            branches.append(
+                f"""EXISTS (
+              SELECT 1 FROM {SEARCH_SCHEMA}.entity ae
+              WHERE ae.entity_id IN (r.subject_entity_id, r.object_entity_id)
+                AND ae.metabolic_domain_id = ANY(%s::smallint[])
+            )""",
+            )
+            args.append(list(annotation.domain_ids))
+
+        clauses.append(f'({" OR ".join(branches)})' if branches else 'false')
 
     if resolved.entity_type_ids:
 

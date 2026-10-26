@@ -51,6 +51,11 @@ _GROUP_ALIAS = '_group'
 
 _CLASS_NAMES: dict[str, dict[int, dict[str, Any]]] = {}
 
+# The identifier namespaces a request has named that this build cannot name,
+# remembered so the line that says so is logged once each rather than once a
+# request.
+_UNKNOWN_NAMESPACES: set[str] = set()
+
 # The delimiter the legacy columns join with. One character, one meaning: a
 # resource name and a reference id never contain it.
 DELIMITER = ';'
@@ -451,14 +456,53 @@ def _project_page(
         if not _select.keys_an_ordered_pair(shapes[_grain_of(row, query)])
     ]
     members = _nodes.party_detail(whole, conn = conn) if whole else {}
-    index = _nodes.lookup(_nodes.entity_ids(rows, members), conn = conn)
-    annotations = _annotate.index(conn) if rows else {}
+    endpoints = _nodes.entity_ids(rows, members)
+    index = _nodes.lookup(endpoints, conn = conn)
+    # The namespaces each endpoint is named in, read for this page's endpoints
+    # beside their identity and for the same reason: `entity_identifier_lookup`
+    # is keyed on `(entity_id, identifier_id)`, so the page is an index-only
+    # scan — 30 ms for 400 endpoints over the two view namespaces — while the
+    # same read over a scope is the F14 cost. It runs whether or not the
+    # request named a namespace, because the two view arrays are standard
+    # columns and `gene_protein_representative`, the table they used to come
+    # from, holds no rows.
+    found = _nodes.identifiers(endpoints, query.identifiers, conn = conn) if rows else {}
+
+    if unknown := [
+        slug for slug in _nodes.unknown_namespaces(query.identifiers)
+        if slug not in _UNKNOWN_NAMESPACES
+    ]:
+
+        # Dropped rather than refused, the way an unknown attribute name is:
+        # FR-045 makes an unknown projection target empty and never a 4xx. Said
+        # once per slug per process, because a client that writes a slug this
+        # build cannot name writes it on every request, and the line is for
+        # whoever reads the log rather than for the caller, who gets the answer
+        # either way.
+        _UNKNOWN_NAMESPACES.update(unknown)
+        _log.info(
+            '%s names no identifier namespace of this build, so it reaches no '
+            'column', unknown,
+        )
+
+    # The annotation layers are read for this page's endpoints, the same way
+    # the per-node lookup above reads their identity and for the same reason:
+    # the whole index is 531,155 links read in 8.4 s, a page of two hundred
+    # endpoints is about 20 ms, and the per-page read therefore never breaks
+    # even against an eager one. The layers travel with the call because they
+    # decide what the read costs — the resource join is ten times the page and
+    # the function layer a second statement, and neither runs unasked.
+    annotations = (
+        _annotate.page(endpoints, conn = conn, layers = query.annotation_layers)
+        if rows else {}
+    )
     registry = _scope.dataset_registry(conn) if rows else []
     projected = [
         _project(
             row, shapes[_grain_of(row, query)], conn, index, annotations,
             registry, resolved,
             members.get(str(row.get('interaction_id'))) or [],
+            found,
         )
         for row in rows
     ]
@@ -566,10 +610,11 @@ def _project(
         query: _params.InteractionQuery,
         conn,
         index: dict[str, dict[str, Any]] | None = None,
-        annotations: dict[str, dict[str, tuple[str, ...]]] | None = None,
+        annotations: dict[str, _annotate.Entry] | None = None,
         registry: list[dict[str, Any]] | None = None,
         resolved: _scope.ResolvedScope | None = None,
         members: list[dict[str, Any]] | None = None,
+        found: dict[str, dict[str, list[str]]] | None = None,
 ) -> dict[str, Any]:
     """
     Render one collapsed row for the response.
@@ -581,8 +626,10 @@ def _project(
         query: The parsed request, for the projection parameters.
         conn: An open connection, for the class vocabulary.
         index: The page's per-node lookup, keyed by entity id.
+        annotations: The page's annotation layers, keyed by entity id.
         members: This interaction's participants, where the page was keyed on
             the interaction and its ends were read from the graph.
+        found: The page's identifier read, keyed by entity id.
 
     Returns:
         The row as JSON-ready values, with the class slug and label added, its
@@ -592,6 +639,12 @@ def _project(
     """
 
     out: dict[str, Any] = {}
+    # Four columns of the standard output are rebuildable from what the row
+    # already carries, so they leave the default row and stay selectable by
+    # name (FR-055). Every one of them is in `project.HOT_COLUMNS`, which is
+    # what makes selecting one cost nothing: the value is already on the
+    # folded row, so this is a rendering decision and the fold does not move.
+    selected = set(query.attributes)
 
     for name, value in row.items():
 
@@ -614,11 +667,20 @@ def _project(
         vocabulary = _class_vocabulary(conn).get(int(class_id), {})
         class_slug = vocabulary.get('name')
         out['interaction_type'] = class_slug
-        out['interaction_type_label'] = vocabulary.get('label')
+
+        if 'interaction_type_label' in selected:
+
+            # The slug stays and the label goes, because they are not the same
+            # promise: the slug is what a caller filters by and what the row
+            # is keyed on, and the label is a display form of it that this
+            # module can rebuild from one vocabulary lookup.
+            out['interaction_type_label'] = vocabulary.get('label')
 
     if _select.keys_an_ordered_pair(query):
 
-        rendered = _nodes.binary_nodes(row, index or {}, query.view, class_slug)
+        rendered = _nodes.binary_nodes(
+            row, index or {}, query.view, class_slug, found, query.identifiers,
+        )
 
     else:
 
@@ -627,7 +689,9 @@ def _project(
         # empty would be the wrong half of a true sentence: it would say the
         # interaction has a source and a target and that the build does not
         # know them, when what is true is that it has participants instead.
-        rendered = _nodes.member_nodes(members or (), index or {}, query.view)
+        rendered = _nodes.member_nodes(
+            members or (), index or {}, query.view, found, query.identifiers,
+        )
 
     for node in rendered:
 
@@ -648,8 +712,21 @@ def _project(
     # to flatten into, so the array is the shape that generalises; over an
     # ordered pair it is the same values the flat columns carry, arranged the
     # way they are when there is no pair to carry them.
-    out['participants'] = _nodes.participants(rendered)
-    out.update(_standard_columns(row, class_slug, registry or [], resolved))
+    #
+    # **It is mandatory where the row is not a pair and optional where it is**,
+    # and the gate is the key shape rather than the grain or the dataset.
+    # Where the page is keyed on the interaction there is no flat pair, so the
+    # array is the only ends the row has and dropping it would leave a row
+    # naming no endpoint at all. Where the page is keyed on an ordered pair it
+    # is the flat columns rearranged, so a caller who does not ask for it
+    # loses nothing it did not already have twice.
+    if not _select.keys_an_ordered_pair(query) or 'participants' in selected:
+
+        out['participants'] = _nodes.participants(rendered)
+
+    out.update(
+        _standard_columns(row, class_slug, registry or [], resolved, selected),
+    )
 
     if query.attributes:
 
@@ -696,6 +773,7 @@ def _standard_columns(
         class_slug: str | None,
         registry: list[dict[str, Any]],
         resolved: _scope.ResolvedScope | None,
+        selected: set[str] | None = None,
 ) -> dict[str, Any]:
     """
     The legacy per-interaction columns, projected from what the fold produced.
@@ -707,30 +785,48 @@ def _standard_columns(
     recomputes a summary — the sign flags and both assertion counts are the
     fold's own, over the scope the query stated.
 
+    **`resources` and `references` are rebuildable, so they are selected
+    rather than given.** Each is one `join` over an array the row carries
+    anyway, and a caller who wants the structured form already has it in
+    `sources` and `reference_pairs`. The dataset scalar stays unconditional:
+    it is not a rendering of a column on the row but an answer about the
+    registry, and no array beside it carries it.
+
     Args:
         row: The folded row.
         class_slug: The row's class, which decides which presets can claim it.
         registry: The preset registry, for the dataset tags.
         resolved: The resolved scope, which knows whether one preset was asked
             for.
+        selected: The names the request asked for, which decide whether the
+            two joined strings are rendered at all.
 
     Returns:
-        The joined provenance, the dataset scalar and the array behind it.
+        The dataset scalar, the array behind it, and whichever of the joined
+        provenance columns was asked for.
     """
 
     sources = sorted(row.get('sources') or ())
     tags = _scope.dataset_tags(sources, class_slug, registry)
     presets = list(resolved.preset_names) if resolved else []
+    selected = selected or set()
 
     # The legacy scalar was scalar because legacy queries were always
     # single-dataset. Asking for one preset therefore means "the dataset you
     # asked for"; asking for none means every tag the row carries, joined, so
     # the column stays a string and loses nothing.
     scalar = presets[0] if len(presets) == 1 else (DELIMITER.join(tags) or None)
-
-    return {
-        'resources': DELIMITER.join(sources),
-        'references': DELIMITER.join(sorted(row.get('reference_pairs') or ())),
+    out: dict[str, Any] = {
         'interaction_dataset': scalar,
         'interaction_datasets': tags,
     }
+
+    if 'resources' in selected:
+
+        out['resources'] = DELIMITER.join(sources)
+
+    if 'references' in selected:
+
+        out['references'] = DELIMITER.join(sorted(row.get('reference_pairs') or ()))
+
+    return out

@@ -58,6 +58,7 @@ from typing import Any, Sequence
 
 from ..graph import SEARCH_SCHEMA
 from ..resource_catalog import resolve_resource_filters
+from . import annotate as _annotate
 from . import fold as _fold
 from . import params as _params
 from . import scope as _scope
@@ -426,7 +427,11 @@ def _rows(node: Any, conn) -> list[dict[str, Any]]:
 
         for row in rows:
 
-            row['annotation_layer'] = node.layer
+            # The recipe's own spelling, normalised. A registry row written
+            # before the layer was renamed still says `intercell`, and the
+            # alias is accepted on input and never emitted — a value carries
+            # that rule as much as a column name does.
+            row['annotation_layer'] = _annotate.canonical_layer(node.layer)
 
         return rows
 

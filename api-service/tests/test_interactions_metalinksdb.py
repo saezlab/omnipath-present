@@ -32,12 +32,35 @@ each fails differently:
   chemical class behind that word follows the resources that contributed a
   compound rather than the compound.
 
-The last group is the swap test. The role and localization attributes a caller
+The last group is the swap test. The location and class attributes a caller
 requests today come from the resources that already publish those terms; later
-they come from the rebuilt intercell classification. The requested names, the
-output shape and the presence of a provenance field are asserted here **and are
-not re-written after the swap** — that is the whole content of the promise that
-the swap is invisible.
+the role half comes from the rebuilt intercell classification. The requested
+names, the output shape and the presence of a provenance field are asserted
+here **and are not re-written after the swap** — that is the whole content of
+the promise that the swap is invisible.
+
+**Those assertions were edited once, by T100, and the reason belongs here
+rather than in a commit message.** The layer was named `intercell` and keyed on
+five annotation terms — `Ligand:OM:7777`, `Receptor:OM:7778`,
+`Secreted:OM:7781`, `Membrane:OM:7779`, `Transmembrane Region:OM:0609` — that
+nothing in the build writes any more. All five returned zero rows, so
+`source_intercell_class` was `[]` on every row of every response and every
+requested boolean was `false`. **The interim layer therefore never served a
+non-empty value to any caller**, so there was no contract in the field for an
+edit to break: no consumer could have read a value from it, and the only thing
+these tests pinned was the presence of a column name.
+
+The alternative to editing them was to keep the name and change what it means —
+to publish GO cellular components and UniProt keywords under `intercell`, a
+word that names a role classification none of them states. FR-046 forbids
+exactly that: a changed meaning behind an unchanged name. So the name moved to
+`annotation`, the suffix constants moved with it, and these three tests were
+re-pointed at the new spelling.
+
+That is the one legitimate edit, and it is legitimate because the value was
+empty rather than because the rename was convenient. **If one of these tests
+needs editing again, the swap changed the contract**, which is the one thing it
+was promised not to do.
 
     DATABASE_URL=... pytest tests/test_interactions_metalinksdb.py -v
 """
@@ -69,8 +92,13 @@ EXCLUDED = 'bindingdb'
 #: Contributes through its mechanism-of-action annotation alone.
 CURATED_BY_MECHANISM = 'chembl'
 
-#: The entity type one end of every row must carry.
-GATE_ENTITY_TYPE = 'Chemical:OM:0037'
+#: The entity type one end of every row must carry. `chemical_entity` and not
+#: `Chemical:OM:0037`: the second is a dead spelling from the ontology-term era
+#: and `vocab_entity_type` holds the first, as the preset's own `curation`
+#: field does. The stale value failed these two tests on the spelling rather
+#: than on the gate, which is the same drift T100 repaired in the annotation
+#: layer, left behind in a constant.
+GATE_ENTITY_TYPE = 'chemical_entity'
 
 #: The page the row-level assertions read.
 PAGE = 200
@@ -78,10 +106,28 @@ PAGE = 200
 #: The node attributes the dataset promises whatever a caller asks for. They
 #: are read from the registry, not written here — this is the fallback for a
 #: registry that declares none, so the swap test still says something.
-ROLE_ATTRIBUTES = ('intercell', )
+ROLE_ATTRIBUTES = ('annotation', )
 
-#: Field names that would carry a node's role or location classification.
-ROLE_SUFFIXES = ('intercell_class', 'intercell_classes', 'intercell')
+#: Field names that would carry a node's location or class classification.
+#: `annotation` and not `intercell`: see the rename note in the module
+#: docstring. The old spelling stays in the tuple because dev5's registry still
+#: declares it and the service accepts it as a deprecated alias, so a build
+#: registered before T100 must still satisfy these tests — the alias resolves
+#: to the new column names, which are the first three entries.
+ROLE_SUFFIXES = (
+    'annotation_class',
+    'annotation',
+    'metabolic_domain',
+    'intercell_class',
+    'intercell',
+)
+
+#: The two ends of a row, which every node column is named for.
+SIDES = ('source', 'target')
+
+#: The stage the interim source must record, so a caller can tell the interim
+#: classification from the rebuilt one.
+INTERIM_STAGE = 'interim'
 
 #: Where a response says which source supplied an attribute.
 PROVENANCE_KEYS = ('attribute_sources', 'annotation_sources', 'sources')
@@ -537,7 +583,7 @@ def test_the_role_attributes_are_served(client, registered):
     ]
 
     assert classified, (
-        f'no row carries a role or localization field; the attributes '
+        f'no row carries a location or class field; the attributes '
         f'{wanted} were requested and the response answers with none of them'
     )
 
@@ -555,11 +601,34 @@ def test_the_supplying_source_is_named(client, registered):
             f'rebuilt one'
         )
 
+        # The key is the mandatory attribute's own name, so provenance that
+        # names a layer the dataset does not promise describes nothing. This is
+        # the assertion that would have caught T100's defect at the registry:
+        # the old value was keyed `intercell` and read "loaded resource
+        # annotations", which named the dead annotation store rather than the
+        # layer actually served.
+        promised = set(registered['mandatory_attributes'] or ROLE_ATTRIBUTES)
+        covered = promised & set(declared)
+
+        assert covered, (
+            f'{DATASET} promises {sorted(promised)} and records '
+            f'attribute_sources for {sorted(declared)}; the provenance names '
+            f'a layer the dataset does not serve'
+        )
+
+        for name in sorted(covered):
+
+            assert declared[name].get('stage') == INTERIM_STAGE, (
+                f'{name} records stage {declared[name].get("stage")!r}; the '
+                f'interim source has to say it is interim or the Phase 9 swap '
+                f'is invisible in the wrong direction'
+            )
+
         return
 
     response = client.get(
         f'/interactions/{DATASET}',
-        params = {'limit': 10, 'attributes': 'intercell.full'},
+        params = {'limit': 10, 'attributes': 'annotation.full'},
     )
 
     assert response.status_code == 200, response.text[:300]
@@ -607,8 +676,74 @@ def test_the_role_attribute_shape_is_stable(client, registered):
 
                 continue
 
-            assert value is None or isinstance(value, (list, dict, bool)), (
+            # `str` is in the tuple for the coarse metabolic domain alone,
+            # which is single-valued because it is one of six buckets read off
+            # a column of `entity` rather than a set of asserted facts. Every
+            # other layer is an array, a by-resource object or a flat boolean.
+            assert value is None or isinstance(value, (list, dict, bool, str)), (
                 f'{key} is {type(value).__name__}; the classification layers '
-                f'are an array, a by-resource object or a flat boolean, and a '
-                f'consumer frame is built on that'
+                f'are an array, a by-resource object, a flat boolean or the '
+                f'one scalar domain, and a consumer frame is built on that'
             )
+
+            if key.endswith('metabolic_domain'):
+
+                continue
+
+            assert not isinstance(value, str), (
+                f'{key} came back as a string; only the metabolic domain is a '
+                f'scalar and every other layer has to stay a structure'
+            )
+
+
+def test_the_bare_layer_name_asks_for_the_summary_and_not_the_object(client):
+    """The registry's own spelling must buy the cheap form of the layer.
+
+    `mandatory_attributes` declares the bare layer name and the composition
+    recipe's `annotate` step names it again, so the engine puts it on every
+    default page of this dataset. While the reader took it as a synonym for
+    `annotation.full` that made the by-resource object the default: it joins
+    `relation_evidence_relation`, whose 172 partitions prune nothing on a
+    `relation_id` lookup, and the page cost 247-306 ms against the summary's
+    50-59 ms. The object is a provenance request and this is the test that it
+    has to be written as one.
+    """
+
+    default = client.get(f'/interactions/{DATASET}', params = {'limit': 10})
+    asked = client.get(
+        f'/interactions/{DATASET}',
+        params = {'limit': 10, 'attributes': 'annotation.full'},
+    )
+
+    assert default.status_code == 200, default.text[:300]
+    assert asked.status_code == 200, asked.text[:300]
+
+    rows = default.json()['interactions']
+    full = asked.json()['interactions']
+
+    assert rows and full, 'the dataset returns no row to read a layer off'
+
+    for row in rows:
+
+        for side in SIDES:
+
+            assert isinstance(row.get(f'{side}_annotation_class'), list), (
+                f'{side}_annotation_class is '
+                f'{type(row.get(f"{side}_annotation_class")).__name__}; the '
+                f'bare layer name has to leave the summary array on the row'
+            )
+            assert f'{side}_annotation' not in row, (
+                f'{side}_annotation came back on a page that named no '
+                f'provenance; the bare layer name is the summary and the '
+                f'by-resource object costs five times the page'
+            )
+
+    objects = [
+        row for row in full for side in SIDES
+        if isinstance(row.get(f'{side}_annotation'), dict)
+    ]
+
+    assert objects, (
+        'annotation.full carried no by-resource object, so the explicit '
+        'spelling lost the form the bare one stopped meaning'
+    )

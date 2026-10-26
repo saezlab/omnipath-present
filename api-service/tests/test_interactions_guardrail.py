@@ -735,27 +735,47 @@ def test_a_hot_column_projection_opens_no_document(client):
 
 # ── The estimate itself: a bound the caller can rely on ─────────────────────
 #
-# **Measured on dev4 2026-08-24.** With an `entity_annotations` filter the
-# planner prices an `OR` of two fifteen-thousand-element uuid arrays and gets
-# it badly wrong: 8,428,823 estimated keys against 729,900 true for `ligand`,
-# and 7,483,451 against 1,273,762 for `receptor` — 11.5x and 5.9x over. The
-# flat record count is mispriced the same way (8,531,569 against 794,518), so
-# it is the predicate and not the `DISTINCT` that the planner cannot price.
-# With the class filter added it undershoots instead: 42,656 against 59,328.
+# **Measured on dev4 2026-08-24, when the filter was an entity list.** The
+# planner priced an `OR` of two fifteen-thousand-element uuid arrays and got it
+# badly wrong: 8,428,823 estimated keys against 729,900 true for `ligand`, and
+# 7,483,451 against 1,273,762 for `receptor` — 11.5x and 5.9x over. The flat
+# record count was mispriced the same way (8,531,569 against 794,518), so it
+# was the predicate and not the `DISTINCT` that defeated it, and with the class
+# filter added it undershot instead: 42,656 against 59,328.
 #
-# An exact count of the annotated scope costs 1.834 s, which is outside the
-# one-second budget and cannot be paid on every request. A key scan bounded at 100,000 keys costs
-# 0.282 s and gives the exact answer wherever the answer is smaller than the
-# bound — 59,328 in 0.397 s for the ligand-receptor scope, 44,455 in 0.074 s
-# for a single resource. So the claim is bounded rather than the planner fixed.
+# **Re-measured on dev5 2026-10-23, after T100.** The filter is a semi-join on
+# the annotation term now rather than a spliced entity list, because the real
+# vocabulary admits far more entities than the old five-term one: a single GO
+# compartment reaches 67,469 entities and `extracellular region` 76,529,
+# against the fifteen thousand priced above. The bounded key count for one
+# compartment costs **1,400 ms** as the semi-join and **11,525 ms** spliced, so
+# the mechanism changed; the planner is just as blind either way, because the
+# selectivity of a term over a 29-million-row `relation` is the same unknown.
+#
+# The claim is therefore still bounded rather than the planner fixed. A key
+# scan bounded at 100,000 keys answers exactly wherever the answer fits inside
+# it, and reports a floor past it.
 
-ANNOTATION_CATEGORY = 'ligand'
+ANNOTATION_CATEGORY = 'plasma_membrane'
 ANNOTATION_CLASS = 'ligand_receptor'
-# Measured by folding the scope: the true key counts the estimate is judged
-# against. The test reads them from the database rather than trusting these,
-# and they are recorded here so a drift is visible in the diff.
-ANNOTATED_TRUE_KEYS = 729_900
-ANNOTATED_CLASS_TRUE_KEYS = 59_328
+# Measured by folding the scope on dev5, 2026-10-23: the true key counts the
+# estimate is judged against. `plasma_membrane` resolves to one term,
+# GO:0005886 under `located_in`, which 31,036 entities carry.
+#
+# The class-scoped figure is the fold's own exact answer, read back with
+# `exact_total` so it is the same count the test compares against rather than a
+# hand-written query that keys the fold slightly differently. It fits inside
+# the scan ceiling, which is what makes the exact assertion below mean
+# something.
+#
+# The unscoped figure is the distinct `(subject, object, class)` keys the
+# predicate admits over the whole record, counted directly against the
+# database; it took 154 s, which is why it is written down rather than asserted
+# live, and it is far past the ceiling, which is what makes the floor assertion
+# mean something. It is an upper bound on the fold's own count and is used as
+# one.
+ANNOTATED_TRUE_KEYS = 5_548_215
+ANNOTATED_CLASS_TRUE_KEYS = 11_228
 
 
 def _annotation_payload(with_class: bool = False, **extra: Any) -> dict:
@@ -774,12 +794,12 @@ def test_an_annotation_filtered_total_is_exact_where_it_is_small(client):
 
     assert int(body['total']) == ANNOTATED_CLASS_TRUE_KEYS, (
         f'the reported total is {body["total"]} against the {ANNOTATED_CLASS_TRUE_KEYS} '
-        f'keys the scope actually folds; the planner said 42,656'
+        f'keys the scope actually folds'
     )
 
 
 def test_an_annotation_filtered_total_does_not_overshoot(client):
-    """8,428,823 against 729,900 is not an estimate, it is a wrong number."""
+    """An estimate past the true count is not an estimate, it is a wrong number."""
 
     body = client.post('/interactions', json = _annotation_payload()).json()
 
